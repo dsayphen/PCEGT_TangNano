@@ -1,0 +1,70 @@
+// ---------------------------------------------------------------------------
+// Physical constraints for PC Engine on the Sipeed Tang Nano 20K
+// Device: GW2AR-LV18QN88C8/I7  (GW2AR-18C)
+//
+// Pin numbers taken from the official Sipeed Tang Nano 20K examples
+// (https://github.com/sipeed/TangNano-20K-example).
+//
+// The GW2AR on-package SDRAM is hard wired inside the package; its signals are
+// placed automatically by the tools from the reserved O_sdram_* / IO_sdram_dq
+// port names and must therefore NOT be constrained here.
+// ---------------------------------------------------------------------------
+
+// 27 MHz reference clock
+IO_LOC  "sys_clk" 4;
+IO_PORT "sys_clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// on-board push button (active high when pressed)
+IO_LOC  "s1" 88;
+IO_PORT "s1" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+// on-board BL616 USB <-> serial bridge
+IO_LOC  "uart_rx" 70;
+IO_PORT "uart_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+IO_LOC  "uart_tx" 69;
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+
+// on-board LEDs (active low)
+IO_LOC  "led[0]" 15;
+IO_PORT "led[0]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_LOC  "led[1]" 16;
+IO_PORT "led[1]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+
+// HDMI / DVI TMDS pairs (ELVDS on a 3.3 V bank)
+IO_LOC  "tmds_clk_p" 33;
+IO_PORT "tmds_clk_p" PULL_MODE=NONE DRIVE=3.5;
+IO_LOC  "tmds_clk_n" 34;
+IO_PORT "tmds_clk_n" PULL_MODE=NONE DRIVE=3.5;
+IO_LOC  "tmds_d_p[0]" 35;
+IO_PORT "tmds_d_p[0]" PULL_MODE=NONE DRIVE=3.5;
+IO_LOC  "tmds_d_n[0]" 36;
+IO_PORT "tmds_d_n[0]" PULL_MODE=NONE DRIVE=3.5;
+IO_LOC  "tmds_d_p[1]" 37;
+IO_PORT "tmds_d_p[1]" PULL_MODE=NONE DRIVE=3.5;
+IO_LOC  "tmds_d_n[1]" 38;
+IO_PORT "tmds_d_n[1]" PULL_MODE=NONE DRIVE=3.5;
+IO_LOC  "tmds_d_p[2]" 39;
+IO_PORT "tmds_d_p[2]" PULL_MODE=NONE DRIVE=3.5;
+IO_LOC  "tmds_d_n[2]" 40;
+IO_PORT "tmds_d_n[2]" PULL_MODE=NONE DRIVE=3.5;
+
+// on-board I2S audio amplifier / headphone jack
+IO_LOC  "pa_en" 51;
+IO_PORT "pa_en" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_LOC  "hp_din" 54;
+IO_PORT "hp_din" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_LOC  "hp_ws" 55;
+IO_PORT "hp_ws" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_LOC  "hp_bck" 56;
+IO_PORT "hp_bck" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+
+// external SNES style game pad (3.3 V only!)
+//   pin 27 -> pad CLOCK
+//   pin 28 -> pad LATCH
+//   pin 25 <- pad DATA (pulled up on chip)
+IO_LOC  "pad_clk" 27;
+IO_PORT "pad_clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_LOC  "pad_latch" 28;
+IO_PORT "pad_latch" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_LOC  "pad_data" 25;
+IO_PORT "pad_data" IO_TYPE=LVCMOS33 PULL_MODE=UP;

@@ -1,0 +1,18 @@
+# Gowin IDE generated output
+impl/gwsynthesis/
+impl/pnr/
+impl/temp/
+impl/gao/
+*.fs
+*.rpt.html
+*.rpt.txt
+*.log
+*.gao
+__pycache__/
+*.py[cod]
+
+
+# editor / OS noise
+*.bak
+*~
+Thumbs.db
