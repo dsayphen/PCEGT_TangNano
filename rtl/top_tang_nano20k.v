@@ -2,8 +2,10 @@
 // PC Engine / TurboGrafx-16 for the Sipeed Tang Nano 20K  (GW2AR-LV18QN88C8/I7)
 //
 // HuCard-only build:
-//   * HuCard ROM in the on-package 64 Mbit SDRAM, loaded over the on-board
-//     USB-UART (see rtl/tang/rom_loader.v for the wire protocol)
+//   * HuCard ROM in the on-package 64 Mbit SDRAM, loaded at power-on from the
+//     root file GAME.PCE on the microSD card (rtl/tang/sd_loader.v) with the
+//     on-board USB-UART as the fallback / replacement path
+//     (see rtl/tang/rom_loader.v for the wire protocol)
 //   * work RAM, VRAM, palette and sprite buffers in block RAM
 //   * genlocked line doubler -> DVI/HDMI on the HDMI connector
 //   * PSG -> I2S -> on-board audio amplifier / headphone jack
@@ -27,6 +29,14 @@ module top_tang_nano20k (
 
     // on-board LEDs (active low)
     output wire [1:0]  led,
+
+    // on-board microSD socket, SD native 1-bit mode (not SPI)
+    output wire        sd_clk,
+    inout  wire        sd_cmd,
+    input  wire        sd_dat0,
+    output wire        sd_dat1,
+    output wire        sd_dat2,
+    output wire        sd_dat3,
 
     // GW2AR on-package SDRAM (pins are assigned automatically by name)
     output wire        O_sdram_clk,
@@ -124,17 +134,85 @@ end
 wire btn_reset = s1_sync[2];
 
 // ===========================================================================
-// UART ROM loader + SDRAM
+// ROM loaders (SD card auto-boot + UART fallback) and SDRAM
+//
+// The SD loader owns the SDRAM write port from reset.  It hands it over,
+// permanently, to the UART loader as soon as the SD attempt fails or a UART
+// transfer starts; rom_source_arb multiplexes - never ORs - the two write
+// ports and the two ROM descriptions.
 // ===========================================================================
 wire        ld_wr;
 wire [22:0] ld_addr;
 wire [7:0]  ld_data;
 wire        ld_busy;
+wire        ld_idle;
 wire        loading;
 wire        image_valid;
 wire [7:0]  rom_sz;
 wire [22:0] rom_offset;
 wire        rx_activity;
+
+// ---- SD card auto-loader --------------------------------------------------
+wire        sd_ld_wr;
+wire [22:0] sd_ld_addr;
+wire [7:0]  sd_ld_data;
+wire        sd_ld_busy;
+wire        sd_loading;
+wire        sd_image_valid;
+wire [7:0]  sd_rom_sz;
+wire [22:0] sd_rom_offset;
+wire        sd_failed;
+wire [3:0]  sd_err;
+wire        sd_enable;
+
+// one and only tri-state of the bidirectional SD CMD line
+wire        sd_cmd_o;
+wire        sd_cmd_oe;
+wire        sd_cmd_i = sd_cmd;
+assign      sd_cmd = sd_cmd_oe ? sd_cmd_o : 1'bz;
+
+// DAT1..DAT3 are unused in 1-bit mode and must be held high
+assign sd_dat1 = 1'b1;
+assign sd_dat2 = 1'b1;
+assign sd_dat3 = 1'b1;
+
+sd_loader #(
+    .CLK_FREQ (CLK_SYS_HZ),
+    .CLK_DIV  (3'd2)            // 10.8 MHz data clock, 218 kHz init clock
+) u_sd (
+    .clk         (clk_sys),
+    .resetn      (sys_resetn),
+    .enable      (sd_enable),
+
+    .sd_clk      (sd_clk),
+    .sd_cmd_i    (sd_cmd_i),
+    .sd_cmd_o    (sd_cmd_o),
+    .sd_cmd_oe   (sd_cmd_oe),
+    .sd_dat0     (sd_dat0),
+
+    .ld_wr       (sd_ld_wr),
+    .ld_addr     (sd_ld_addr),
+    .ld_data     (sd_ld_data),
+    .ld_busy     (sd_ld_busy),
+    .ld_idle     (ld_idle),
+
+    .loading     (sd_loading),
+    .image_valid (sd_image_valid),
+    .rom_sz      (sd_rom_sz),
+    .rom_offset  (sd_rom_offset),
+    .failed      (sd_failed),
+    .err_code    (sd_err)
+);
+
+// ---- UART loader ----------------------------------------------------------
+wire        ua_ld_wr;
+wire [22:0] ua_ld_addr;
+wire [7:0]  ua_ld_data;
+wire        ua_ld_busy;
+wire        ua_loading;
+wire        ua_image_valid;
+wire [7:0]  ua_rom_sz;
+wire [22:0] ua_rom_offset;
 
 rom_loader #(
     .CLK_FREQ  (CLK_SYS_HZ),
@@ -143,15 +221,51 @@ rom_loader #(
     .clk         (clk_sys),
     .resetn      (sys_resetn),
     .rx          (uart_rx),
-    .ld_wr       (ld_wr),
-    .ld_addr     (ld_addr),
-    .ld_data     (ld_data),
-    .ld_busy     (ld_busy),
-    .loading     (loading),
-    .image_valid (image_valid),
-    .rom_sz      (rom_sz),
-    .rom_offset  (rom_offset),
+    .ld_wr       (ua_ld_wr),
+    .ld_addr     (ua_ld_addr),
+    .ld_data     (ua_ld_data),
+    .ld_busy     (ua_ld_busy),
+    .loading     (ua_loading),
+    .image_valid (ua_image_valid),
+    .rom_sz      (ua_rom_sz),
+    .rom_offset  (ua_rom_offset),
     .rx_activity (rx_activity)
+);
+
+// ---- source arbitration ---------------------------------------------------
+rom_source_arb u_arb (
+    .clk            (clk_sys),
+    .resetn         (sys_resetn),
+
+    .sd_ld_wr       (sd_ld_wr),
+    .sd_ld_addr     (sd_ld_addr),
+    .sd_ld_data     (sd_ld_data),
+    .sd_loading     (sd_loading),
+    .sd_image_valid (sd_image_valid),
+    .sd_rom_sz      (sd_rom_sz),
+    .sd_rom_offset  (sd_rom_offset),
+    .sd_failed      (sd_failed),
+    .sd_enable      (sd_enable),
+    .sd_ld_busy     (sd_ld_busy),
+
+    .ua_ld_wr       (ua_ld_wr),
+    .ua_ld_addr     (ua_ld_addr),
+    .ua_ld_data     (ua_ld_data),
+    .ua_loading     (ua_loading),
+    .ua_image_valid (ua_image_valid),
+    .ua_rom_sz      (ua_rom_sz),
+    .ua_rom_offset  (ua_rom_offset),
+    .ua_ld_busy     (ua_ld_busy),
+
+    .ld_wr          (ld_wr),
+    .ld_addr        (ld_addr),
+    .ld_data        (ld_data),
+    .ld_busy        (ld_busy),
+    .loading        (loading),
+    .image_valid    (image_valid),
+    .rom_sz         (rom_sz),
+    .rom_offset     (rom_offset),
+    .own_uart_o     ()
 );
 
 assign uart_tx = 1'b1;   // idle, nothing is sent back
@@ -184,6 +298,7 @@ pce_sdram_ctrl #(
     .ld_addr       (ld_addr),
     .ld_data       (ld_data),
     .ld_busy       (ld_busy),
+    .ld_idle       (ld_idle),
     .ld_active     (loading),
 
     .rom_rd        (rom_rd),
@@ -198,10 +313,14 @@ pce_sdram_ctrl #(
 // ===========================================================================
 // Core reset
 //
-// The console is held in reset while the SDRAM is initialising, while a ROM
-// image is being received, when no image has been loaded yet and for 64k
-// clocks (1.5 ms) afterwards, which is long enough for the COLD_RESET memory
-// clear inside the core to complete.
+// The console is held in reset while the SDRAM is initialising, while the SD
+// card is being read or a ROM image is being received over the UART, when no
+// image has been loaded yet and for 64k clocks (1.5 ms) afterwards, which is
+// long enough for the COLD_RESET memory clear inside the core to complete.
+//
+// `loading` is high from power-on until the SD attempt has succeeded or failed
+// (sd_loader holds it), and again for the whole of any later UART transfer, so
+// the core can never run while the ROM area of the SDRAM is being written.
 // ===========================================================================
 wire rst_trigger = !sdram_init_done || loading || !image_valid || btn_reset;
 
@@ -345,6 +464,12 @@ assign pa_en = 1'b1;
 
 // ===========================================================================
 // Status LEDs (active low)
+//
+//   led[0]  PLLs locked and SDRAM initialised
+//   led[1]  a ROM image is loaded and the console is running.  It stays off
+//           while the SD card is being read, while a UART transfer runs and
+//           after a failed SD attempt (which silently arms the UART fallback);
+//           sd_err then holds the reason, see rtl/tang/sd_loader.v.
 // ===========================================================================
 assign led[0] = ~(lock_main & lock_hdmi & sdram_init_done);
 assign led[1] = ~(image_valid & ~loading & ~core_reset);

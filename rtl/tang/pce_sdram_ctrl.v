@@ -7,7 +7,8 @@
 // buffers all live in block RAM, so this controller only has to arbitrate
 // between
 //
-//   1. ROM image writes coming from the UART loader (highest priority, rare)
+//   1. ROM image writes coming from the active ROM loader - the SD card
+//      auto-loader or the UART loader (highest priority, rare)
 //   2. periodic auto-refresh                       (must never be starved)
 //   3. HuCard ROM byte reads from the CPU
 //
@@ -50,6 +51,7 @@ module pce_sdram_ctrl #(
     input  wire [22:0] ld_addr,
     input  wire [7:0]  ld_data,
     output wire        ld_busy,      // previous write not accepted yet
+    output wire        ld_idle,      // nothing buffered *and* nothing in flight
     input  wire        ld_active,    // held high while a ROM image is loading
 
     // HuCard ROM read port (from pce_top)
@@ -148,6 +150,13 @@ reg  [7:0]  wr_data;
 
 assign ld_busy = wr_pending;
 
+// `ld_idle` (declared with the arbiter state below) is the true end-of-transfer
+// indication: `ld_busy` only reports this one entry pending buffer, and a byte
+// that has just been dequeued from it is still being written by sdram.v
+// (5 clocks of bank activate / write / recovery).  A loader that published its
+// ROM description on !ld_busy alone would start the console before the last
+// byte had reached the memory array.
+
 // ---------------------------------------------------------------------------
 // Refresh timer
 // ---------------------------------------------------------------------------
@@ -168,6 +177,13 @@ localparam ST_READ = 3'd3;
 localparam ST_WAIT = 3'd4;
 
 reg [2:0] st;
+
+// Nothing buffered, no strobe presented this cycle, the scheduler back in
+// ST_IDLE and the SDRAM controller no longer busy: the last loader write has
+// completed inside the memory.  Reads and refreshes also hold `ld_idle` low
+// while they are in flight, which is harmless - it only delays the moment a
+// loader may declare its transfer finished.
+assign ld_idle = !wr_pending && !ld_wr && (st == ST_IDLE) && !sd_busy;
 
 wire refresh_tick  = (refresh_cnt == REFRESH_INTERVAL[15:0] - 16'd1);
 wire issue_refresh = (st == ST_IDLE) && !sd_busy && !wr_pending && refresh_pending;
