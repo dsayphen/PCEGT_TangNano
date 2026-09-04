@@ -30,6 +30,26 @@ IO_PORT "led[0]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
 IO_LOC  "led[1]" 16;
 IO_PORT "led[1]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
 
+// on-board microSD socket, driven in SD native 1-bit mode (not SPI):
+//   sd_clk   host clock          (output)
+//   sd_cmd   command / response  (bidirectional, tri-stated by the top level)
+//   sd_dat0  data line 0         (input, the only data line used)
+//   sd_dat1..3                   (outputs held high, as the SD spec requires
+//                                 for the unused lines of 1-bit mode)
+// The board already has the pull-ups the card needs, so PULL_MODE=NONE.
+IO_LOC  "sd_clk" 83;
+IO_PORT "sd_clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_LOC  "sd_cmd" 82;
+IO_PORT "sd_cmd" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_LOC  "sd_dat0" 84;
+IO_PORT "sd_dat0" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "sd_dat1" 85;
+IO_PORT "sd_dat1" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_LOC  "sd_dat2" 80;
+IO_PORT "sd_dat2" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_LOC  "sd_dat3" 81;
+IO_PORT "sd_dat3" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+
 // HDMI / DVI TMDS pairs (ELVDS on a 3.3 V bank)
 IO_LOC  "tmds_clk_p" 33;
 IO_PORT "tmds_clk_p" PULL_MODE=NONE DRIVE=3.5;

@@ -30,5 +30,14 @@ set_false_path -from [get_ports {s1}]
 set_false_path -from [get_ports {uart_rx}]
 set_false_path -from [get_ports {pad_data}]
 
+// The SD card answers on CMD/DAT0 in its own clock domain (the card retimes
+// them to the sd_clk this design generates, so they are not launched by any
+// clock the analyser knows about).  sd_file_reader samples them on the rising
+// sd_clk edge, i.e. 2 clk_sys cycles = 46 ns after the falling edge on which
+// the card drove them, which is the timing the reader was validated with on
+// hardware; there is no launch clock to constrain them against.
+set_false_path -from [get_ports {sd_cmd}]
+set_false_path -from [get_ports {sd_dat0}]
+
 report_timing -setup -max_paths 25 -max_common_paths 1
 report_timing -hold  -max_paths 25 -max_common_paths 1
