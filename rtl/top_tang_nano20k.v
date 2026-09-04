@@ -18,16 +18,15 @@
 module top_tang_nano20k (
     input  wire        sys_clk,        // 27 MHz crystal
 
-    // on-board push buttons (active high)
+    // on-board push button (active high)
     input  wire        s1,
-    input  wire        s2,
 
     // on-board USB serial bridge
     input  wire        uart_rx,
     output wire        uart_tx,
 
     // on-board LEDs (active low)
-    output wire [5:0]  led,
+    output wire [1:0]  led,
 
     // GW2AR on-package SDRAM (pins are assigned automatically by name)
     output wire        O_sdram_clk,
@@ -119,13 +118,10 @@ wire pix_resetn = pix_rst_sync[2];
 
 // button synchronisers
 reg [2:0] s1_sync = 3'b000;
-reg [2:0] s2_sync = 3'b000;
 always @(posedge clk_sys) begin
     s1_sync <= {s1_sync[1:0], s1};
-    s2_sync <= {s2_sync[1:0], s2};
 end
 wire btn_reset = s1_sync[2];
-wire btn_run   = s2_sync[2];
 
 // ===========================================================================
 // UART ROM loader + SDRAM
@@ -286,7 +282,7 @@ pce_pad u_joy (
     .btn_i   (pad_btn[8] | pad_btn[9]),      // SNES A / X  -> PCE I
     .btn_ii  (pad_btn[0] | pad_btn[1]),      // SNES B / Y  -> PCE II
     .sel     (pad_btn[2]),                   // SNES Select -> Select
-    .run     (pad_btn[3] | btn_run)          // SNES Start / board S2 -> Run
+    .run     (pad_btn[3])                    // SNES Start -> Run
 );
 
 // ===========================================================================
@@ -350,11 +346,7 @@ assign pa_en = 1'b1;
 // ===========================================================================
 // Status LEDs (active low)
 // ===========================================================================
-assign led = ~{ ~core_reset,                // 5: console running
-                rx_activity,                // 4: UART traffic
-                loading,                    // 3: receiving an image
-                image_valid,                // 2: an image is present
-                sdram_init_done,            // 1: SDRAM ready
-                lock_main & lock_hdmi };    // 0: PLLs locked
+assign led[0] = ~(lock_main & lock_hdmi & sdram_init_done);
+assign led[1] = ~(image_valid & ~loading & ~core_reset);
 
 endmodule

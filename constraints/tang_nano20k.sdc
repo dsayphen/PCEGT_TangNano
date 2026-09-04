@@ -27,7 +27,6 @@ set_clock_groups -asynchronous \
 
 // asynchronous inputs
 set_false_path -from [get_ports {s1}]
-set_false_path -from [get_ports {s2}]
 set_false_path -from [get_ports {uart_rx}]
 set_false_path -from [get_ports {pad_data}]
 

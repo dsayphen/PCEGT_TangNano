@@ -8,6 +8,8 @@ impl/gao/
 *.rpt.txt
 *.log
 *.gao
+__pycache__/
+*.py[cod]
 
 
 # editor / OS noise

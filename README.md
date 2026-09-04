@@ -27,7 +27,7 @@ headphone amplifier.
 | 8 KiB work RAM, 64 KiB VRAM, palette RAM | yes, in block RAM |
 | Video output | 640x480-class DVI over HDMI, genlocked line doubler |
 | Audio | stereo PSG, I2S to the on-board amplifier / headphone jack |
-| Controller | one SNES-style pad on the GPIO header + the two board buttons |
+| Controller | one SNES-style pad on the GPIO header; S1 resets the console |
 | ROM loading | UART, see section 4 |
 | CD-ROM², Super CD, Arcade Card | **not built** (`CD_SUPPORT = 0`, `AC_SUPPORT = 0`) |
 | SuperGrafx (second VDC / VPC) | **not built** (`LITE = 1`, does not fit) |
@@ -88,27 +88,22 @@ python tools/mif2vhd.py
 | --- | --- | --- |
 | 27 MHz clock | 4 | |
 | `s1` (button) | 88 | **reset** the console |
-| `s2` (button) | 87 | acts as the **RUN** button |
 | `uart_rx` | 70 | from the on-board BL616 USB-serial bridge |
 | `uart_tx` | 69 | idle, nothing is sent back |
-| `led[5:0]` | 20,19,18,17,16,15 | status, active low |
+| `led[1:0]` | 16,15 | status, active low |
 | HDMI TMDS clk ± | 33 / 34 | |
 | HDMI TMDS d0/d1/d2 ± | 35/36, 37/38, 39/40 | |
 | `pa_en`, `hp_din`, `hp_ws`, `hp_bck` | 51, 54, 55, 56 | on-board I2S amplifier |
-| `pad_clk` | 52 | SNES pad CLOCK |
-| `pad_latch` | 53 | SNES pad LATCH |
-| `pad_data` | 71 | SNES pad DATA (pulled up on chip) |
+| `pad_clk` | 27 | SNES pad CLOCK |
+| `pad_latch` | 28 | SNES pad LATCH |
+| `pad_data` | 25 | SNES pad DATA (pulled up on chip) |
 
 ### LEDs
 
 | LED | Meaning |
 | --- | --- |
-| 0 | both PLLs locked |
-| 1 | SDRAM initialised |
-| 2 | a ROM image is present |
-| 3 | receiving a ROM image |
-| 4 | toggles on every received UART byte |
-| 5 | the console is running (not in reset) |
+| 0 | PLLs locked and SDRAM initialised |
+| 1 | a ROM is loaded and the console is running |
 
 ### Game pad
 
@@ -118,9 +113,9 @@ pad 5 V and then drive DATA back into the FPGA):
 ```
    pad VCC   ->  3V3
    pad GND   ->  GND
-   pad CLOCK ->  pin 52
-   pad LATCH ->  pin 53
-   pad DATA  ->  pin 71
+   pad CLOCK ->  pin 27
+   pad LATCH ->  pin 28
+   pad DATA  ->  pin 25
 ```
 
 Mapping:
@@ -132,12 +127,11 @@ Mapping:
 | B or Y | button II |
 | Select | SELECT |
 | Start | RUN |
-| — | RUN is also on board button **S2** |
 
 Board button **S1** resets the console (the loaded ROM stays in SDRAM).
 
 If no pad is connected, DATA idles high and no button is reported; the console
-can still be reset with S1 and started with S2.
+can still be reset with S1.
 
 ---
 
