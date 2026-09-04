@@ -1,0 +1,16 @@
+# Gowin IDE generated output
+impl/gwsynthesis/
+impl/pnr/
+impl/temp/
+impl/gao/
+*.fs
+*.rpt.html
+*.rpt.txt
+*.log
+*.gao
+
+
+# editor / OS noise
+*.bak
+*~
+Thumbs.db
