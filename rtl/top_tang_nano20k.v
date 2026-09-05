@@ -410,7 +410,7 @@ pce_pad u_joy (
 wire [7:0] vga_r, vga_g, vga_b;
 wire       vga_hs, vga_vs, vga_de;
 
-video_scandoubler u_sd (
+video_scandoubler u_scandoubler (
     .clk_sys    (clk_sys),
     .ce_pix     (vid_ce),
     .r_in       (vid_r),

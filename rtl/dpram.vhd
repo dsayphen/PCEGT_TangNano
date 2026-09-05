@@ -73,7 +73,8 @@ ARCHITECTURE SYN OF dpram IS
 		return m;
 	end function;
 
-	signal ram : mem_t := init_mem;
+	--signal ram : mem_t := init_mem;
+    signal ram : mem_t := (others => (others => '0'));  -- test : remplace `:= init_mem`
 
 	signal q0 : std_logic_vector((data_width - 1) downto 0);
 	signal q1 : std_logic_vector((data_width - 1) downto 0);
@@ -106,6 +107,10 @@ BEGIN
 	end process;
 
 END SYN;
+
+LIBRARY ieee;
+USE ieee.std_logic_1164.all;
+USE ieee.numeric_std.all;
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.all;
@@ -144,9 +149,31 @@ end entity;
 ARCHITECTURE SYN OF dpram_difclk IS
 
 	-- Both ports address the same physical storage but are clocked
-	-- independently, so the array has to be a shared variable.
+	-- independently. VHDL-2008 requires a shared variable to be of a
+	-- protected type, so the raw array is wrapped in one instead of being
+	-- declared directly as `shared variable`.
 	type mem_t is array (0 to 2**addr_width_a-1) of std_logic_vector(data_width_a-1 downto 0);
-	shared variable ram : mem_t := (others => (others => '0'));
+
+	type ram_protected_t is protected
+		procedure write(addr : integer; d : std_logic_vector);
+		impure function read(addr : integer) return std_logic_vector;
+	end protected ram_protected_t;
+
+	type ram_protected_t is protected body
+		variable ram : mem_t := (others => (others => '0'));
+
+		procedure write(addr : integer; d : std_logic_vector) is
+		begin
+			ram(addr) := d;
+		end procedure;
+
+		impure function read(addr : integer) return std_logic_vector is
+		begin
+			return ram(addr);
+		end function;
+	end protected body ram_protected_t;
+
+	shared variable ram : ram_protected_t;
 
 	signal q0 : std_logic_vector((data_width_a - 1) downto 0);
 	signal q1 : std_logic_vector((data_width_b - 1) downto 0);
@@ -160,10 +187,10 @@ BEGIN
 		if rising_edge(clock0) then
 			if enable_a = '1' then
 				if wren_a = '1' and cs_a = '1' then
-					ram(to_integer(unsigned(address_a))) := data_a;
+					ram.write(to_integer(unsigned(address_a)), data_a);
 					q0 <= data_a;
 				else
-					q0 <= ram(to_integer(unsigned(address_a)));
+					q0 <= ram.read(to_integer(unsigned(address_a)));
 				end if;
 			end if;
 		end if;
@@ -174,10 +201,10 @@ BEGIN
 		if rising_edge(clock1) then
 			if enable_b = '1' then
 				if wren_b = '1' and cs_b = '1' then
-					ram(to_integer(unsigned(address_b))) := data_b;
+					ram.write(to_integer(unsigned(address_b)), data_b);
 					q1 <= data_b;
 				else
-					q1 <= ram(to_integer(unsigned(address_b)));
+					q1 <= ram.read(to_integer(unsigned(address_b)));
 				end if;
 			end if;
 		end if;

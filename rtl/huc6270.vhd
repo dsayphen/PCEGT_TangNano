@@ -371,7 +371,7 @@ begin
 	
 	FDOT_CNT <= DOT_CNT when SP64 = '0' else FETCH_DOT;
 	SPR_CE   <= DCK_CE  when SP64 = '0' else FETCH_CE;
-	SPR_MAX  <= 15      when SP64 = '0' else 63;
+	SPR_MAX  <= 15      when SP64 = '0' else MAX_SPRITES-1;
 
 	HSW_END_POS <= "00"&unsigned(HSW) + ("000000"&unsigned(RES7M));
 	HDS_END_POS <= ("00"&unsigned(HSW)) + ("000000"&unsigned(RES7M)) + 1 + unsigned(HDS);
