@@ -20,6 +20,15 @@ use IEEE.STD_LOGIC_1164.all;
 use IEEE.NUMERIC_STD.all;
 
 entity pce_core is
+    generic (
+        -- 1 = HuCard standard (un seul VDC, fonctionnel sur ce device)
+		-- 0 = SuperGrafx (second VDC + VRAM doublée -> ATTENTION : dépasse le
+		--     budget BSRAM du GW2AR-18, 1024 Kbit nécessaires contre 828 Kbit
+		--     disponibles ; ne pas utiliser sur Tang Nano 20K sans revoir
+		--     l'architecture mémoire de VRAM1 (voir SDRAM externe))
+		LITE : integer := 1
+	);
+
 	port (
 		clk        : in  std_logic;
 		reset      : in  std_logic;
@@ -63,7 +72,16 @@ architecture rtl of pce_core is
 	signal vram_rd : std_logic;
 	signal vram_hi : std_logic;
 
-	signal vram1_di : std_logic_vector(15 downto 0) := (others => '0');
+    signal vram1_a  : std_logic_vector(15 downto 0);
+    signal vram1_do : std_logic_vector(15 downto 0);
+    signal vram1_di : std_logic_vector(15 downto 0);
+    signal vram1_q  : std_logic_vector(15 downto 0);
+    signal vram1_we : std_logic;
+    signal vram1_rd : std_logic;
+    signal vram1_hi : std_logic;
+
+    signal sgx_i    : std_logic;
+
 	signal gg_code_z : std_logic_vector(128 downto 0) := (others => '0');
 	signal ff_byte   : std_logic_vector(7 downto 0) := x"FF";
 	signal zero_byte : std_logic_vector(7 downto 0) := x"00";
@@ -79,9 +97,11 @@ architecture rtl of pce_core is
 
 begin
 
+    sgx_i <= '1' when LITE = 0 else '0';
+
 	CORE : entity work.pce_top
 	generic map (
-		LITE             => 1,
+		LITE             => LITE,   -- transmis depuis le generic de pce_core
 		PSG_O_WIDTH      => 20,
 		MAX_SPRITES      => 16,
 		USE_INTERNAL_RAM => 1,
@@ -112,11 +132,11 @@ begin
 		VRAM0_WE    => vram_we,
 		VRAM0_DI    => vram_di,
 
-		VRAM1_A     => open,
-		VRAM1_DO    => open,
-		VRAM1_RD    => open,
-		VRAM1_WE    => open,
-		VRAM1_DI    => vram1_di,
+        VRAM1_A     => vram1_a,
+        VRAM1_DO    => vram1_do,
+        VRAM1_RD    => vram1_rd,
+        VRAM1_WE    => vram1_we,
+        VRAM1_DI    => vram1_di,
 
 		GG_EN       => '0',
 		GG_CODE     => gg_code_z,
@@ -124,7 +144,7 @@ begin
 		GG_AVAIL    => open,
 
 		SP64        => '0',
-		SGX         => '0',
+		SGX         => sgx_i,
 
 		JOY_OUT     => joy_out,
 		JOY_IN      => joy_in,
@@ -220,5 +240,34 @@ begin
 	end process;
 
 	vram_di <= (others => '0') when vram_hi = '1' else vram_q;
+
+    gen_sgx_vram: if LITE = 0 generate
+        VRAM1 : entity work.dpram
+        generic map (
+            addr_width => 15,
+            data_width => 16
+        )
+        port map (
+            clock     => clk,
+            address_a => vram1_a(14 downto 0),
+            data_a    => vram1_do,
+            wren_a    => vram1_we,
+            q_a       => vram1_q
+        );
+
+        process (clk)
+        begin
+            if rising_edge(clk) then
+                vram1_hi <= vram1_a(15);
+            end if;
+        end process;
+
+        vram1_di <= (others => '0') when vram1_hi = '1' else vram1_q;
+    end generate;
+
+    -- HuCard standard : VRAM1 n'existe pas, on tie-off proprement
+    gen_lite_novram: if LITE /= 0 generate
+        vram1_di <= (others => '0');
+    end generate;
 
 end rtl;

@@ -251,7 +251,7 @@ always @(posedge clk) begin
     cfg_now     <= rst_done & ~rst_done_p1;// Rising Edge Detect
 
     if (rst_cnt != FREQ / 1000 * 200 / 1000) begin      // count to 200 us
-        rst_cnt  <= rst_cnt[14:0] + 1;
+        rst_cnt  <= rst_cnt[14:0] + 15'd1;
         rst_done <= 1'b0;
         cfg_busy <= 1'b1;
     end else begin

@@ -284,7 +284,7 @@ begin
 				CH(i).LFO_ADD <= (others => '0');
 			end loop;
 		else
-			DATA := CH(1).WF_DATA(conv_integer(CH(1).WF_ADDR)) xor "1000";
+			DATA := CH(1).WF_DATA(conv_integer(CH(1).WF_ADDR)) xor "10000";
 			CH(0).LFO_ADD(11 downto 8) <= DATA(4) & DATA(4) & DATA(4) & DATA(4);
 			case CH(1).LFCTL is
 			when "01" =>   CH(0).LFO_ADD(7 downto 0) <= DATA(4) & DATA(4) & DATA(4) & DATA;
