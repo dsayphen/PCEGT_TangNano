@@ -95,6 +95,9 @@ architecture rtl of pce_core is
 	signal cdda_r_nc : signed(19 downto 0);
 	signal adpcm_nc  : signed(15 downto 0);
 
+--    attribute syn_ramstyle : string;
+--    attribute syn_ramstyle of VRAM0 : label is "block_ram";
+
 begin
 
     sgx_i <= '1' when LITE = 0 else '0';

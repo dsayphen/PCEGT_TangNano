@@ -50,23 +50,15 @@ IO_PORT "sd_dat2" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
 IO_LOC  "sd_dat3" 81;
 IO_PORT "sd_dat3" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
 
-// HDMI / DVI TMDS pairs (ELVDS on a 3.3 V bank)
-IO_LOC  "tmds_clk_p" 33;
-IO_PORT "tmds_clk_p" PULL_MODE=NONE DRIVE=3.5;
-IO_LOC  "tmds_clk_n" 34;
-IO_PORT "tmds_clk_n" PULL_MODE=NONE DRIVE=3.5;
-IO_LOC  "tmds_d_p[0]" 35;
-IO_PORT "tmds_d_p[0]" PULL_MODE=NONE DRIVE=3.5;
-IO_LOC  "tmds_d_n[0]" 36;
-IO_PORT "tmds_d_n[0]" PULL_MODE=NONE DRIVE=3.5;
-IO_LOC  "tmds_d_p[1]" 37;
-IO_PORT "tmds_d_p[1]" PULL_MODE=NONE DRIVE=3.5;
-IO_LOC  "tmds_d_n[1]" 38;
-IO_PORT "tmds_d_n[1]" PULL_MODE=NONE DRIVE=3.5;
-IO_LOC  "tmds_d_p[2]" 39;
-IO_PORT "tmds_d_p[2]" PULL_MODE=NONE DRIVE=3.5;
-IO_LOC  "tmds_d_n[2]" 40;
-IO_PORT "tmds_d_n[2]" PULL_MODE=NONE DRIVE=3.5;
+// HDMI TX
+IO_LOC "tmds_d_p[0]" 35,36;
+IO_PORT "tmds_d_p[0]" PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "tmds_d_p[1]" 37,38;
+IO_PORT "tmds_d_p[1]" PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "tmds_d_p[2]" 39,40;
+IO_PORT "tmds_d_p[2]" PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "tmds_clk_p" 33,34;
+IO_PORT "tmds_clk_p" PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
 // on-board I2S audio amplifier / headphone jack
 IO_LOC  "pa_en" 51;

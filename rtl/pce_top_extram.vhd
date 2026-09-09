@@ -317,6 +317,9 @@ component cd is
 	);
 end component;
 
+--attribute syn_ramstyle : string;
+--attribute syn_ramstyle of RAM : label is "block_ram";
+
 begin
 
 --------------------------------------------------------------------------------
