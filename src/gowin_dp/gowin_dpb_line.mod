@@ -1,0 +1,25 @@
+-series GW2AR
+-device GW2AR-18
+-device_version C
+-package QFN88
+-part_number GW2AR-LV18QN88C8/I7
+
+
+-mod_name Gowin_DP
+-file_name gowin_dpb_line
+-path C:/Users/tawy/.copilot/repos/copilot-worktrees/PCEGT_TangNano/dsayphen-verbose-parakeet/src/gowin_dp/
+-type RAM_DP
+-file_type vlg
+-bram_b true
+-dev_type GW2AR-18C
+-ip_version 1.0
+-depth_0 512
+-depth_1 512
+-width_0 10
+-width_1 10
+-read_mode_0 bypass
+-read_mode_1 bypass
+-write_mode_0 normal
+-write_mode_1 normal
+-speed false
+-reset_mode sync

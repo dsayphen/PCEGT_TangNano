@@ -16,14 +16,12 @@
 create_clock -name sys_clk   -period 37.037 [get_ports {sys_clk}]
 
 create_clock -name clk_sys   -period 23.148 [get_nets {clk_sys}]
-create_clock -name clk_sdram -period 23.148 [get_nets {clk_sdram}]
+//create_clock -name clk_sdram -period 23.148 [get_nets {clk_sdram}]
+create_clock -name clk_sdram -period 23.148 [get_pins {u_pll_main/rpll_inst/CLKOUTP}]
 create_clock -name clk_pix5  -period 7.716  [get_nets {clk_pix5}]
 create_clock -name clk_pix   -period 38.580 [get_nets {clk_pix}]
 
-set_clock_groups -asynchronous \
-    -group [get_clocks {sys_clk}] \
-    -group [get_clocks {clk_sys clk_sdram}] \
-    -group [get_clocks {clk_pix5 clk_pix}]
+set_clock_groups -asynchronous -group [get_clocks {sys_clk}] -group [get_clocks {clk_sys clk_sdram}] -group [get_clocks {clk_pix5 clk_pix}]
 
 // asynchronous inputs
 set_false_path -from [get_ports {s1}]

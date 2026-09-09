@@ -12,7 +12,7 @@ entity psg_mixer is
 	generic (
 		O_WIDTH : integer := 24;
 		A_WIDTH : integer := 24;
-		VOLTAB_FILE: string := "./voltab_small.mif"
+		VOLTAB_FILE: string := "voltab_small.mif"
 	);
 	port (
 		CLK 	: in std_logic;

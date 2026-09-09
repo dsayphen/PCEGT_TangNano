@@ -4,7 +4,7 @@
 --
 -- The entity interfaces (names, generics, ports, defaults) are unchanged so
 -- that the rest of the core does not need to be touched.  The behaviour of the
--- original altsyncram configuration is reproduced:
+-- original altsyncram configuration is reproduced on port A:
 --
 --   * synchronous, unregistered output  -> read data appears one clock later
 --   * read_during_write_mode = NEW_DATA -> a port reading the address it is
@@ -12,6 +12,20 @@
 --   * cs_x = '0' forces the corresponding output to `disable_value` and
 --     inhibits the write
 --   * enable_x acts as a clock enable
+--
+-- Port B intentionally does NOT reproduce the write-first/bypass behaviour.
+-- Every instantiation of this entity in the core uses port B purely for a
+-- clear/write sweep (CLR_A/CLR_WE-style) on one hand and independent reads on
+-- the other, with the two never coinciding in time -- so the bypass was never
+-- functionally required there.  GowinSynthesis maps a write-first port to a
+-- WRITE_MODE setting that the BSRAM primitive on the GW2AR-18 does not
+-- support (PA2122, WRITE_MODE1 = 2'b10), forcing a fallback to a much more
+-- expensive LUT-based implementation.  Gowin's own IP Core Generator output
+-- for a comparable dual-port RAM (see nand2mario/snestang's
+-- Gowin_DPB_OAM.v) always configures WRITE_MODE0 = WRITE_MODE1 = 2'b00 (no
+-- bypass), which is exactly what removing the port B bypass here reproduces
+-- at the RTL level, letting plain BSRAM inference (no syn_ramstyle override
+-- needed) succeed through both synthesis and place & route.
 --
 -- Memory initialisation: GowinSynthesis has no equivalent of altsyncram's
 -- `init_file`, and VHDL file I/O is not available at elaboration time, so the
@@ -73,8 +87,9 @@ ARCHITECTURE SYN OF dpram IS
 		return m;
 	end function;
 
-	--signal ram : mem_t := init_mem;
-    signal ram : mem_t := (others => (others => '0'));  -- test : remplace `:= init_mem`
+	signal ram : mem_t := init_mem;
+	attribute syn_ramstyle : string;
+	attribute syn_ramstyle of ram : signal is "block_ram";
 
 	signal q0 : std_logic_vector((data_width - 1) downto 0);
 	signal q1 : std_logic_vector((data_width - 1) downto 0);
@@ -86,6 +101,8 @@ BEGIN
 	process (clock)
 	begin
 		if rising_edge(clock) then
+			-- Port A: write-first / bypass preserved (CPU-facing back-to-back
+			-- read-modify-write correctness relies on this).
 			if enable_a = '1' then
 				if wren_a = '1' and cs_a = '1' then
 					ram(to_integer(unsigned(address_a))) <= data_a;
@@ -95,22 +112,18 @@ BEGIN
 				end if;
 			end if;
 
+			-- Port B: plain (no-bypass) read/write, matching Gowin BSRAM
+			-- WRITE_MODE = 2'b00. See architecture header comment.
 			if enable_b = '1' then
 				if wren_b = '1' and cs_b = '1' then
 					ram(to_integer(unsigned(address_b))) <= data_b;
-					q1 <= data_b;
-				else
-					q1 <= ram(to_integer(unsigned(address_b)));
 				end if;
+				q1 <= ram(to_integer(unsigned(address_b)));
 			end if;
 		end if;
 	end process;
 
 END SYN;
-
-LIBRARY ieee;
-USE ieee.std_logic_1164.all;
-USE ieee.numeric_std.all;
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.all;
@@ -149,31 +162,9 @@ end entity;
 ARCHITECTURE SYN OF dpram_difclk IS
 
 	-- Both ports address the same physical storage but are clocked
-	-- independently. VHDL-2008 requires a shared variable to be of a
-	-- protected type, so the raw array is wrapped in one instead of being
-	-- declared directly as `shared variable`.
+	-- independently, so the array has to be a shared variable.
 	type mem_t is array (0 to 2**addr_width_a-1) of std_logic_vector(data_width_a-1 downto 0);
-
-	type ram_protected_t is protected
-		procedure write(addr : integer; d : std_logic_vector);
-		impure function read(addr : integer) return std_logic_vector;
-	end protected ram_protected_t;
-
-	type ram_protected_t is protected body
-		variable ram : mem_t := (others => (others => '0'));
-
-		procedure write(addr : integer; d : std_logic_vector) is
-		begin
-			ram(addr) := d;
-		end procedure;
-
-		impure function read(addr : integer) return std_logic_vector is
-		begin
-			return ram(addr);
-		end function;
-	end protected body ram_protected_t;
-
-	shared variable ram : ram_protected_t;
+	shared variable ram : mem_t := (others => (others => '0'));
 
 	signal q0 : std_logic_vector((data_width_a - 1) downto 0);
 	signal q1 : std_logic_vector((data_width_b - 1) downto 0);
@@ -187,10 +178,10 @@ BEGIN
 		if rising_edge(clock0) then
 			if enable_a = '1' then
 				if wren_a = '1' and cs_a = '1' then
-					ram.write(to_integer(unsigned(address_a)), data_a);
+					ram(to_integer(unsigned(address_a))) := data_a;
 					q0 <= data_a;
 				else
-					q0 <= ram.read(to_integer(unsigned(address_a)));
+					q0 <= ram(to_integer(unsigned(address_a)));
 				end if;
 			end if;
 		end if;
@@ -201,10 +192,10 @@ BEGIN
 		if rising_edge(clock1) then
 			if enable_b = '1' then
 				if wren_b = '1' and cs_b = '1' then
-					ram.write(to_integer(unsigned(address_b)), data_b);
+					ram(to_integer(unsigned(address_b))) := data_b;
 					q1 <= data_b;
 				else
-					q1 <= ram.read(to_integer(unsigned(address_b)));
+					q1 <= ram(to_integer(unsigned(address_b)));
 				end if;
 			end if;
 		end if;

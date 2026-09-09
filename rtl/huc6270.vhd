@@ -297,6 +297,12 @@ architecture rtl of HUC6270 is
 	signal CLR_A			: unsigned(7 downto 0);
 	signal CLR_WE			: std_logic;
 
+--	attribute syn_ramstyle : string;
+--	attribute syn_ramstyle of SAT : label is "distributed_ram";
+--	attribute syn_ramstyle of SPR_LINE_BUF0 : label is "distributed_ram";
+--	attribute syn_ramstyle of SPR_LINE_BUF1 : label is "distributed_ram";
+
+
 begin
 
 	process(CLK, RST_N)
@@ -752,19 +758,29 @@ begin
 	DMAS_SAT_WE <= DCK_CE when DMAS_EXEC = '1' and SLOT = CPU else '0'; 
 	SAT_ADDR <= std_logic_vector(SPR_EVAL_X) when CLR_WE = '0' else std_logic_vector(CLR_A);
 	
-	SAT : entity work.dpram generic map (8,16)
-	port map(
-		clock		=> CLK,
-		
-		data_a	=> RAM_DI,
-		address_a=> DMAS_SAT_ADDR,
-		wren_a	=> DMAS_SAT_WE,
-		
-		address_b=> SAT_ADDR,
-		data_b   => (others => '0'),
-		wren_b   => CLR_WE,
-		q_b		=> SAT_Q
-	);
+--SAT : entity work.dpram generic map (8,16)
+--port map(
+--	clock		=> CLK,
+--	data_a	=> RAM_DI,
+--	address_a=> DMAS_SAT_ADDR,
+--	wren_a	=> DMAS_SAT_WE,
+--	address_b=> SAT_ADDR,
+--	data_b   => (others => '0'),
+--	wren_b   => CLR_WE,
+--	q_b		=> SAT_Q
+--);
+
+SAT : entity work.dpram_ip_8x16
+port map(
+	clock		=> CLK,
+	data_a	=> RAM_DI,
+	address_a=> DMAS_SAT_ADDR,
+	wren_a	=> DMAS_SAT_WE,
+	address_b=> SAT_ADDR,
+	data_b   => (others => '0'),
+	wren_b   => CLR_WE,
+	q_b		=> SAT_Q
+);
 
 	CLR_A  <= CLR_A + 1 when rising_edge(CLK);
 	CLR_WE <= CLR_MEM   when rising_edge(CLK);
@@ -1076,31 +1092,53 @@ begin
 	SPR_LINE_ADDR(0) <= std_logic_vector(SPR_OUT_X(9 downto 1)) when SPR_LINE_CLR = '1' else SPR_LINE_RENDER_ADDR(0);
 	SPR_LINE_ADDR(1) <= std_logic_vector(SPR_OUT_X(9 downto 1)) when SPR_LINE_CLR = '1' else SPR_LINE_RENDER_ADDR(1);
 	
-	SPR_LINE_BUF0 : entity work.dpram generic map (9,10)
-	port map(
-		clock		=> CLK,
+--	SPR_LINE_BUF0 : entity work.dpram generic map (9,10)
+--	port map(
+--		clock		=> CLK,
 
-		address_a=> SPR_LINE_WR_ADDR(0),
-		data_a	=> SPR_LINE_D(0),
-		wren_a	=> SPR_LINE_WE(0),
+--		address_a=> SPR_LINE_WR_ADDR(0),
+--		data_a	=> SPR_LINE_D(0),
+--		wren_a	=> SPR_LINE_WE(0),
 
-		address_b=> SPR_LINE_ADDR(0),
-		wren_b	=> SPR_LINE_CLR and DCK_CE and not SPR_OUT_X(0),
-		q_b		=> SPR_LINE_Q(0)
-	);
-	
-	SPR_LINE_BUF1 : entity work.dpram generic map (9,10)
-	port map(
-		clock		=> CLK,
+--		address_b=> SPR_LINE_ADDR(0),
+--		wren_b	=> SPR_LINE_CLR and DCK_CE and not SPR_OUT_X(0),
+--		q_b		=> SPR_LINE_Q(0)
+--	);
+--	
+--	SPR_LINE_BUF1 : entity work.dpram generic map (9,10)
+--	port map(
+--		clock		=> CLK,
 
-		address_a=> SPR_LINE_WR_ADDR(1),
-		data_a	=> SPR_LINE_D(1),
-		wren_a	=> SPR_LINE_WE(1),
+--		address_a=> SPR_LINE_WR_ADDR(1),
+--		data_a	=> SPR_LINE_D(1),
+--		wren_a	=> SPR_LINE_WE(1),
 
-		address_b=> SPR_LINE_ADDR(1),
-		wren_b	=> SPR_LINE_CLR and DCK_CE and SPR_OUT_X(0),
-		q_b		=> SPR_LINE_Q(1)
-	);
+--		address_b=> SPR_LINE_ADDR(1),
+--		wren_b	=> SPR_LINE_CLR and DCK_CE and SPR_OUT_X(0),
+--		q_b		=> SPR_LINE_Q(1)
+--	);
+
+    SPR_LINE_BUF0 : entity work.dpram_ip_9x10
+    port map(
+        clock		=> CLK,
+        address_a=> SPR_LINE_WR_ADDR(0),
+        data_a	=> SPR_LINE_D(0),
+        wren_a	=> SPR_LINE_WE(0),
+        address_b=> SPR_LINE_ADDR(0),
+        wren_b	=> SPR_LINE_CLR and DCK_CE and not SPR_OUT_X(0),
+        q_b		=> SPR_LINE_Q(0)
+    );
+
+    SPR_LINE_BUF1 : entity work.dpram_ip_9x10
+    port map(
+        clock		=> CLK,
+        address_a=> SPR_LINE_WR_ADDR(1),
+        data_a	=> SPR_LINE_D(1),
+        wren_a	=> SPR_LINE_WE(1),
+        address_b=> SPR_LINE_ADDR(1),
+        wren_b	=> SPR_LINE_CLR and DCK_CE and SPR_OUT_X(0),
+        q_b		=> SPR_LINE_Q(1)
+    );
 
 	process(CLK, RST_N)
 	variable PX : unsigned(3 downto 0);
