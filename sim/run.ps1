@@ -64,13 +64,14 @@ if ($CROSS) {
         'rtl/tang/iosys/spiflash.v', 'rtl/tang/iosys/spi_master.v',
         'rtl/tang/iosys/simplespimaster.v', 'rtl/tang/iosys/simpleuart.v',
         'rtl/tang/iosys/textdisp.v', 'rtl/tang/iosys/font_rom.v',
-        'rtl/tang/pce_sdram_ctrl.v', 'rtl/tang/sdram.v'
+        'rtl/tang/pce_sdram_ctrl_3ch.v'
     )
     & $iverilog -g2005-sv -o sim/tb_iosys.vvp @iosysFiles
     if ($LASTEXITCODE) { throw 'iverilog failed for tb_iosys' }
     $out = & $vvp sim/tb_iosys.vvp
     $out | Write-Host
-    if ($out -match 'FAILED' -or $out -notmatch 'PASSED') { $fails += 'tb_iosys' }
+    $text = $out -join "`n"
+    if ($text -match 'FAILED' -or $text -notmatch 'PASSED') { $fails += 'tb_iosys' }
 } else {
     Write-Warning 'no RISC-V toolchain, skipping tb_iosys'
 }
@@ -85,7 +86,8 @@ foreach ($tb in @('tb_textdisp', 'tb_rom_source_arb')) {
     if ($LASTEXITCODE) { throw "iverilog failed for $tb" }
     $out = & $vvp "sim/$tb.vvp"
     $out | Write-Host
-    if ($out -match 'FAILED' -or $out -notmatch 'PASSED') { $fails += $tb }
+    $text = $out -join "`n"
+    if ($text -match 'FAILED' -or $text -notmatch 'PASSED') { $fails += $tb }
 }
 
 if ($fails.Count) {

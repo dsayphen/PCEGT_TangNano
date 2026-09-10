@@ -6,7 +6,8 @@ use IEEE.STD_LOGIC_TEXTIO.all;
 
 entity pce_top is
 	generic (
-		LITE : integer := 0;
+		SGX_SUPPORT   : integer := 0;
+		CHEAT_SUPPORT : integer := 0;
 		PSG_O_WIDTH: integer := 16;
 		MAX_SPRITES: integer := 16;
 		USE_INTERNAL_RAM: integer := 0;
@@ -326,7 +327,7 @@ begin
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
-generate_CHEAT: if (LITE = 0) generate begin
+generate_CHEAT: if (CHEAT_SUPPORT /= 0) generate begin
 
 -- Game Genie
 GAMEGENIE : component CODES
@@ -350,7 +351,7 @@ GENIE_DI <= GENIE_DO when GENIE else CPU_DI;
 
 end generate;
 
-generate_NOCHEAT: if (LITE /= 0) generate begin
+generate_NOCHEAT: if (CHEAT_SUPPORT = 0) generate begin
 	GENIE_DI <= CPU_DI;
 	GG_AVAIL <= '0';
 end generate;
@@ -491,7 +492,7 @@ port map(
 CLR_A  <= CLR_A + 1  when rising_edge(CLK);
 CLR_WE <= COLD_RESET when rising_edge(CLK);
 
-generate_SGX: if (LITE = 0) generate begin
+generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 
 	VRAM1_RD <= VRAM1_READ and not VRAM1_ADDR(15);
 	VRAM1_WE <= VRAM1_WRITE and not VRAM1_ADDR(15);
@@ -576,7 +577,7 @@ generate_SGX: if (LITE = 0) generate begin
 
 end generate;
 
-generate_NOSGX: if (LITE /= 0) generate begin
+generate_NOSGX: if (SGX_SUPPORT = 0) generate begin
 
 	-- No second VDC: keep the (unused) external VRAM1 port quiet.
 	VRAM1_A  <= (others => '0');

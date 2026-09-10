@@ -17,11 +17,10 @@
         <File path="rtl/tang/iosys/spiflash.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/iosys/textdisp.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/pce_pad.v" type="file.verilog" enable="1"/>
-        <File path="rtl/tang/pce_sdram_ctrl.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/pce_sdram_ctrl_3ch.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/pll_clocks.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/rom_loader.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/rom_source_arb.v" type="file.verilog" enable="1"/>
-        <File path="rtl/tang/sdram.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/snes_gamepad.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/tmds_encoder.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/uart_rx.v" type="file.verilog" enable="1"/>

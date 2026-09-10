@@ -2,13 +2,12 @@
 -- HuCard-only wrapper around pce_top (extram variant) for the Tang Nano 20K.
 --
 -- Purpose:
---   * pick the configuration that fits the GW2AR-18 (LITE = 1 so there is no
+--   * pick the configuration that fits the GW2AR-18 (SGX_SUPPORT = 0 so there is no
 --     SuperGrafx second VDC and no Game Genie, CD_SUPPORT = 0 / AC_SUPPORT = 0
 --     so neither the CD-ROM unit nor the Arcade Card are built, and
 --     USE_INTERNAL_RAM = 1 so the 8 KiB work RAM is a block RAM)
 --   * tie off every interface that this build does not use
---   * provide the VDC video RAM from block RAM (identical to the
---     USE_INTERNAL_VRAM path of the MiST/MiSTer top level)
+--   * expose VDC0 video RAM to the interleaved external SDRAM controller
 --   * expose a small, all-lowercase port list to the Verilog top level
 --
 -- Only the HuCard ROM remains as an external memory client, which is what
@@ -21,12 +20,9 @@ use IEEE.NUMERIC_STD.all;
 
 entity pce_core is
     generic (
-        -- 1 = HuCard standard (un seul VDC, fonctionnel sur ce device)
-		-- 0 = SuperGrafx (second VDC + VRAM doublée -> ATTENTION : dépasse le
-		--     budget BSRAM du GW2AR-18, 1024 Kbit nécessaires contre 828 Kbit
-		--     disponibles ; ne pas utiliser sur Tang Nano 20K sans revoir
-		--     l'architecture mémoire de VRAM1 (voir SDRAM externe))
-		LITE : integer := 1
+        -- 0 = HuCard standard (un seul VDC, fonctionnel sur ce device)
+		-- 1 = SuperGrafx (second VDC + VRAM doublée)
+        SGX_SUPPORT : integer := 1
 	);
 
 	port (
@@ -40,6 +36,20 @@ entity pce_core is
 		rom_a      : out std_logic_vector(21 downto 0);
 		rom_do     : in  std_logic_vector(7 downto 0);
 		rom_sz     : in  std_logic_vector(7 downto 0);
+
+		-- VDC0 video RAM (external SDRAM)
+		vram0_a    : out std_logic_vector(15 downto 0);
+		vram0_do   : out std_logic_vector(15 downto 0);
+		vram0_di   : in  std_logic_vector(15 downto 0);
+		vram0_rd   : out std_logic;
+		vram0_we   : out std_logic;
+
+		-- VDC1 video RAM (external SDRAM, SuperGrafx)
+		vram1_a    : out std_logic_vector(15 downto 0);
+		vram1_do   : out std_logic_vector(15 downto 0);
+		vram1_di   : in  std_logic_vector(15 downto 0);
+		vram1_rd   : out std_logic;
+		vram1_we   : out std_logic;
 
 		-- pad
 		joy_out    : out std_logic_vector(1 downto 0);
@@ -64,22 +74,6 @@ end pce_core;
 
 architecture rtl of pce_core is
 
-	signal vram_a  : std_logic_vector(15 downto 0);
-	signal vram_do : std_logic_vector(15 downto 0);
-	signal vram_di : std_logic_vector(15 downto 0);
-	signal vram_q  : std_logic_vector(15 downto 0);
-	signal vram_we : std_logic;
-	signal vram_rd : std_logic;
-	signal vram_hi : std_logic;
-
-    signal vram1_a  : std_logic_vector(15 downto 0);
-    signal vram1_do : std_logic_vector(15 downto 0);
-    signal vram1_di : std_logic_vector(15 downto 0);
-    signal vram1_q  : std_logic_vector(15 downto 0);
-    signal vram1_we : std_logic;
-    signal vram1_rd : std_logic;
-    signal vram1_hi : std_logic;
-
     signal sgx_i    : std_logic;
 
 	signal gg_code_z : std_logic_vector(128 downto 0) := (others => '0');
@@ -95,16 +89,14 @@ architecture rtl of pce_core is
 	signal cdda_r_nc : signed(19 downto 0);
 	signal adpcm_nc  : signed(15 downto 0);
 
---    attribute syn_ramstyle : string;
---    attribute syn_ramstyle of VRAM0 : label is "block_ram";
-
 begin
 
-    sgx_i <= '1' when LITE = 0 else '0';
+    sgx_i <= '1' when SGX_SUPPORT /= 0 else '0';
 
 	CORE : entity work.pce_top
 	generic map (
-		LITE             => LITE,   -- transmis depuis le generic de pce_core
+		SGX_SUPPORT      => SGX_SUPPORT,
+		CHEAT_SUPPORT    => 0,
 		PSG_O_WIDTH      => 20,
 		MAX_SPRITES      => 16,
 		USE_INTERNAL_RAM => 1,
@@ -129,11 +121,11 @@ begin
 		BRM_DO      => ff_byte,
 		BRM_WE      => open,
 
-		VRAM0_A     => vram_a,
-		VRAM0_DO    => vram_do,
-		VRAM0_RD    => vram_rd,
-		VRAM0_WE    => vram_we,
-		VRAM0_DI    => vram_di,
+		VRAM0_A     => vram0_a,
+		VRAM0_DO    => vram0_do,
+		VRAM0_RD    => vram0_rd,
+		VRAM0_WE    => vram0_we,
+		VRAM0_DI    => vram0_di,
 
         VRAM1_A     => vram1_a,
         VRAM1_DO    => vram1_do,
@@ -215,62 +207,5 @@ begin
 
 	aud_l <= std_logic_vector(psg_l);
 	aud_r <= std_logic_vector(psg_r);
-
-	--------------------------------------------------------------------------
-	-- VDC video RAM: 32K x 16 in block RAM.
-	-- Addresses with bit 15 set are outside the physical VRAM; the core already
-	-- masks the read/write strobes, the read data is forced to zero here in the
-	-- same way the internal-VRAM configuration of pce_top.vhd does it.
-	--------------------------------------------------------------------------
-	VRAM0 : entity work.dpram
-	generic map (
-		addr_width => 15,
-		data_width => 16
-	)
-	port map (
-		clock     => clk,
-		address_a => vram_a(14 downto 0),
-		data_a    => vram_do,
-		wren_a    => vram_we,
-		q_a       => vram_q
-	);
-
-	process (clk)
-	begin
-		if rising_edge(clk) then
-			vram_hi <= vram_a(15);
-		end if;
-	end process;
-
-	vram_di <= (others => '0') when vram_hi = '1' else vram_q;
-
-    gen_sgx_vram: if LITE = 0 generate
-        VRAM1 : entity work.dpram
-        generic map (
-            addr_width => 15,
-            data_width => 16
-        )
-        port map (
-            clock     => clk,
-            address_a => vram1_a(14 downto 0),
-            data_a    => vram1_do,
-            wren_a    => vram1_we,
-            q_a       => vram1_q
-        );
-
-        process (clk)
-        begin
-            if rising_edge(clk) then
-                vram1_hi <= vram1_a(15);
-            end if;
-        end process;
-
-        vram1_di <= (others => '0') when vram1_hi = '1' else vram1_q;
-    end generate;
-
-    -- HuCard standard : VRAM1 n'existe pas, on tie-off proprement
-    gen_lite_novram: if LITE /= 0 generate
-        vram1_di <= (others => '0');
-    end generate;
 
 end rtl;
