@@ -2,12 +2,12 @@
 -- HuCard-only wrapper around pce_top (extram variant) for the Tang Nano 20K.
 --
 -- Purpose:
---   * pick the configuration that fits the GW2AR-18 (SGX_SUPPORT = 0 so there is no
---     SuperGrafx second VDC and no Game Genie, CD_SUPPORT = 0 / AC_SUPPORT = 0
+--   * enable the SuperGrafx second VDC while keeping Game Genie disabled;
+--     CD_SUPPORT = 0 / AC_SUPPORT = 0
 --     so neither the CD-ROM unit nor the Arcade Card are built, and
 --     USE_INTERNAL_RAM = 1 so the 8 KiB work RAM is a block RAM)
 --   * tie off every interface that this build does not use
---   * expose VDC0 video RAM to the interleaved external SDRAM controller
+--   * expose both VDC video RAM ports to the interleaved SDRAM controller
 --   * expose a small, all-lowercase port list to the Verilog top level
 --
 -- Only the HuCard ROM remains as an external memory client, which is what

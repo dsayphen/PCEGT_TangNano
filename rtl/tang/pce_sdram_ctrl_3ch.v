@@ -2,12 +2,12 @@
 //
 // The 8 MiB memory is partitioned by physical SDRAM bank:
 //   banks 0-1: HuCard ROM and loader writes
-//   bank 2:    PicoRV32 firmware and data
+//   bank 2:    PicoRV32 firmware/data and VDC1 VRAM
 //   bank 3:    VDC0 VRAM (last 64 KiB, 0x7f0000-0x7fffff)
 //
 // The fixed eight-cycle schedule is derived from SNESTang's Nano 20K
 // controller. At 86.4 MHz it completes one VRAM access per fastest PCE pixel
-// period while keeping independent slots for ROM and PicoRV32 traffic.
+// period. VDC1 has priority over PicoRV32 on their shared channel.
 
 module pce_sdram_ctrl_3ch #(
     parameter FREQ = 86_400_000
@@ -475,6 +475,12 @@ reg [3:0]  rv_ds_latch;
 reg [2:0]  oe_latch;
 reg [2:0]  we_latch;
 reg [2:0]  active;
+reg [1:0]  channel1_port;
+reg        host_cas_done;
+
+localparam CHANNEL1_NONE  = 2'd0;
+localparam CHANNEL1_RV    = 2'd1;
+localparam CHANNEL1_VRAM1 = 2'd2;
 
 always @(posedge clk) begin
     if (!resetn) begin
@@ -495,12 +501,16 @@ always @(posedge clk) begin
         host_ack      <= 1'b0;
         rv_ack        <= 1'b0;
         vram_ack      <= 1'b0;
+        vram1_ack     <= 1'b0;
         host_dout     <= 16'd0;
         rv_dout       <= 32'd0;
         vram_dout     <= 16'd0;
+        vram1_dout    <= 16'd0;
         oe_latch      <= 3'b000;
         we_latch      <= 3'b000;
         active        <= 3'b000;
+        channel1_port <= CHANNEL1_NONE;
+        host_cas_done <= 1'b0;
     end else begin
         cmd       <= CMD_NOP;
         SDRAM_DQM <= 4'b1111;
@@ -538,13 +548,22 @@ always @(posedge clk) begin
             endcase
         end else if (init_done) begin
             if (clkref && !clkref_r && !refresh_window && !refresh_block)
-                cycle <= 3'd3;
+                cycle <= 3'd0;
             else
                 cycle <= cycle + 3'd1;
 
-            // Channel 0: ROM and loader, RAS at cycle 0.
+            // Complete the host read from its cycle-5 CAS.
             if (cycle == 3'd0) begin
                 refresh_block <= 1'b0;
+                if (active[0] && host_cas_done) begin
+                    if (oe_latch[0])
+                        host_dout <= addr_latch[0][1] ?
+                                     dq_in[31:16] : dq_in[15:0];
+                    host_ack <= host_req;
+                    active[0] <= 1'b0;
+                    host_cas_done <= 1'b0;
+                end
+
                 if (!refresh_window)
                     refresh_turn <= 1'b1;
                 if (refresh_window && refresh_turn &&
@@ -556,28 +575,26 @@ always @(posedge clk) begin
                     oe_latch[0]   <= 1'b0;
                 end else begin
                     refresh_turn <= 1'b1;
-                    if (host_req != host_ack) begin
-                        active[0]     <= 1'b1;
-                        addr_latch[0] <= host_addr;
-                        din_latch[0]  <= host_din;
-                        ds_latch[0]   <= host_ds;
-                        we_latch[0]   <= host_we;
-                        oe_latch[0]   <= !host_we;
-                        addr_out      <= host_addr[20:10];
-                        SDRAM_BA      <= host_addr[22:21];
-                        cmd           <= CMD_ACTIVATE;
-                    end else begin
-                        active[0]   <= 1'b0;
-                        we_latch[0] <= 1'b0;
-                        oe_latch[0] <= 1'b0;
-                    end
                 end
             end
 
-            // Channel 1: PicoRV32, RAS at cycle 1.
+            // Channel 1: VDC1 has priority over PicoRV32 and occupies the
+            // upper 64 KiB of bank 2.
             if (cycle == 3'd1 && !refresh_block) begin
-                active[1] <= rv_req != rv_ack;
-                if (rv_req != rv_ack) begin
+                if (vram1_req != vram1_ack) begin
+                    active[1]       <= 1'b1;
+                    channel1_port   <= CHANNEL1_VRAM1;
+                    addr_latch[1]   <= {7'b1011111, vram1_addr, 1'b0};
+                    din_latch[1]    <= vram1_din;
+                    ds_latch[1]     <= 2'b11;
+                    we_latch[1]     <= vram1_we;
+                    oe_latch[1]     <= !vram1_we;
+                    addr_out        <= {5'b11111, vram1_addr[14:9]};
+                    SDRAM_BA        <= 2'b10;
+                    cmd             <= CMD_ACTIVATE;
+                end else if (rv_req != rv_ack) begin
+                    active[1]     <= 1'b1;
+                    channel1_port <= CHANNEL1_RV;
                     addr_latch[1] <= rv_addr;
                     rv_din_latch  <= rv_din;
                     rv_ds_latch   <= rv_ds;
@@ -587,23 +604,88 @@ always @(posedge clk) begin
                     SDRAM_BA      <= rv_addr[22:21];
                     cmd           <= CMD_ACTIVATE;
                 end else begin
-                    we_latch[1] <= 1'b0;
-                    oe_latch[1] <= 1'b0;
+                    active[1]     <= 1'b0;
+                    channel1_port <= CHANNEL1_NONE;
+                    we_latch[1]   <= 1'b0;
+                    oe_latch[1]   <= 1'b0;
                 end
             end
 
-            // Previous VRAM read data is available at cycle 2.
-            if (cycle == 3'd2 && active[2]) begin
-                if (oe_latch[2])
-                    vram_dout <= addr_latch[2][1] ?
-                                 dq_in[31:16] : dq_in[15:0];
-                else
-                    vram_dout <= din_latch[2];
-                active[2] <= 1'b0;
+            // VDC0 RAS at cycle 2 (upper 64 KiB of bank 3).
+            if (cycle == 3'd2 && !refresh_block) begin
+                active[2] <= vram_req != vram_ack;
+                if (vram_req != vram_ack) begin
+                    addr_latch[2] <= {7'b1111111, vram_addr, 1'b0};
+                    din_latch[2]  <= vram_din;
+                    ds_latch[2]   <= 2'b11;
+                    we_latch[2]   <= vram_we;
+                    oe_latch[2]   <= !vram_we;
+                    addr_out      <= {5'b11111, vram_addr[14:9]};
+                    SDRAM_BA      <= 2'b11;
+                    cmd           <= CMD_ACTIVATE;
+                end else begin
+                    active[2]   <= 1'b0;
+                    we_latch[2] <= 1'b0;
+                    oe_latch[2] <= 1'b0;
+                end
+
+                // Loader writes use the otherwise idle VDC0 command slot.
+                // This keeps their write data away from the channel-1 read
+                // return at cycle 6.
+                if (active[0] && we_latch[0] &&
+                    vram_req == vram_ack) begin
+                    host_cas_done <= 1'b1;
+                    cmd           <= CMD_WRITE;
+                    addr_out      <= {3'b100, addr_latch[0][9:2]};
+                    SDRAM_BA      <= addr_latch[0][22:21];
+                    dq_oen        <= 1'b0;
+                    dq_out        <= {din_latch[0], din_latch[0]};
+                    SDRAM_DQM     <= addr_latch[0][1] ?
+                                     {~ds_latch[0], 2'b11} :
+                                     {2'b11, ~ds_latch[0]};
+                end
             end
 
-            // Channel 0 CAS at cycle 2.
-            if (cycle == 3'd2 && active[0]) begin
+            // VDC1 / PicoRV32 CAS at cycle 3.
+            if (cycle == 3'd3 && active[1]) begin
+                if (channel1_port == CHANNEL1_VRAM1)
+                    vram1_ack <= vram1_req;
+                cmd      <= we_latch[1] ? CMD_WRITE : CMD_READ;
+                addr_out <= {3'b100, addr_latch[1][9:2]};
+                SDRAM_BA <= addr_latch[1][22:21];
+                if (we_latch[1]) begin
+                    dq_oen    <= 1'b0;
+                    if (channel1_port == CHANNEL1_RV) begin
+                        dq_out    <= rv_din_latch;
+                        SDRAM_DQM <= ~rv_ds_latch;
+                    end else begin
+                        dq_out    <= {din_latch[1], din_latch[1]};
+                        SDRAM_DQM <= addr_latch[1][1] ?
+                                     4'b0011 : 4'b1100;
+                    end
+                end else begin
+                    SDRAM_DQM <= 4'b0000;
+                end
+            end
+
+            // VDC0 CAS at cycle 4.
+            if (cycle == 3'd4 && active[2]) begin
+                vram_ack <= vram_req;
+                cmd      <= we_latch[2] ? CMD_WRITE : CMD_READ;
+                addr_out <= {3'b100, addr_latch[2][9:2]};
+                SDRAM_BA <= 2'b11;
+                if (we_latch[2]) begin
+                    dq_oen    <= 1'b0;
+                    dq_out    <= {din_latch[2], din_latch[2]};
+                    SDRAM_DQM <= addr_latch[2][1] ? 4'b0011 : 4'b1100;
+                end else begin
+                    SDRAM_DQM <= 4'b0000;
+                end
+            end
+
+            // Host CAS at cycle 5.
+            if (cycle == 3'd5 && active[0] && !we_latch[0]) begin
+                host_cas_done <= 1'b1;
                 cmd      <= we_latch[0] ? CMD_WRITE : CMD_READ;
                 addr_out <= {3'b100, addr_latch[0][9:2]};
                 SDRAM_BA <= addr_latch[0][22:21];
@@ -618,68 +700,43 @@ always @(posedge clk) begin
                 end
             end
 
-            // Channel 1 CAS at cycle 3.
-            if (cycle == 3'd3 && active[1]) begin
-                cmd      <= we_latch[1] ? CMD_WRITE : CMD_READ;
-                addr_out <= {3'b100, addr_latch[1][9:2]};
-                SDRAM_BA <= addr_latch[1][22:21];
-                if (we_latch[1]) begin
-                    dq_oen    <= 1'b0;
-                    dq_out    <= rv_din_latch;
-                    SDRAM_DQM <= ~rv_ds_latch;
-                end else begin
-                    SDRAM_DQM <= 4'b0000;
-                end
-            end
-
-            // Channel 2: VRAM, RAS at cycle 4.
-            if (cycle == 3'd4 && !refresh_block) begin
-                active[2] <= vram_req != vram_ack;
-                if (vram_req != vram_ack) begin
-                    addr_latch[2] <= {7'b1111111, vram_addr, 1'b0};
-                    din_latch[2]  <= vram_din;
-                    ds_latch[2]   <= 2'b11;
-                    we_latch[2]   <= vram_we;
-                    oe_latch[2]   <= !vram_we;
-                    addr_out      <= {5'b11111, vram_addr[14:9]};
-                    SDRAM_BA      <= 2'b11;
-                    cmd           <= CMD_ACTIVATE;
-                end else begin
-                    we_latch[2] <= 1'b0;
-                    oe_latch[2] <= 1'b0;
-                end
-            end
-
-            // Channel 0 read data / completion at cycle 5.
-            if (cycle == 3'd5 && active[0]) begin
-                if (oe_latch[0])
-                    host_dout <= addr_latch[0][1] ?
-                                 dq_in[31:16] : dq_in[15:0];
-                host_ack <= host_req;
-                active[0] <= 1'b0;
-            end
-
-            // Channel 1 read data / completion at cycle 6.
+            // VDC1 / PicoRV32 read data at cycle 6.
             if (cycle == 3'd6 && active[1]) begin
-                if (oe_latch[1])
-                    rv_dout <= dq_in;
-                rv_ack <= rv_req;
+                if (channel1_port == CHANNEL1_RV) begin
+                    if (oe_latch[1])
+                        rv_dout <= dq_in;
+                    rv_ack <= rv_req;
+                end else begin
+                    if (oe_latch[1])
+                        vram1_dout <= addr_latch[1][1] ?
+                                      dq_in[31:16] : dq_in[15:0];
+                    else
+                        vram1_dout <= din_latch[1];
+                end
                 active[1] <= 1'b0;
             end
 
-            // Channel 2 CAS at cycle 7.
+            // VDC0 read data and next host RAS at cycle 7.
             if (cycle == 3'd7 && active[2]) begin
-                vram_ack <= vram_req;
-                cmd      <= we_latch[2] ? CMD_WRITE : CMD_READ;
-                addr_out <= {3'b100, addr_latch[2][9:2]};
-                SDRAM_BA <= 2'b11;
-                if (we_latch[2]) begin
-                    dq_oen    <= 1'b0;
-                    dq_out    <= {din_latch[2], din_latch[2]};
-                    SDRAM_DQM <= addr_latch[2][1] ? 4'b0011 : 4'b1100;
-                end else begin
-                    SDRAM_DQM <= 4'b0000;
-                end
+                if (oe_latch[2])
+                    vram_dout <= addr_latch[2][1] ?
+                                 dq_in[31:16] : dq_in[15:0];
+                else
+                    vram_dout <= din_latch[2];
+                active[2] <= 1'b0;
+            end
+            if (cycle == 3'd7 && !refresh_block && !active[0] &&
+                host_req != host_ack) begin
+                active[0]     <= 1'b1;
+                addr_latch[0] <= host_addr;
+                din_latch[0]  <= host_din;
+                ds_latch[0]   <= host_ds;
+                we_latch[0]   <= host_we;
+                oe_latch[0]   <= !host_we;
+                host_cas_done <= 1'b0;
+                addr_out      <= host_addr[20:10];
+                SDRAM_BA      <= host_addr[22:21];
+                cmd           <= CMD_ACTIVATE;
             end
         end
     end

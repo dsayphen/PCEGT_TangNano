@@ -30,7 +30,7 @@ headphone amplifier.
 | Controller | one SNES-style pad on the GPIO header; S1 resets the console |
 | ROM loading | UART, see section 4 |
 | CD-ROM², Super CD, Arcade Card | **not built** (`CD_SUPPORT = 0`, `AC_SUPPORT = 0`) |
-| SuperGrafx (second VDC / VPC) | **not built** (`SGX_SUPPORT = 0`) |
+| SuperGrafx (second VDC / VPC) | yes (`SGX_SUPPORT = 1`) |
 | Game Genie / cheat engine | **not built** (`CHEAT_SUPPORT = 0`) |
 | Backup RAM (BRAM), Populous SRAM | not implemented, saves are lost on power-off |
 | Multitap, 6-button pads, mouse, MB128 | not implemented |
@@ -223,23 +223,25 @@ There is therefore **no HDMI audio**; sound comes out of the headphone jack.
 
 ## 6. Memory map
 
-The HuCard ROM, PicoRV32 RAM and VDC0 VRAM share the external SDRAM through
-three fixed interleaved channels.
+The HuCard ROM, PicoRV32 RAM and both VDC VRAMs share the external SDRAM
+through three fixed interleaved channels. VDC1 shares the bank-2 channel with
+PicoRV32 and takes priority while SuperGrafx video fetches are active.
 
 | What | Where | Size |
 | --- | --- | --- |
 | HuCard ROM | SDRAM, byte address 0 (+512 if the image has a header) | ≤ 4 MiB |
 | Work RAM | block RAM inside `pce_top` (`USE_INTERNAL_RAM = 1`) | 8 KiB |
-| PicoRV32 RAM | SDRAM bank 2, byte address `0x400000` | 2 MiB window |
+| PicoRV32 RAM | SDRAM bank 2, byte address `0x400000` | 1984 KiB |
 | VDC0 VRAM | SDRAM bank 3, byte address `0x7F0000` | 32K × 16 |
+| VDC1 VRAM | SDRAM bank 2, byte address `0x5F0000` | 32K × 16 |
 | Palette RAM, sprite/attribute buffers, PSG table | block RAM inside the core | small |
 | Line buffers for the scan doubler | block RAM | 2 × 1024 × 9 |
 
 `rtl/tang/pce_sdram_ctrl_3ch.v` runs the SDRAM at 86.4 MHz and assigns fixed
-slots to (1) HuCard ROM/loader, (2) PicoRV32 and (3) VDC0 VRAM. Its eight-cycle
-schedule returns VRAM data within one fastest PCE pixel period. Refresh commands
-are issued in alternating slots during vertical blanking and while the console
-is held in reset.
+slots to (1) HuCard ROM/loader, (2) PicoRV32 or VDC1 and (3) VDC0. Its
+eight-cycle schedule returns both VRAM data words within one fastest PCE pixel
+period. Refresh commands are issued in alternating slots during vertical
+blanking and while the console is held in reset.
 
 ---
 

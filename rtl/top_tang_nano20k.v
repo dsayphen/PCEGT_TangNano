@@ -8,13 +8,13 @@
 //     over the DVI output and streams the .PCE file the user selects with the
 //     SNES pad into the SDRAM.  The on-board USB-UART remains available as a
 //     fallback / replacement path (see rtl/tang/rom_loader.v).
-//   * VDC0 VRAM in SDRAM; work RAM, palette and sprite buffers in block RAM
+//   * both VDC VRAMs in SDRAM; work RAM, palette and sprite buffers in BSRAM
 //   * genlocked line doubler -> DVI/HDMI on the HDMI connector
 //   * PSG -> I2S -> on-board audio amplifier / headphone jack
 //   * one SNES style pad on the GPIO header, plus the two on-board buttons
 //
-// Not built: CD-ROM^2 / Super CD / Arcade Card, SuperGrafx, backup RAM,
-// Populous SRAM, multitap, 6-button pads, Game Genie.
+// Not built: CD-ROM^2 / Super CD / Arcade Card, backup RAM, Populous SRAM,
+// multitap, 6-button pads, Game Genie.
 //
 // See README.md for the build, flash, load and wiring instructions.
 //
