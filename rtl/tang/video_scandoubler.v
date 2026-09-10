@@ -49,7 +49,15 @@ module video_scandoubler (
     output reg  [7:0]  vga_b,
     output reg         vga_hs,        // active high
     output reg         vga_vs,        // active high
-    output reg         vga_de
+    output reg         vga_de,
+
+    // ---- OSD timing (combinational, leads vga_* by exactly 3 clocks) ----
+    // textdisp.v needs three clk_pix stages to turn a coordinate into a
+    // colour, which is exactly the depth of the output pipeline below, so the
+    // pre-pipeline coordinates line up with vga_de without any extra delay.
+    output wire [10:0] osd_x,         // 0..639 inside the active area
+    output wire [9:0]  osd_y,         // 0..479 inside the active area
+    output wire        osd_de
 );
 
 localparam [10:0] H_TOTAL  = 11'd819;
@@ -177,6 +185,11 @@ wire v_active = (vline >= (V_START >> 1)) &&
 wire de_c = v_active && (hcnt >= H_PRE) && (hcnt < H_PRE + H_ACTIVE);
 wire hs_c = (hcnt < H_SYNC);
 wire vs_c = (hdmi_line < V_SYNC);
+
+// OSD coordinates, taken at the head of the output pipeline
+assign osd_x  = hcnt - H_PRE;
+assign osd_y  = hdmi_line - V_START;
+assign osd_de = de_c;
 
 initial begin
     hcnt       = 11'd0;

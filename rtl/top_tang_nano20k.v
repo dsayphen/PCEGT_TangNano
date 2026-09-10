@@ -2,26 +2,29 @@
 // PC Engine / TurboGrafx-16 for the Sipeed Tang Nano 20K  (GW2AR-LV18QN88C8/I7)
 //
 // HuCard-only build:
-//   * HuCard ROM in the on-package 64 Mbit SDRAM, loaded at power-on from the
-//     root file GAME.PCE on the microSD card (rtl/tang/sd_loader.v) with the
-//     on-board USB-UART as the fallback / replacement path
-//     (see rtl/tang/rom_loader.v for the wire protocol)
+//   * HuCard ROM in the on-package 64 Mbit SDRAM.  A PicoRV32 IO subsystem
+//     (rtl/tang/iosys/, SNESTang style) boots its firmware from the on-board
+//     SPI flash, mounts the microSD card with FatFs, shows an on-screen menu
+//     over the DVI output and streams the .PCE file the user selects with the
+//     SNES pad into the SDRAM.  The on-board USB-UART remains available as a
+//     fallback / replacement path (see rtl/tang/rom_loader.v).
 //   * work RAM, VRAM, palette and sprite buffers in block RAM
 //   * genlocked line doubler -> DVI/HDMI on the HDMI connector
 //   * PSG -> I2S -> on-board audio amplifier / headphone jack
 //   * one SNES style pad on the GPIO header, plus the two on-board buttons
 //
 // Not built: CD-ROM^2 / Super CD / Arcade Card, SuperGrafx, backup RAM,
-// Populous SRAM, multitap, 6-button pads, Game Genie, OSD.
+// Populous SRAM, multitap, 6-button pads, Game Genie.
 //
-// See README.md for the build, load and wiring instructions.
+// See README.md for the build, flash, load and wiring instructions.
 //
 
 module top_tang_nano20k (
     input  wire        sys_clk,        // 27 MHz crystal
 
-    // on-board push button (active high)
+    // on-board push buttons (active high)
     input  wire        s1,
+    input  wire        s2,
 
     // on-board USB serial bridge
     input  wire        uart_rx,
@@ -30,13 +33,21 @@ module top_tang_nano20k (
     // on-board LEDs (active low)
     output wire [1:0]  led,
 
-    // on-board microSD socket, SD native 1-bit mode (not SPI)
-    output wire        sd_clk,
-    inout  wire        sd_cmd,
-    input  wire        sd_dat0,
-    output wire        sd_dat1,
-    output wire        sd_dat2,
-    output wire        sd_dat3,
+    // on-board microSD socket, driven in SPI mode
+    output wire        sd_clk,         // SCK
+    output wire        sd_cmd,         // MOSI
+    input  wire        sd_dat0,        // MISO
+    output wire        sd_dat1,        // held high
+    output wire        sd_dat2,        // held high
+    output wire        sd_dat3,        // CS, held low
+
+    // on-board SPI NOR flash (MSPI pins, released after configuration)
+    output wire        flash_spi_cs_n,
+    input  wire        flash_spi_miso,
+    output wire        flash_spi_mosi,
+    output wire        flash_spi_clk,
+    output wire        flash_spi_wp_n,
+    output wire        flash_spi_hold_n,
 
     // GW2AR on-package SDRAM (pins are assigned automatically by name)
     output wire        O_sdram_clk,
@@ -72,6 +83,12 @@ module top_tang_nano20k (
 // also handles 921600, which cuts the load time of a 1 MiB image to ~11 s.
 localparam BAUD_RATE  = 115200;
 localparam CLK_SYS_HZ = 43_200_000;
+
+// Firmware image location in the on-board SPI NOR flash.  The Tang Nano 20K
+// carries a 64 Mbit (8 MiB) part and the GW2AR-18 bitstream is well under
+// 1 MiB, so 0x500000 is far past it - the same offset SNESTang uses.
+localparam [23:0] FIRMWARE_FLASH_ADDR = 24'h50_0000;
+localparam        FIRMWARE_SIZE       = 128*1024;
 
 // ===========================================================================
 // Clocks
@@ -128,18 +145,19 @@ wire pix_resetn = pix_rst_sync[2];
 
 // button synchronisers
 reg [2:0] s1_sync = 3'b000;
+reg [2:0] s2_sync = 3'b000;
 always @(posedge clk_sys) begin
     s1_sync <= {s1_sync[1:0], s1};
+    s2_sync <= {s2_sync[1:0], s2};
 end
 wire btn_reset = s1_sync[2];
+wire btn_select = s2_sync[2];
 
 // ===========================================================================
-// ROM loaders (SD card auto-boot + UART fallback) and SDRAM
+// ROM loaders (menu softcore + UART fallback) and SDRAM
 //
-// The SD loader owns the SDRAM write port from reset.  It hands it over,
-// permanently, to the UART loader as soon as the SD attempt fails or a UART
-// transfer starts; rom_source_arb multiplexes - never ORs - the two write
-// ports and the two ROM descriptions.
+// rom_source_arb multiplexes - never ORs - the two write ports and the two
+// ROM descriptions, so only one source can ever reach the memory.
 // ===========================================================================
 wire        ld_wr;
 wire [22:0] ld_addr;
@@ -150,58 +168,92 @@ wire        loading;
 wire        image_valid;
 wire [7:0]  rom_sz;
 wire [22:0] rom_offset;
-wire        rx_activity;
 
-// ---- SD card auto-loader --------------------------------------------------
-wire        sd_ld_wr;
-wire [22:0] sd_ld_addr;
-wire [7:0]  sd_ld_data;
-wire        sd_ld_busy;
-wire        sd_loading;
-wire        sd_image_valid;
-wire [7:0]  sd_rom_sz;
-wire [22:0] sd_rom_offset;
-wire        sd_failed;
-wire [3:0]  sd_err;
-wire        sd_enable;
+// ---- softcore / menu ------------------------------------------------------
+wire        rv_ld_wr;
+wire [22:0] rv_ld_addr;
+wire [7:0]  rv_ld_data;
+wire        rv_ld_busy;
+wire        rv_loading;
+wire        rv_image_valid;
+wire [7:0]  rv_rom_sz;
+wire [22:0] rv_rom_offset;
 
-// one and only tri-state of the bidirectional SD CMD line
-wire        sd_cmd_o;
-wire        sd_cmd_oe;
-wire        sd_cmd_i = sd_cmd;
-assign      sd_cmd = sd_cmd_oe ? sd_cmd_o : 1'bz;
+wire        rv_valid;
+wire        rv_ready;
+wire [22:0] rv_addr;
+wire [31:0] rv_wdata;
+wire [3:0]  rv_wstrb;
+wire [31:0] rv_rdata;
 
-// DAT1..DAT3 are unused in 1-bit mode and must be held high
+wire        osd_on;
+wire [23:0] osd_rgb;
+wire        osd_active;
+wire [10:0] osd_x;
+wire [9:0]  osd_y;
+wire        osd_de;
+
+wire [11:0] pad_btn;
+wire [11:0] menu_btn = pad_btn | {3'b000, btn_select, 8'b0000_0000};
+wire        sdram_init_done;
+
+// DAT1 / DAT2 are unused in SPI mode and must be held high, DAT3 is the chip
+// select and is driven by the IO subsystem.
 assign sd_dat1 = 1'b1;
 assign sd_dat2 = 1'b1;
-assign sd_dat3 = 1'b1;
 
-sd_loader #(
-    .CLK_FREQ (CLK_SYS_HZ),
-    .CLK_DIV  (3'd2)            // 10.8 MHz data clock, 218 kHz init clock
-) u_sd (
-    .clk         (clk_sys),
-    .resetn      (sys_resetn),
-    .enable      (sd_enable),
+iosys #(
+    .FREQ                (CLK_SYS_HZ),
+    .FIRMWARE_FLASH_ADDR (FIRMWARE_FLASH_ADDR),
+    .FIRMWARE_SIZE       (FIRMWARE_SIZE),
+    .RV_BASE             (23'h40_0000)
+) u_iosys (
+    .clk              (clk_sys),
+    .resetn           (sys_resetn & ~btn_reset),
 
-    .sd_clk      (sd_clk),
-    .sd_cmd_i    (sd_cmd_i),
-    .sd_cmd_o    (sd_cmd_o),
-    .sd_cmd_oe   (sd_cmd_oe),
-    .sd_dat0     (sd_dat0),
+    .clk_pix          (clk_pix),
+    .pix_resetn       (pix_resetn),
+    .osd_x            (osd_x),
+    .osd_y            (osd_y),
+    .osd_de           (osd_de),
+    .osd_on           (osd_on),
+    .osd_rgb          (osd_rgb),
+    .osd_active       (osd_active),
 
-    .ld_wr       (sd_ld_wr),
-    .ld_addr     (sd_ld_addr),
-    .ld_data     (sd_ld_data),
-    .ld_busy     (sd_ld_busy),
-    .ld_idle     (ld_idle),
+    .joy1             (menu_btn),
 
-    .loading     (sd_loading),
-    .image_valid (sd_image_valid),
-    .rom_sz      (sd_rom_sz),
-    .rom_offset  (sd_rom_offset),
-    .failed      (sd_failed),
-    .err_code    (sd_err)
+    .ld_wr            (rv_ld_wr),
+    .ld_addr          (rv_ld_addr),
+    .ld_data          (rv_ld_data),
+    .ld_busy          (rv_ld_busy),
+    .ld_idle          (ld_idle),
+    .loading          (rv_loading),
+    .image_valid      (rv_image_valid),
+    .rom_sz           (rv_rom_sz),
+    .rom_offset       (rv_rom_offset),
+
+    .rv_valid         (rv_valid),
+    .rv_ready         (rv_ready),
+    .rv_addr          (rv_addr),
+    .rv_wdata         (rv_wdata),
+    .rv_wstrb         (rv_wstrb),
+    .rv_rdata         (rv_rdata),
+    .ram_busy         (~sdram_init_done),
+
+    .flash_spi_cs_n   (flash_spi_cs_n),
+    .flash_spi_miso   (flash_spi_miso),
+    .flash_spi_mosi   (flash_spi_mosi),
+    .flash_spi_clk    (flash_spi_clk),
+    .flash_spi_wp_n   (flash_spi_wp_n),
+    .flash_spi_hold_n (flash_spi_hold_n),
+
+    .uart_rx          (uart_rx),
+    .uart_tx          (uart_tx),
+
+    .sd_clk           (sd_clk),
+    .sd_mosi          (sd_cmd),
+    .sd_miso          (sd_dat0),
+    .sd_cs_n          (sd_dat3)
 );
 
 // ---- UART loader ----------------------------------------------------------
@@ -229,7 +281,7 @@ rom_loader #(
     .image_valid (ua_image_valid),
     .rom_sz      (ua_rom_sz),
     .rom_offset  (ua_rom_offset),
-    .rx_activity (rx_activity)
+    .rx_activity ()
 );
 
 // ---- source arbitration ---------------------------------------------------
@@ -237,16 +289,14 @@ rom_source_arb u_arb (
     .clk            (clk_sys),
     .resetn         (sys_resetn),
 
-    .sd_ld_wr       (sd_ld_wr),
-    .sd_ld_addr     (sd_ld_addr),
-    .sd_ld_data     (sd_ld_data),
-    .sd_loading     (sd_loading),
-    .sd_image_valid (sd_image_valid),
-    .sd_rom_sz      (sd_rom_sz),
-    .sd_rom_offset  (sd_rom_offset),
-    .sd_failed      (sd_failed),
-    .sd_enable      (sd_enable),
-    .sd_ld_busy     (sd_ld_busy),
+    .rv_ld_wr       (rv_ld_wr),
+    .rv_ld_addr     (rv_ld_addr),
+    .rv_ld_data     (rv_ld_data),
+    .rv_loading     (rv_loading),
+    .rv_image_valid (rv_image_valid),
+    .rv_rom_sz      (rv_rom_sz),
+    .rv_rom_offset  (rv_rom_offset),
+    .rv_ld_busy     (rv_ld_busy),
 
     .ua_ld_wr       (ua_ld_wr),
     .ua_ld_addr     (ua_ld_addr),
@@ -268,13 +318,10 @@ rom_source_arb u_arb (
     .own_uart_o     ()
 );
 
-assign uart_tx = 1'b1;   // idle, nothing is sent back
-
 wire        rom_rd;
 wire [21:0] rom_a;
 wire [7:0]  rom_do;
 wire        rom_rdy;
-wire        sdram_init_done;
 
 pce_sdram_ctrl #(
     .FREQ (CLK_SYS_HZ)
@@ -307,20 +354,29 @@ pce_sdram_ctrl #(
     .rom_do        (rom_do),
     .rom_rdy       (rom_rdy),
 
+    .rv_valid      (rv_valid),
+    .rv_ready      (rv_ready),
+    .rv_addr       (rv_addr),
+    .rv_wdata      (rv_wdata),
+    .rv_wstrb      (rv_wstrb),
+    .rv_rdata      (rv_rdata),
+
     .init_done     (sdram_init_done)
 );
 
 // ===========================================================================
 // Core reset
 //
-// The console is held in reset while the SDRAM is initialising, while the SD
-// card is being read or a ROM image is being received over the UART, when no
+// The console is held in reset while the SDRAM is initialising, while a ROM
+// image is being streamed from the card or received over the UART, when no
 // image has been loaded yet and for 64k clocks (1.5 ms) afterwards, which is
 // long enough for the COLD_RESET memory clear inside the core to complete.
 //
-// `loading` is high from power-on until the SD attempt has succeeded or failed
-// (sd_loader holds it), and again for the whole of any later UART transfer, so
-// the core can never run while the ROM area of the SDRAM is being written.
+// `loading` is high for the whole of any transfer, from the moment the menu
+// firmware (or the UART loader) announces it until the last byte has really
+// reached the memory array, so the core can never run while the ROM area of
+// the SDRAM is being written - including when the user reopens the menu and
+// picks a different game.
 // ===========================================================================
 wire rst_trigger = !sdram_init_done || loading || !image_valid || btn_reset;
 
@@ -376,9 +432,10 @@ pce_core u_pce (
 
 // ===========================================================================
 // Game pad
+//
+// While the menu is on screen the pad drives the menu only, so a game that is
+// already running does not see the button presses used to navigate it.
 // ===========================================================================
-wire [11:0] pad_btn;
-
 snes_gamepad u_pad (
     .clk       (clk_sys),
     .resetn    (sys_resetn),
@@ -388,24 +445,26 @@ snes_gamepad u_pad (
     .buttons   (pad_btn)
 );
 
+wire [11:0] game_btn = osd_active ? 12'd0 : pad_btn;
+
 // SNES bit order: 0:B 1:Y 2:Select 3:Start 4:Up 5:Down 6:Left 7:Right
 //                 8:A 9:X 10:L 11:R
 pce_pad u_joy (
     .clk     (clk_sys),
     .joy_out (joy_out),
     .joy_in  (joy_in),
-    .up      (pad_btn[4]),
-    .down    (pad_btn[5]),
-    .left    (pad_btn[6]),
-    .right   (pad_btn[7]),
-    .btn_i   (pad_btn[8] | pad_btn[9]),      // SNES A / X  -> PCE I
-    .btn_ii  (pad_btn[0] | pad_btn[1]),      // SNES B / Y  -> PCE II
-    .sel     (pad_btn[2]),                   // SNES Select -> Select
-    .run     (pad_btn[3])                    // SNES Start -> Run
+    .up      (game_btn[4]),
+    .down    (game_btn[5]),
+    .left    (game_btn[6]),
+    .right   (game_btn[7]),
+    .btn_i   (game_btn[8] | game_btn[9]),   // SNES A / X  -> PCE I
+    .btn_ii  (game_btn[0] | game_btn[1]),   // SNES B / Y  -> PCE II
+    .sel     (game_btn[2]),                 // SNES Select -> Select
+    .run     (game_btn[3])                  // SNES Start -> Run
 );
 
 // ===========================================================================
-// Video: genlocked line doubler + DVI transmitter
+// Video: genlocked line doubler + OSD overlay + DVI transmitter
 // ===========================================================================
 wire [7:0] vga_r, vga_g, vga_b;
 wire       vga_hs, vga_vs, vga_de;
@@ -428,16 +487,25 @@ video_scandoubler u_scandoubler (
     .vga_b      (vga_b),
     .vga_hs     (vga_hs),
     .vga_vs     (vga_vs),
-    .vga_de     (vga_de)
+    .vga_de     (vga_de),
+    .osd_x      (osd_x),
+    .osd_y      (osd_y),
+    .osd_de     (osd_de)
 );
+
+// The OSD replaces the picture completely while it is up.  osd_rgb is already
+// aligned with vga_* - see the comment on osd_x in video_scandoubler.v.
+wire [7:0] out_r = osd_on ? osd_rgb[23:16] : vga_r;
+wire [7:0] out_g = osd_on ? osd_rgb[15:8]  : vga_g;
+wire [7:0] out_b = osd_on ? osd_rgb[7:0]   : vga_b;
 
 dvi_tx u_dvi (
     .clk_pix    (clk_pix),
     .clk_pix5   (clk_pix5),
     .resetn     (pix_resetn),
-    .r          (vga_r),
-    .g          (vga_g),
-    .b          (vga_b),
+    .r          (out_r),
+    .g          (out_g),
+    .b          (out_b),
     .de         (vga_de),
     .hsync      (vga_hs),
     .vsync      (vga_vs),
@@ -467,9 +535,8 @@ assign pa_en = 1'b1;
 //
 //   led[0]  PLLs locked and SDRAM initialised
 //   led[1]  a ROM image is loaded and the console is running.  It stays off
-//           while the SD card is being read, while a UART transfer runs and
-//           after a failed SD attempt (which silently arms the UART fallback);
-//           sd_err then holds the reason, see rtl/tang/sd_loader.v.
+//           while the menu is up before a game has been picked and for the
+//           whole of any ROM transfer.
 // ===========================================================================
 assign led[0] = ~(lock_main & lock_hdmi & sdram_init_done);
 assign led[1] = ~(image_valid & ~loading & ~core_reset);

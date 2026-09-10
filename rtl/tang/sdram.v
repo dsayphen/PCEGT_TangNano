@@ -3,8 +3,13 @@
 // Original author: nand2mario
 // Taken from https://github.com/sipeed/TangNano-20K-example (nestang/src/sdram.v),
 // which is distributed under the GNU General Public License v3.
-// Unmodified apart from this header and the default FREQ parameter, which is
-// set to the 43.2 MHz system clock used by this project.
+//
+// Changes for this project:
+//   * the default FREQ parameter is the 43.2 MHz system clock used here
+//   * a `wr32` command was added: a 32-bit write masked by `wstrb`, so that the
+//     PicoRV32 IO subsystem can use the SDRAM as its main memory without
+//     paying for four separate byte writes per word.  The original byte write
+//     (`wr` / `din`) is untouched.
 //
 // This is a byte-based, low-latency and non-bursting controller for the embedded SDRAM
 // on Tang Nano 20K. The SDRAM module is 64Mbit 32bit. (2K rows x 256 columns x 4 banks x 32 bits).
@@ -61,10 +66,13 @@ module sdram
     input             clk_sdram,    // phase shifted from clk (normally 180-degrees)
     input             resetn,
     input             rd,           // command: read
-    input             wr,           // command: write
+    input             wr,           // command: write (single byte from din)
+    input             wr32,         // command: write (32 bits from din32, masked by wstrb)
     input             refresh,      // command: auto refresh. 4096 refresh cycles in 64ms. Once per 15us.
     input      [22:0] addr,         // byte address
     input       [7:0] din,          // data input
+    input      [31:0] din32,        // 32-bit data input, used by wr32
+    input       [3:0] wstrb,        // byte enables for wr32
     output      [7:0] dout,         // data output
     output [DATA_WIDTH-1:0] dout32, // 32-bit data output
     output reg        data_ready,   // available 6 cycles after wr is set
@@ -109,6 +117,7 @@ localparam [10:0] MODE_REG = {4'b0, CAS[2:0], BURST_MODE, BURST_LEN};
 
 reg cfg_now;            // pulse for configuration
 reg [3:0] cycle;        // each operation (config/read/write) are max 7 cycles
+reg word_wr;            // the write in progress is a 32-bit masked write
 
 //
 // SDRAM state machine
@@ -152,12 +161,13 @@ always @(posedge clk) begin
         end
 
         // read/write/refresh
-        {IDLE, 4'bxxxx}: if (rd | wr) begin
+        {IDLE, 4'bxxxx}: if (rd | wr | wr32) begin
             // bank activate
             {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE} <= CMD_BankActivate;
             SDRAM_BA <= addr[ROW_WIDTH+COL_WIDTH+BANK_WIDTH-1+2 : ROW_WIDTH+COL_WIDTH+2];    // bank id
             SDRAM_A <= addr[ROW_WIDTH+COL_WIDTH-1+2:COL_WIDTH+2];      // 12-bit row address
             state <= rd ? READ : WRITE;
+            word_wr <= wr32;
             cycle <= 4'd1;
             busy <= 1'b1;
         end else if (refresh) begin
@@ -204,11 +214,12 @@ always @(posedge clk) begin
             {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE} <= CMD_Write;
             SDRAM_A[10] <= 1'b1;        // set auto precharge
             SDRAM_A[9:0] <= {1'b0, addr[COL_WIDTH-1+2:2]};  // column address
-            SDRAM_DQM <= addr[1:0] == 2'd0 ? 4'b1110 :
+            SDRAM_DQM <= word_wr ? ~wstrb :
+                         addr[1:0] == 2'd0 ? 4'b1110 :
                          addr[1:0] == 2'd1 ? 4'b1101 :
                          addr[1:0] == 2'd2 ? 4'b1011 : 4'b0111;     // only write the correct byte
             off <= addr[1:0];
-            dq_out <= {din,din,din,din};
+            dq_out <= word_wr ? din32 : {din,din,din,din};
             dq_oen <= 1'b0;                 // DQ output on
         end
         {WRITE, T_RCD+4'd1}: begin
