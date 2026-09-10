@@ -8,7 +8,7 @@
 //     over the DVI output and streams the .PCE file the user selects with the
 //     SNES pad into the SDRAM.  The on-board USB-UART remains available as a
 //     fallback / replacement path (see rtl/tang/rom_loader.v).
-//   * work RAM, VRAM, palette and sprite buffers in block RAM
+//   * VDC0 VRAM in SDRAM; work RAM, palette and sprite buffers in block RAM
 //   * genlocked line doubler -> DVI/HDMI on the HDMI connector
 //   * PSG -> I2S -> on-board audio amplifier / headphone jack
 //   * one SNES style pad on the GPIO header, plus the two on-board buttons
@@ -94,7 +94,8 @@ localparam        FIRMWARE_SIZE       = 128*1024;
 // Clocks
 // ===========================================================================
 wire clk_sys;        // 43.2 MHz
-wire clk_sdram;      // 43.2 MHz, 180 degrees
+wire clk_mem;        // 86.4 MHz SDRAM controller
+wire clk_sdram;      // 86.4 MHz, 180 degrees
 wire clk_pix5;       // 129.6 MHz
 wire clk_pix;        // 25.92 MHz
 wire lock_main;
@@ -102,8 +103,9 @@ wire lock_hdmi;
 
 pll_main u_pll_main (
     .clkin   (sys_clk),
-    .clkout  (clk_sys),
+    .clkout  (clk_mem),
     .clkoutp (clk_sdram),
+    .clkoutd (clk_sys),
     .lock    (lock_main)
 );
 
@@ -322,12 +324,28 @@ wire        rom_rd;
 wire [21:0] rom_a;
 wire [7:0]  rom_do;
 wire        rom_rdy;
+wire [15:0] vram0_a;
+wire [15:0] vram0_do;
+wire [15:0] vram0_di;
+wire        vram0_rd;
+wire        vram0_we;
+wire [15:0] vram1_a;
+wire [15:0] vram1_do;
+wire [15:0] vram1_di;
+wire        vram1_rd;
+wire        vram1_we;
+wire        vid_ce;
+wire        vid_vbl;
+wire        vram_refresh_window;
 
-pce_sdram_ctrl #(
-    .FREQ (CLK_SYS_HZ)
+pce_sdram_ctrl_3ch #(
+    .FREQ (86_400_000)
 ) u_mem (
     .clk           (clk_sys),
+    .clk_mem       (clk_mem),
     .clk_sdram     (clk_sdram),
+    .clkref        (vid_ce),
+    .refresh_window(vram_refresh_window),
     .resetn        (sys_resetn),
 
     .O_sdram_clk   (O_sdram_clk),
@@ -353,6 +371,18 @@ pce_sdram_ctrl #(
     .rom_offset    (rom_offset),
     .rom_do        (rom_do),
     .rom_rdy       (rom_rdy),
+
+    .vram_addr     (vram0_a),
+    .vram_din      (vram0_do),
+    .vram_dout     (vram0_di),
+    .vram_rd       (vram0_rd),
+    .vram_we       (vram0_we),
+
+    .vram1_addr    (vram1_a),
+    .vram1_din     (vram1_do),
+    .vram1_dout    (vram1_di),
+    .vram1_rd      (vram1_rd),
+    .vram1_we      (vram1_we),
 
     .rv_valid      (rv_valid),
     .rv_ready      (rv_ready),
@@ -389,6 +419,7 @@ always @(posedge clk_sys) begin
 end
 
 wire core_reset = ~rst_cnt[16];
+assign vram_refresh_window = core_reset || vid_vbl;
 
 // ===========================================================================
 // The console
@@ -397,12 +428,13 @@ wire [1:0]  joy_out;
 wire [3:0]  joy_in;
 wire [19:0] aud_l;
 wire [19:0] aud_r;
-wire        vid_ce;
 wire [2:0]  vid_r, vid_g, vid_b;
-wire        vid_hs, vid_vs, vid_hbl, vid_vbl;
+wire        vid_hs, vid_vs, vid_hbl;
 wire [1:0]  vid_dcc;
 
-pce_core u_pce (
+pce_core #(
+    .SGX_SUPPORT (1)
+) u_pce (
     .clk        (clk_sys),
     .reset      (core_reset),
     .cold_reset (core_reset),
@@ -412,6 +444,18 @@ pce_core u_pce (
     .rom_a      (rom_a),
     .rom_do     (rom_do),
     .rom_sz     (rom_sz),
+
+    .vram0_a    (vram0_a),
+    .vram0_do   (vram0_do),
+    .vram0_di   (vram0_di),
+    .vram0_rd   (vram0_rd),
+    .vram0_we   (vram0_we),
+
+    .vram1_a    (vram1_a),
+    .vram1_do   (vram1_do),
+    .vram1_di   (vram1_di),
+    .vram1_rd   (vram1_rd),
+    .vram1_we   (vram1_we),
 
     .joy_out    (joy_out),
     .joy_in     (joy_in),

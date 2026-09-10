@@ -24,14 +24,14 @@ headphone amplifier.
 | --- | --- |
 | HuCard games up to 4 MiB (incl. the SF2 mapper) | yes |
 | HuC6280 CPU, HuC6270 VDC, HuC6260 VCE, PSG | yes |
-| 8 KiB work RAM, 64 KiB VRAM, palette RAM | yes, in block RAM |
+| 8 KiB work RAM, 64 KiB VRAM, palette RAM | yes; VRAM in SDRAM, the rest in block RAM |
 | Video output | 640x480-class DVI over HDMI, genlocked line doubler |
 | Audio | stereo PSG, I2S to the on-board amplifier / headphone jack |
 | Controller | one SNES-style pad on the GPIO header; S1 resets the console |
 | ROM loading | UART, see section 4 |
 | CD-ROM², Super CD, Arcade Card | **not built** (`CD_SUPPORT = 0`, `AC_SUPPORT = 0`) |
-| SuperGrafx (second VDC / VPC) | **not built** (`LITE = 1`, does not fit) |
-| Game Genie / cheat engine | **not built** (`LITE = 1`) |
+| SuperGrafx (second VDC / VPC) | **not built** (`SGX_SUPPORT = 0`) |
+| Game Genie / cheat engine | **not built** (`CHEAT_SUPPORT = 0`) |
 | Backup RAM (BRAM), Populous SRAM | not implemented, saves are lost on power-off |
 | Multitap, 6-button pads, mouse, MB128 | not implemented |
 | OSD / menu | none, this is a standalone build |
@@ -213,8 +213,9 @@ There is therefore **no HDMI audio**; sound comes out of the headphone jack.
 | Clock | Frequency | Source |
 | --- | --- | --- |
 | `sys_clk` | 27 MHz | board crystal |
-| `clk_sys` | 43.2 MHz | rPLL #1 `CLKOUT`, 27 × 8/5 |
-| `clk_sdram` | 43.2 MHz, 180° | rPLL #1 `CLKOUTP` |
+| `clk_mem` | 86.4 MHz | rPLL #1 `CLKOUT`, 27 × 16/5 |
+| `clk_sys` | 43.2 MHz | rPLL #1 `CLKOUTD` /2 |
+| `clk_sdram` | 86.4 MHz, 180° | rPLL #1 `CLKOUTP` |
 | `clk_pix5` | 129.6 MHz | rPLL #2 `CLKOUT`, 27 × 24/5 |
 | `clk_pix` | 25.92 MHz | `CLKDIV` /5 of `clk_pix5` |
 
@@ -222,21 +223,23 @@ There is therefore **no HDMI audio**; sound comes out of the headphone jack.
 
 ## 6. Memory map
 
-Only the HuCard ROM lives in external memory; everything else fits in block RAM.
+The HuCard ROM, PicoRV32 RAM and VDC0 VRAM share the external SDRAM through
+three fixed interleaved channels.
 
 | What | Where | Size |
 | --- | --- | --- |
 | HuCard ROM | SDRAM, byte address 0 (+512 if the image has a header) | ≤ 4 MiB |
 | Work RAM | block RAM inside `pce_top` (`USE_INTERNAL_RAM = 1`) | 8 KiB |
-| VDC VRAM | block RAM in `rtl/tang/pce_core.vhd` | 32K × 16 |
+| PicoRV32 RAM | SDRAM bank 2, byte address `0x400000` | 2 MiB window |
+| VDC0 VRAM | SDRAM bank 3, byte address `0x7F0000` | 32K × 16 |
 | Palette RAM, sprite/attribute buffers, PSG table | block RAM inside the core | small |
 | Line buffers for the scan doubler | block RAM | 2 × 1024 × 9 |
 
-`rtl/tang/pce_sdram_ctrl.v` arbitrates between (1) loader writes, (2) auto
-refresh every 512 clocks and (3) HuCard ROM reads, and keeps one 32-bit word in
-a cache so that sequential instruction fetches hit three times out of four. A
-`ROM_RD` / `ROM_RDY` request costs 1.6 wait states on average, well inside the
-6-clock HuC6280 memory cycle.
+`rtl/tang/pce_sdram_ctrl_3ch.v` runs the SDRAM at 86.4 MHz and assigns fixed
+slots to (1) HuCard ROM/loader, (2) PicoRV32 and (3) VDC0 VRAM. Its eight-cycle
+schedule returns VRAM data within one fastest PCE pixel period. Refresh commands
+are issued in alternating slots during vertical blanking and while the console
+is held in reset.
 
 ---
 
@@ -253,10 +256,10 @@ rtl/
   cd/                         CD-ROM² unit - kept for reference, NOT in the project
   shared/                     MiST wrapper - kept for reference, NOT in the project
   tang/
-    pce_core.vhd              HuCard-only wrapper + VRAM
+    pce_core.vhd              HuCard-only wrapper + external VRAM interface
     pll_clocks.v              rPLL / CLKDIV instances
     sdram.v                   SDRAM controller (nand2mario, GPLv3)
-    pce_sdram_ctrl.v          arbiter, ROM word cache, refresh
+    pce_sdram_ctrl_3ch.v      interleaved ROM / PicoRV32 / VRAM controller
     uart_rx.v, rom_loader.v   UART ROM loader
     video_scandoubler.v       genlocked line doubler + HDMI timing
     tmds_encoder.v, dvi_tx.v  DVI encoder, OSER10 serialisers, ELVDS buffers
@@ -293,7 +296,8 @@ Kept deliberately small:
   component instantiation instead of a direct entity instantiation, so
   `rtl/cd/*` does not have to be part of the project. `VOLTAB_FILE` was
   corrected from the non-existent `../voltab/voltab_small.mif` to
-  `voltab_small.mif`. The unused `VRAM1_*` outputs are driven in the `LITE`
+  `voltab_small.mif`. The unused `VRAM1_*` outputs are driven when
+  `SGX_SUPPORT = 0`
   branch.
 * `rtl/huc6270.vhd` — one-character fix in the `SPR_CACHE` reset aggregate,
   where the 4-bit `PAL` record element was initialised with a 2-bit literal.

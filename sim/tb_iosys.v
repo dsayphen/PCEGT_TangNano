@@ -18,11 +18,13 @@ module tb_iosys;
 localparam FIRMWARE_SIZE = 4096;
 
 reg clk = 0;
+reg clk_mem = 0;
 reg clk_sdram = 0;
 reg resetn = 0;
 
 always #11.574 clk = ~clk;              // 43.2 MHz
-always @(clk) clk_sdram <= #11.574 clk; // 180 degrees
+always #5.787 clk_mem = ~clk_mem;        // 86.4 MHz
+always @(clk_mem) clk_sdram <= #5.787 clk_mem; // 180 degrees
 
 // ---- device pins ----------------------------------------------------------
 wire [31:0] IO_sdram_dq;
@@ -53,6 +55,13 @@ reg  [21:0] rom_a  = 22'h3FFFFF;
 wire [7:0]  rom_do;
 wire        rom_rdy;
 wire        sdram_init_done;
+reg  [15:0] vram_addr = 16'hffff;
+reg  [15:0] vram_din = 16'd0;
+wire [15:0] vram_dout;
+reg         vram_rd = 1'b0;
+reg         vram_we = 1'b0;
+reg         clkref = 1'b0;
+reg         refresh_window = 1'b0;
 
 wire        osd_on;
 wire [23:0] osd_rgb;
@@ -112,9 +121,12 @@ iosys #(
     .sd_cs_n    ()
 );
 
-pce_sdram_ctrl #(.FREQ(43_200_000)) mem (
+pce_sdram_ctrl_3ch #(.FREQ(86_400_000)) mem (
     .clk           (clk),
+    .clk_mem       (clk_mem),
     .clk_sdram     (clk_sdram),
+    .clkref        (clkref),
+    .refresh_window(refresh_window),
     .resetn        (resetn),
 
     .O_sdram_clk   (O_sdram_clk),
@@ -141,6 +153,12 @@ pce_sdram_ctrl #(.FREQ(43_200_000)) mem (
     .rom_do        (rom_do),
     .rom_rdy       (rom_rdy),
 
+    .vram_addr     (vram_addr),
+    .vram_din      (vram_din),
+    .vram_dout     (vram_dout),
+    .vram_rd       (vram_rd),
+    .vram_we       (vram_we),
+
     .rv_valid      (rv_valid),
     .rv_ready      (rv_ready),
     .rv_addr       (rv_addr),
@@ -162,7 +180,7 @@ sdram_model sd (
     .CLK  (O_sdram_clk),
     .CKE  (O_sdram_cke),
     .DQM  (O_sdram_dqm),
-    .clk  (clk)
+    .clk  (clk_mem)
 );
 
 spiflash_model #(
@@ -181,7 +199,13 @@ spiflash_model #(
 // ===========================================================================
 integer errors = 0;
 integer marks  = 0;
+integer refreshes = 0;
 reg [7:0] mark_log [0:15];
+
+always @(negedge clk_mem)
+    if (!O_sdram_cs_n && !O_sdram_ras_n &&
+        !O_sdram_cas_n && O_sdram_wen_n)
+        refreshes = refreshes + 1;
 
 initial begin
     wait (dut.flash_loaded);
@@ -265,6 +289,27 @@ initial begin
     read_rom(22'd4,  8'hA1);
     read_rom(22'd33, 8'h21);
 
+    // ---- VDC0 bank-3 port ----------------------------------------------
+    $display("--- VRAM0 port ---");
+    write_vram(16'h0123, 16'hBEEF);
+    read_vram(16'h0124, 16'h0000);
+    read_vram(16'h0123, 16'hBEEF);
+    check_eq(sd.mem[21'h1fc091], 32'hBEEF0000,
+             "VRAM0 physical bank-3 word");
+    sd.mem[21'h1fc100] = 32'h22221111;
+    read_vram_timed(16'h0200, 16'h1111);
+    read_vram_timed(16'h0201, 16'h2222);
+
+    refresh_window = 1'b1;
+    repeat (40) @(posedge clk);
+    refresh_window = 1'b0;
+    if (refreshes < 2) begin
+        $display("FAIL refresh burst count = %0d", refreshes);
+        errors = errors + 1;
+    end else begin
+        $display("ok   refresh burst count = %0d", refreshes);
+    end
+
     if (errors == 0)
         $display("\n*** tb_iosys PASSED ***");
     else
@@ -289,6 +334,64 @@ task read_rom;
             $display("ok   rom[%0d] = %h", a, rom_do);
         end
         rom_rd <= 1'b0;
+    end
+endtask
+
+task read_vram_timed;
+    input [15:0] a;
+    input [15:0] want;
+    begin
+        // Model a fastest-mode DCK_CE: the address changes with clkref and
+        // must be returned before the fourth following 43.2 MHz edge.
+        @(negedge clk);
+        vram_addr <= a;
+        vram_rd   <= 1'b1;
+        clkref    <= 1'b1;
+        @(posedge clk);
+        @(negedge clk);
+        clkref <= 1'b0;
+        repeat (4) @(posedge clk);
+        if (vram_dout !== want) begin
+            $display("FAIL timed vram[%0h] = %h, expected %h",
+                     a, vram_dout, want);
+            errors = errors + 1;
+        end else begin
+            $display("ok   timed vram[%0h] = %h", a, vram_dout);
+        end
+        vram_rd <= 1'b0;
+    end
+endtask
+
+task write_vram;
+    input [15:0] a;
+    input [15:0] data;
+    begin
+        @(posedge clk);
+        vram_addr <= a;
+        vram_din  <= data;
+        vram_we   <= 1'b1;
+        @(posedge clk);
+        vram_we   <= 1'b0;
+        repeat (12) @(posedge clk);
+    end
+endtask
+
+task read_vram;
+    input [15:0] a;
+    input [15:0] want;
+    begin
+        @(posedge clk);
+        vram_addr <= a;
+        vram_rd   <= 1'b1;
+        repeat (12) @(posedge clk);
+        if (vram_dout !== want) begin
+            $display("FAIL vram[%0h] = %h, expected %h",
+                     a, vram_dout, want);
+            errors = errors + 1;
+        end else begin
+            $display("ok   vram[%0h] = %h", a, vram_dout);
+        end
+        vram_rd <= 1'b0;
     end
 endtask
 
