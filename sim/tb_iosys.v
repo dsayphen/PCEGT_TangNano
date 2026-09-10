@@ -60,6 +60,11 @@ reg  [15:0] vram_din = 16'd0;
 wire [15:0] vram_dout;
 reg         vram_rd = 1'b0;
 reg         vram_we = 1'b0;
+reg  [15:0] vram1_addr = 16'hffff;
+reg  [15:0] vram1_din = 16'd0;
+wire [15:0] vram1_dout;
+reg         vram1_rd = 1'b0;
+reg         vram1_we = 1'b0;
 reg         clkref = 1'b0;
 reg         refresh_window = 1'b0;
 
@@ -158,6 +163,12 @@ pce_sdram_ctrl_3ch #(.FREQ(86_400_000)) mem (
     .vram_dout     (vram_dout),
     .vram_rd       (vram_rd),
     .vram_we       (vram_we),
+
+    .vram1_addr    (vram1_addr),
+    .vram1_din     (vram1_din),
+    .vram1_dout    (vram1_dout),
+    .vram1_rd      (vram1_rd),
+    .vram1_we      (vram1_we),
 
     .rv_valid      (rv_valid),
     .rv_ready      (rv_ready),
@@ -264,7 +275,8 @@ initial begin
 
     // wait for the two loads to have been announced
     wait (marks >= 6);
-    repeat (200) @(posedge clk);
+    wait (!loading);
+    repeat (20) @(posedge clk);
 
     $display("--- after both loads ---");
     check_eq(marks, 6, "marker count");
@@ -299,6 +311,14 @@ initial begin
     sd.mem[21'h1fc100] = 32'h22221111;
     read_vram_timed(16'h0200, 16'h1111);
     read_vram_timed(16'h0201, 16'h2222);
+    write_vram1(16'h0123, 16'hCAFE);
+    read_vram1_timed(16'h0124, 16'h0000);
+    read_vram1_timed(16'h0123, 16'hCAFE);
+    check_eq(sd.mem[21'h17c091], 32'hCAFE0000,
+             "VRAM1 physical bank-2 word");
+    sd.mem[21'h1fc180] = 32'h00003333;
+    sd.mem[21'h17c180] = 32'h00004444;
+    read_both_vrams_timed(16'h0300, 16'h3333, 16'h4444);
 
     refresh_window = 1'b1;
     repeat (40) @(posedge clk);
@@ -334,6 +354,70 @@ task read_rom;
             $display("ok   rom[%0d] = %h", a, rom_do);
         end
         rom_rd <= 1'b0;
+    end
+endtask
+
+task read_both_vrams_timed;
+    input [15:0] a;
+    input [15:0] want0;
+    input [15:0] want1;
+    begin
+        @(negedge clk);
+        vram_addr  <= a;
+        vram1_addr <= a;
+        vram_rd    <= 1'b1;
+        vram1_rd   <= 1'b1;
+        clkref     <= 1'b1;
+        @(posedge clk);
+        @(negedge clk);
+        clkref <= 1'b0;
+        repeat (4) @(posedge clk);
+        if (vram_dout !== want0 || vram1_dout !== want1) begin
+            $display("FAIL dual VRAM = %h/%h, expected %h/%h",
+                     vram_dout, vram1_dout, want0, want1);
+            errors = errors + 1;
+        end else begin
+            $display("ok   dual VRAM = %h/%h", vram_dout, vram1_dout);
+        end
+        vram_rd  <= 1'b0;
+        vram1_rd <= 1'b0;
+    end
+endtask
+
+task write_vram1;
+    input [15:0] a;
+    input [15:0] data;
+    begin
+        @(posedge clk);
+        vram1_addr <= a;
+        vram1_din  <= data;
+        vram1_we   <= 1'b1;
+        @(posedge clk);
+        vram1_we   <= 1'b0;
+        repeat (12) @(posedge clk);
+    end
+endtask
+
+task read_vram1_timed;
+    input [15:0] a;
+    input [15:0] want;
+    begin
+        @(negedge clk);
+        vram1_addr <= a;
+        vram1_rd   <= 1'b1;
+        clkref     <= 1'b1;
+        @(posedge clk);
+        @(negedge clk);
+        clkref <= 1'b0;
+        repeat (4) @(posedge clk);
+        if (vram1_dout !== want) begin
+            $display("FAIL timed vram1[%0h] = %h, expected %h",
+                     a, vram1_dout, want);
+            errors = errors + 1;
+        end else begin
+            $display("ok   timed vram1[%0h] = %h", a, vram1_dout);
+        end
+        vram1_rd <= 1'b0;
     end
 endtask
 
