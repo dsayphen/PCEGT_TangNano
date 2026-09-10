@@ -2,15 +2,25 @@
 // SDRAM scheduler for the Tang Nano 20K PC Engine port.
 //
 // The HuCard-only configuration of pce_top (extram variant, LITE=1,
-// USE_INTERNAL_RAM=1, CD_SUPPORT=0) needs exactly one external memory client:
-// the HuCard ROM.  Work RAM, VRAM, the palette and the sprite/attribute
-// buffers all live in block RAM, so this controller only has to arbitrate
-// between
+// USE_INTERNAL_RAM=1, CD_SUPPORT=0) needs one external memory client for the
+// game, and the PicoRV32 IO subsystem needs a second one for its own code and
+// data.  Work RAM, VRAM, the palette and the sprite/attribute buffers all live
+// in block RAM, so this controller arbitrates between
 //
-//   1. ROM image writes coming from the active ROM loader - the SD card
-//      auto-loader or the UART loader (highest priority, rare)
+//   1. ROM image writes coming from the active ROM loader - the softcore menu
+//      or the UART loader (highest priority, rare)
 //   2. periodic auto-refresh                       (must never be starved)
 //   3. HuCard ROM byte reads from the CPU
+//   4. 32-bit accesses from the PicoRV32 softcore  (lowest priority)
+//
+// The 8 MiB address space is split
+//
+//   0x000000 .. 0x3FFFFF   HuCard ROM (written by the loaders, read by the core)
+//   0x400000 .. 0x5FFFFF   PicoRV32 RAM (firmware, stack, FatFs buffers)
+//   0x600000 .. 0x7FFFFF   unused
+//
+// so the two clients never alias and the ROM word cache below can never be
+// polluted by softcore traffic.
 //
 // The underlying byte-addressed controller (sdram.v, nand2mario, GPLv3) needs
 // ~5 clocks per access at 43.2 MHz which is close to one 7.16 MHz CPU cycle,
@@ -61,6 +71,14 @@ module pce_sdram_ctrl #(
     output wire [7:0]  rom_do,
     output wire        rom_rdy,
 
+    // PicoRV32 32-bit port (lowest priority)
+    input  wire        rv_valid,
+    output reg         rv_ready,     // single cycle acknowledge
+    input  wire [22:0] rv_addr,
+    input  wire [31:0] rv_wdata,
+    input  wire [3:0]  rv_wstrb,
+    output reg  [31:0] rv_rdata,
+
     output reg         init_done
 );
 
@@ -69,9 +87,12 @@ module pce_sdram_ctrl #(
 // ---------------------------------------------------------------------------
 reg         sd_rd;
 reg         sd_wr;
+reg         sd_wr32;
 reg         sd_refresh;
 reg  [22:0] sd_addr;
 reg  [7:0]  sd_din;
+reg  [31:0] sd_din32;
+reg  [3:0]  sd_wstrb;
 wire [7:0]  sd_dout;
 wire [31:0] sd_dout32;
 wire        sd_data_ready;
@@ -94,9 +115,12 @@ sdram #(.FREQ(FREQ)) sdram_i (
     .resetn     (resetn),
     .rd         (sd_rd),
     .wr         (sd_wr),
+    .wr32       (sd_wr32),
     .refresh    (sd_refresh),
     .addr       (sd_addr),
     .din        (sd_din),
+    .din32      (sd_din32),
+    .wstrb      (sd_wstrb),
     .dout       (sd_dout),
     .dout32     (sd_dout32),
     .data_ready (sd_data_ready),
@@ -158,6 +182,15 @@ assign ld_busy = wr_pending;
 // byte had reached the memory array.
 
 // ---------------------------------------------------------------------------
+// Softcore request buffer
+// ---------------------------------------------------------------------------
+reg         rv_pending;
+reg  [22:0] rv_addr_r;
+reg  [31:0] rv_wdata_r;
+reg  [3:0]  rv_wstrb_r;
+reg         rv_is_wr;
+
+// ---------------------------------------------------------------------------
 // Refresh timer
 // ---------------------------------------------------------------------------
 reg [15:0] refresh_cnt;
@@ -170,11 +203,12 @@ reg        refresh_pending;
 // only raises `busy`) one clock after they are issued.  ST_CMD adds that clock
 // for writes and refreshes; reads wait for `data_ready` anyway.
 // ---------------------------------------------------------------------------
-localparam ST_INIT = 3'd0;
-localparam ST_IDLE = 3'd1;
-localparam ST_CMD  = 3'd2;
-localparam ST_READ = 3'd3;
-localparam ST_WAIT = 3'd4;
+localparam ST_INIT   = 3'd0;
+localparam ST_IDLE   = 3'd1;
+localparam ST_CMD    = 3'd2;
+localparam ST_READ   = 3'd3;
+localparam ST_WAIT   = 3'd4;
+localparam ST_RVREAD = 3'd5;
 
 reg [2:0] st;
 
@@ -191,7 +225,9 @@ wire issue_refresh = (st == ST_IDLE) && !sd_busy && !wr_pending && refresh_pendi
 always @(posedge clk) begin
     sd_rd      <= 1'b0;
     sd_wr      <= 1'b0;
+    sd_wr32    <= 1'b0;
     sd_refresh <= 1'b0;
+    rv_ready   <= 1'b0;
 
     // ---- refresh request -------------------------------------------------
     if (refresh_tick)
@@ -225,6 +261,17 @@ always @(posedge clk) begin
             rom_pending <= 1'b1;
     end
 
+    // ---- softcore request ------------------------------------------------
+    // picorv32 holds rv_valid until it sees rv_ready, so a request is latched
+    // once and the acknowledge pulse ends it.
+    if (rv_valid && !rv_pending && !rv_ready) begin
+        rv_pending <= 1'b1;
+        rv_addr_r  <= rv_addr;
+        rv_wdata_r <= rv_wdata;
+        rv_wstrb_r <= rv_wstrb;
+        rv_is_wr   <= |rv_wstrb;
+    end
+
     // ---- SDRAM command scheduling ---------------------------------------
     case (st)
         ST_INIT: begin
@@ -248,6 +295,19 @@ always @(posedge clk) begin
                 sd_addr <= {rom_addr_r[22:2], 2'b00};
                 sd_rd   <= 1'b1;
                 st      <= ST_READ;
+            end else if (rv_pending) begin
+                sd_addr <= {rv_addr_r[22:2], 2'b00};
+                if (rv_is_wr) begin
+                    sd_din32   <= rv_wdata_r;
+                    sd_wstrb   <= rv_wstrb_r;
+                    sd_wr32    <= 1'b1;
+                    rv_pending <= 1'b0;
+                    rv_ready   <= 1'b1;     // posted write
+                    st         <= ST_CMD;
+                end else begin
+                    sd_rd <= 1'b1;
+                    st    <= ST_RVREAD;
+                end
             end
         end
 
@@ -262,6 +322,15 @@ always @(posedge clk) begin
                 rom_do_r    <= fill_byte;
                 rom_pending <= 1'b0;
                 st          <= ST_WAIT;
+            end
+        end
+
+        ST_RVREAD: begin
+            if (sd_data_ready) begin
+                rv_rdata   <= sd_dout32;
+                rv_pending <= 1'b0;
+                rv_ready   <= 1'b1;
+                st         <= ST_WAIT;
             end
         end
 
@@ -284,6 +353,10 @@ always @(posedge clk) begin
         wr_pending      <= 1'b0;
         refresh_cnt     <= 16'd0;
         refresh_pending <= 1'b0;
+        rv_pending      <= 1'b0;
+        rv_ready        <= 1'b0;
+        rv_rdata        <= 32'd0;
+        rv_is_wr        <= 1'b0;
     end
 end
 

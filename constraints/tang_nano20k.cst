@@ -14,9 +14,11 @@
 IO_LOC  "sys_clk" 4;
 IO_PORT "sys_clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-// on-board push button (active high when pressed)
+// on-board push buttons (active high when pressed)
 IO_LOC  "s1" 88;
 IO_PORT "s1" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "s2" 87;
+IO_PORT "s2" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
 
 // on-board BL616 USB <-> serial bridge
 IO_LOC  "uart_rx" 70;
@@ -30,12 +32,13 @@ IO_PORT "led[0]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
 IO_LOC  "led[1]" 16;
 IO_PORT "led[1]" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
 
-// on-board microSD socket, driven in SD native 1-bit mode (not SPI):
-//   sd_clk   host clock          (output)
-//   sd_cmd   command / response  (bidirectional, tri-stated by the top level)
-//   sd_dat0  data line 0         (input, the only data line used)
-//   sd_dat1..3                   (outputs held high, as the SD spec requires
-//                                 for the unused lines of 1-bit mode)
+// on-board microSD socket, driven in SPI mode (not SD native 1-bit mode):
+//   sd_clk   SCK                  (output, pin 83)
+//   sd_cmd   MOSI  (card CMD)     (output, pin 82)
+//   sd_dat0  MISO  (card DAT0)    (input,  pin 84)
+//   sd_dat3  CS    (card DAT3)    (output, pin 81, held low)
+//   sd_dat1  DAT1                 (output, pin 85, held high as SPI mode wants)
+//   sd_dat2  DAT2                 (output, pin 80, held high)
 // The board already has the pull-ups the card needs, so PULL_MODE=NONE.
 IO_LOC  "sd_clk" 83;
 IO_PORT "sd_clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
@@ -50,6 +53,24 @@ IO_PORT "sd_dat2" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
 IO_LOC  "sd_dat3" 81;
 IO_PORT "sd_dat3" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
 
+// on-board SPI NOR flash, which also holds the FPGA bitstream.  These are the
+// MSPI dual-purpose pins; they are released by the configuration engine once
+// the bitstream has been read, and "Use MSPI as regular IO" must be enabled in
+// the project's dual-purpose pin settings for the placer to accept them.
+// The PicoRV32 firmware image lives at flash offset 0x500000.
+IO_LOC  "flash_spi_cs_n" 60;
+IO_PORT "flash_spi_cs_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "flash_spi_wp_n" 57;
+IO_PORT "flash_spi_wp_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "flash_spi_hold_n" 63;
+IO_PORT "flash_spi_hold_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "flash_spi_miso" 62;    // MSPI_DO
+IO_PORT "flash_spi_miso" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "flash_spi_mosi" 61;    // MSPI_DI
+IO_PORT "flash_spi_mosi" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC  "flash_spi_clk" 59;
+IO_PORT "flash_spi_clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
 // HDMI TX
 IO_LOC "tmds_d_p[0]" 35,36;
 IO_PORT "tmds_d_p[0]" PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
@@ -60,7 +81,10 @@ IO_PORT "tmds_d_p[2]" PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 IO_LOC "tmds_clk_p" 33,34;
 IO_PORT "tmds_clk_p" PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
-// on-board I2S audio amplifier / headphone jack
+// on-board I2S audio amplifier / headphone jack.
+// Pins 54/55/56 are the SSPI dual-purpose pins, so "Use SSPI as regular IO"
+// must be enabled in the project's dual-purpose pin settings or the placer
+// rejects them with PR2017 ("the location is a dedicated pin (SSPI)").
 IO_LOC  "pa_en" 51;
 IO_PORT "pa_en" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
 IO_LOC  "hp_din" 54;

@@ -11,6 +11,19 @@ impl/gao/
 __pycache__/
 *.py[cod]
 
+# Local reference checkouts and IDE state
+.work/
+*.gprj.user
+
+# Firmware and simulation build products
+*.o
+*.elf
+*.elf.list
+*.vcd
+*.vvp
+firmware/firmware.bin
+sim/prog.bin
+sim/prog.hex
 
 # editor / OS noise
 *.bak

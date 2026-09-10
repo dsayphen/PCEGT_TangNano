@@ -1,4 +1,4 @@
-<?xml version="1" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE gowin-fpga-project>
 <Project>
     <Template>FPGA</Template>
@@ -8,13 +8,19 @@
         <File path="rtl/cheatcodes.sv" type="file.verilog" enable="1"/>
         <File path="rtl/tang/dvi_tx.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/i2s_tx.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/font_rom.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/iosys.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/picorv32.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/simplespimaster.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/simpleuart.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/spi_master.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/spiflash.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/textdisp.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/pce_pad.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/pce_sdram_ctrl.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/pll_clocks.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/rom_loader.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/rom_source_arb.v" type="file.verilog" enable="1"/>
-        <File path="rtl/tang/sd/sd_file_reader.v" type="file.verilog" enable="1"/>
-        <File path="rtl/tang/sd_loader.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/sdram.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/snes_gamepad.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/tmds_encoder.v" type="file.verilog" enable="1"/>

@@ -1,0 +1,479 @@
+//
+// IOSys - PicoRV32 based IO subsystem for the Tang Nano 20K PC Engine port.
+//
+// Derived from nand2mario's SNESTang `src/iosys/iosys.v`, tag v0.7
+// (commit df5acd0104d0a6a2c8c22e8e4857baf61d456aaa), which is distributed
+// under the GNU General Public License v3.  The SNES specific parts (ROM
+// header parser, BSRAM window, second joypad, core id switching) have been
+// removed and the ROM loading interface has been reworked to drive the byte
+// oriented SDRAM write port of this project directly, with back pressure.
+//
+// What it does
+// ------------
+//   * a PicoRV32 RV32I softcore runs at clk_sys (43.2 MHz) out of SDRAM
+//   * at power-on FIRMWARE_SIZE bytes are copied from SPI flash
+//     (FIRMWARE_FLASH_ADDR) into the softcore's SDRAM window, then the core
+//     is released from reset
+//   * the firmware mounts the microSD card with FatFs (SD in SPI mode),
+//     draws a menu on the OSD, reads the SNES pad and streams the selected
+//     .PCE file into the HuCard ROM area of the SDRAM
+//
+// Memory map seen by the softcore
+// -------------------------------
+//   0x0000_0000 .. 0x001F_FFFF   RAM (2 MiB, physically SDRAM RV_BASE + a)
+//   0x0200_0000                  OSD character / overlay control
+//   0x0200_0010                  UART clock divider
+//   0x0200_0014                  UART data
+//   0x0200_0020                  SD SPI: transfer one byte
+//   0x0200_0024                  SD SPI: transfer four bytes
+//   0x0200_0030                  ROM load control  (1 = start, 0 = finish)
+//   0x0200_0034                  ROM load data     (4 bytes, little endian)
+//   0x0200_0038                  ROM image size in bytes
+//   0x0200_0040                  joypad, read only
+//   0x0200_0050                  milliseconds since reset, read only
+//   0x0200_0060                  core id, read only
+//
+// ROM description
+// ---------------
+// The size register is decoded exactly like the UART loader (rom_loader.v):
+//
+//   rom_sz     = size >> 16
+//   rom_offset = 512 when (size & 0x3FF) == 0x200, else 0
+//
+// and the image is written to SDRAM from byte 0, copier header included.
+// `rom_loading` stays high until the last byte has really reached the memory
+// array (ld_idle), so the top level cannot start the console too early.
+//
+
+`ifndef PICORV32_REGS
+`ifdef PICORV32_V
+`error "iosys.v must be read before picorv32.v!"
+`endif
+`define PICORV32_REGS picosoc_regs
+`endif
+
+module iosys #(
+    parameter        FREQ                = 43_200_000,
+    parameter [23:0] FIRMWARE_FLASH_ADDR = 24'h50_0000,
+    parameter        FIRMWARE_SIZE       = 128*1024,
+    // base of the softcore's 2 MiB RAM window inside the 8 MiB SDRAM
+    parameter [22:0] RV_BASE             = 23'h40_0000,
+    parameter [31:0] ROM_MAX_SIZE        = 32'h0040_0000,
+    parameter [15:0] CORE_ID             = 16'd3          // 3 = pcetang
+) (
+    input  wire        clk,               // clk_sys, 43.2 MHz
+    input  wire        resetn,
+
+    // ---- OSD, pixel clock domain -----------------------------------------
+    input  wire        clk_pix,
+    input  wire        pix_resetn,
+    input  wire [10:0] osd_x,
+    input  wire [9:0]  osd_y,
+    input  wire        osd_de,
+    output wire        osd_on,
+    output wire [23:0] osd_rgb,
+    output wire        osd_active,        // clk domain copy of the overlay flag
+
+    // ---- controller -------------------------------------------------------
+    // SNES bit order: 0:B 1:Y 2:Select 3:Start 4:Up 5:Down 6:Left 7:Right
+    //                 8:A 9:X 10:L 11:R
+    input  wire [11:0] joy1,
+
+    // ---- HuCard ROM write port (same shape as rom_loader.v) --------------
+    output reg         ld_wr,
+    output reg  [22:0] ld_addr,
+    output reg  [7:0]  ld_data,
+    input  wire        ld_busy,
+    input  wire        ld_idle,
+    output reg         loading,
+    output reg         image_valid,
+    output reg  [7:0]  rom_sz,
+    output reg  [22:0] rom_offset,
+
+    // ---- 32 bit SDRAM port for the softcore ------------------------------
+    output wire        rv_valid,
+    input  wire        rv_ready,
+    output wire [22:0] rv_addr,
+    output wire [31:0] rv_wdata,
+    output wire [3:0]  rv_wstrb,
+    input  wire [31:0] rv_rdata,
+    input  wire        ram_busy,          // high until the SDRAM is initialised
+
+    // ---- SPI flash holding the firmware ----------------------------------
+    output wire        flash_spi_cs_n,
+    input  wire        flash_spi_miso,
+    output wire        flash_spi_mosi,
+    output wire        flash_spi_clk,
+    output wire        flash_spi_wp_n,
+    output wire        flash_spi_hold_n,
+
+    // ---- debug UART -------------------------------------------------------
+    input  wire        uart_rx,
+    output wire        uart_tx,
+
+    // ---- microSD, SPI mode ------------------------------------------------
+    output wire        sd_clk,
+    output wire        sd_mosi,           // card CMD
+    input  wire        sd_miso,           // card DAT0
+    output wire        sd_cs_n            // card DAT3
+);
+
+/* verilator lint_off PINMISSING */
+/* verilator lint_off WIDTHTRUNC */
+
+// ===========================================================================
+// Firmware fetch from SPI flash into the softcore's SDRAM window
+// ===========================================================================
+localparam FW_AW = 21;      // enough for the 2 MiB window
+
+localparam [1:0] FS_IDLE  = 2'd0;
+localparam [1:0] FS_LOAD  = 2'd1;
+localparam [1:0] FS_DRAIN = 2'd2;
+localparam [1:0] FS_DONE  = 2'd3;
+
+reg [1:0]        flash_st;
+reg [FW_AW-1:0]  flash_addr;
+reg [FW_AW-1:0]  flash_wr_addr;
+reg              flash_start;
+reg [7:0]        flash_d;
+reg [3:0]        flash_wstrb;
+reg              flash_wr;
+
+wire flash_loading = (flash_st == FS_LOAD) || (flash_st == FS_DRAIN);
+wire flash_loaded  = (flash_st == FS_DONE);
+
+wire [7:0] flash_dout;
+wire       flash_out_strb;
+
+assign flash_spi_hold_n = 1'b1;
+assign flash_spi_wp_n   = 1'b0;     // read only access, keep write protect on
+
+spiflash #(
+    .ADDR (FIRMWARE_FLASH_ADDR),
+    .LEN  (FIRMWARE_SIZE)
+) u_flash (
+    .clk       (clk),
+    .resetn    (resetn),
+    .ncs       (flash_spi_cs_n),
+    .miso      (flash_spi_miso),
+    .mosi      (flash_spi_mosi),
+    .sck       (flash_spi_clk),
+    .start     (flash_start),
+    .dout      (flash_dout),
+    .dout_strb (flash_out_strb),
+    .busy      ()
+);
+
+// One SPI byte takes 32 clocks and an SDRAM write about 7, so a write can
+// never be overrun.  flash_wr is nevertheless held until rv_ready so that the
+// handshake stays correct while the memory is busy with a refresh, and the
+// last byte is drained before the softcore is released from reset.
+always @(posedge clk) begin
+    if (!resetn) begin
+        flash_st    <= FS_IDLE;
+        flash_addr  <= {FW_AW{1'b0}};
+        flash_wr_addr <= {FW_AW{1'b0}};
+        flash_start <= 1'b0;
+        flash_wr    <= 1'b0;
+        flash_wstrb <= 4'b0000;
+    end else begin
+        flash_start <= 1'b0;
+
+        case (flash_st)
+            FS_IDLE: if (!ram_busy) begin
+                flash_start <= 1'b1;
+                flash_addr  <= {FW_AW{1'b0}};
+                flash_st    <= FS_LOAD;
+            end
+
+            FS_LOAD: begin
+                if (flash_wr && rv_ready)
+                    flash_wr <= 1'b0;
+                if (flash_out_strb) begin
+                    flash_d       <= flash_dout;
+                    flash_wr_addr <= flash_addr;
+                    flash_wr      <= 1'b1;
+                    case (flash_addr[1:0])
+                        2'd0: flash_wstrb <= 4'b0001;
+                        2'd1: flash_wstrb <= 4'b0010;
+                        2'd2: flash_wstrb <= 4'b0100;
+                        2'd3: flash_wstrb <= 4'b1000;
+                    endcase
+                    if (flash_addr == FIRMWARE_SIZE-1)
+                        flash_st <= FS_DRAIN;
+                    else
+                        flash_addr <= flash_addr + 1'b1;
+                end
+            end
+
+            FS_DRAIN: begin
+                if (flash_wr && rv_ready)
+                    flash_wr <= 1'b0;
+                else if (!flash_wr)
+                    flash_st <= FS_DONE;
+            end
+
+            default: ;      // FS_DONE
+        endcase
+    end
+end
+
+// ===========================================================================
+// PicoRV32
+// ===========================================================================
+wire        mem_valid;
+wire        mem_ready;
+wire [31:0] mem_addr;
+wire [31:0] mem_wdata;
+wire [3:0]  mem_wstrb;
+wire [31:0] mem_rdata;
+
+wire ram_sel = mem_valid && (mem_addr[31:21] == 11'd0);
+
+wire textdisp_sel  = mem_valid && (mem_addr == 32'h0200_0000);
+wire uart_div_sel  = mem_valid && (mem_addr == 32'h0200_0010);
+wire uart_dat_sel  = mem_valid && (mem_addr == 32'h0200_0014);
+wire spi_byte_sel  = mem_valid && (mem_addr == 32'h0200_0020);
+wire spi_word_sel  = mem_valid && (mem_addr == 32'h0200_0024);
+wire rl_ctrl_sel   = mem_valid && (mem_addr == 32'h0200_0030);
+wire rl_data_sel   = mem_valid && (mem_addr == 32'h0200_0034);
+wire rl_size_sel   = mem_valid && (mem_addr == 32'h0200_0038);
+wire joy_sel       = mem_valid && (mem_addr == 32'h0200_0040);
+wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
+wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
+
+wire [31:0] uart_div_do;
+wire [31:0] uart_dat_do;
+wire        uart_dat_wait;
+wire [31:0] spi_do;
+wire        spi_wait;
+
+reg  [31:0] time_reg;
+
+// ROM streaming state, declared here because mem_ready depends on it
+reg  [31:0] rl_buf;
+reg  [2:0]  rl_cnt;         // bytes still to be pushed out of rl_buf
+reg  [22:0] rl_addr;
+reg  [31:0] rl_size;
+reg         rl_finishing;
+reg  [19:0] rl_timeout;
+
+// the ROM data register stalls the softcore while the previous word is being
+// pushed into the SDRAM
+wire rl_data_ready = (rl_cnt == 3'd0);
+
+assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
+                   rl_ctrl_sel || rl_size_sel || joy_sel || time_sel || id_sel ||
+                   (rl_data_sel && rl_data_ready) ||
+                   (uart_dat_sel && !uart_dat_wait) ||
+                   ((spi_byte_sel || spi_word_sel) && !spi_wait);
+
+assign mem_rdata = ram_sel      ? rv_rdata :
+                   joy_sel      ? {20'b0, joy1} :
+                   uart_div_sel ? uart_div_do :
+                   uart_dat_sel ? uart_dat_do :
+                   time_sel     ? time_reg :
+                   id_sel       ? {16'b0, CORE_ID} :
+                   (spi_byte_sel || spi_word_sel) ? spi_do :
+                   32'h0000_0000;
+
+picorv32 #(
+    .ENABLE_COUNTERS   (0),
+    .ENABLE_COUNTERS64 (0),
+    .CATCH_MISALIGN    (0),
+    .CATCH_ILLINSN     (0),
+    .TWO_STAGE_SHIFT   (0),
+    .BARREL_SHIFTER    (0),
+    .COMPRESSED_ISA    (0),
+    .ENABLE_MUL        (0),
+    .ENABLE_DIV        (0)
+) u_rv32 (
+    .clk       (clk),
+    .resetn    (resetn & flash_loaded),
+    .mem_valid (mem_valid),
+    .mem_ready (mem_ready),
+    .mem_addr  (mem_addr),
+    .mem_wdata (mem_wdata),
+    .mem_wstrb (mem_wstrb),
+    .mem_rdata (mem_rdata)
+);
+
+// ===========================================================================
+// Peripherals
+// ===========================================================================
+textdisp u_disp (
+    .clk         (clk),
+    .resetn      (resetn),
+    .reg_char_we (textdisp_sel ? mem_wstrb : 4'b0000),
+    .reg_char_di (mem_wdata),
+    .overlay     (osd_active),
+
+    .clk_pix     (clk_pix),
+    .pix_resetn  (pix_resetn),
+    .osd_x       (osd_x),
+    .osd_y       (osd_y),
+    .osd_de      (osd_de),
+    .osd_on      (osd_on),
+    .osd_rgb     (osd_rgb)
+);
+
+simpleuart u_uart (
+    .clk          (clk),
+    .resetn       (resetn),
+    .ser_tx       (uart_tx),
+    .ser_rx       (uart_rx),
+    .reg_div_we   (uart_div_sel ? mem_wstrb : 4'b0000),
+    .reg_div_di   (mem_wdata),
+    .reg_div_do   (uart_div_do),
+    .reg_dat_we   (uart_dat_sel ? mem_wstrb[0] : 1'b0),
+    .reg_dat_re   (uart_dat_sel && !mem_wstrb),
+    .reg_dat_di   (mem_wdata),
+    .reg_dat_do   (uart_dat_do),
+    .reg_dat_wait (uart_dat_wait)
+);
+
+simplespimaster u_spi (
+    .clk         (clk),
+    .resetn      (resetn),
+    .sck         (sd_clk),
+    .mosi        (sd_mosi),
+    .miso        (sd_miso),
+    .reg_byte_we (spi_byte_sel ? mem_wstrb[0] : 1'b0),
+    .reg_word_we (spi_word_sel ? mem_wstrb[0] : 1'b0),
+    .reg_di      (mem_wdata),
+    .reg_do      (spi_do),
+    .reg_wait    (spi_wait)
+);
+
+// the card is kept selected for the whole session, like SNESTang does
+assign sd_cs_n = 1'b0;
+
+// ===========================================================================
+// ROM streaming into the HuCard area of the SDRAM
+// ===========================================================================
+wire rl_size_ok = (rl_size != 32'd0) && (rl_size <= ROM_MAX_SIZE);
+
+always @(posedge clk) begin
+    ld_wr <= 1'b0;
+
+    // ---- accept a word from the softcore ---------------------------------
+    if (rl_data_sel && (mem_wstrb != 4'b0) && rl_data_ready) begin
+        rl_buf <= mem_wdata;
+        rl_cnt <= 3'd4;
+    end
+
+    // ---- push one byte at a time into the SDRAM --------------------------
+    // Addresses beyond the HuCard area are swallowed so that an oversized
+    // file can never reach the softcore's own RAM window.
+    else if (rl_cnt != 3'd0 && !ld_busy && !ld_wr) begin
+        ld_wr   <= (rl_addr < ROM_MAX_SIZE[22:0]);
+        ld_addr <= rl_addr;
+        ld_data <= rl_buf[7:0];
+        rl_buf  <= {8'h00, rl_buf[31:8]};
+        rl_cnt  <= rl_cnt - 3'd1;
+        rl_addr <= rl_addr + 23'd1;
+    end
+
+    // ---- control register -------------------------------------------------
+    if (rl_ctrl_sel && (mem_wstrb != 4'b0)) begin
+        if (mem_wdata[7:0] == 8'd1) begin
+            loading      <= 1'b1;
+            image_valid  <= 1'b0;
+            rl_addr      <= 23'd0;
+            rl_cnt       <= 3'd0;
+            rl_finishing <= 1'b0;
+            rl_timeout   <= 20'd0;
+        end else if (mem_wdata[7:0] == 8'd0) begin
+            rl_finishing <= 1'b1;
+            rl_timeout   <= 20'd0;
+        end
+    end
+
+    if (rl_size_sel && (mem_wstrb != 4'b0))
+        rl_size <= mem_wdata;
+
+    // ---- end of transfer: wait for the SDRAM to really drain -------------
+    if (rl_finishing) begin
+        rl_timeout <= rl_timeout + 20'd1;
+        if ((rl_cnt == 3'd0 && !ld_wr && ld_idle) || (&rl_timeout)) begin
+            rl_finishing <= 1'b0;
+            loading      <= 1'b0;
+            rom_sz       <= rl_size[23:16];
+            rom_offset   <= (rl_size[9:0] == 10'h200) ? 23'd512 : 23'd0;
+            image_valid  <= rl_size_ok;
+        end
+    end
+
+    if (!resetn) begin
+        ld_wr        <= 1'b0;
+        ld_addr      <= 23'd0;
+        ld_data      <= 8'd0;
+        loading      <= 1'b0;
+        image_valid  <= 1'b0;
+        rom_sz       <= 8'd0;
+        rom_offset   <= 23'd0;
+        rl_buf       <= 32'd0;
+        rl_cnt       <= 3'd0;
+        rl_addr      <= 23'd0;
+        rl_size      <= 32'd0;
+        rl_finishing <= 1'b0;
+        rl_timeout   <= 20'd0;
+    end
+end
+
+// ===========================================================================
+// SDRAM port multiplexing: flash loader first, then the softcore
+// ===========================================================================
+assign rv_valid = flash_loading ? flash_wr : (mem_valid & ram_sel);
+assign rv_addr  = flash_loading ? (RV_BASE | {2'b00, flash_wr_addr})
+                                : (RV_BASE | {2'b00, mem_addr[20:0]});
+assign rv_wdata = flash_loading ? {flash_d, flash_d, flash_d, flash_d} : mem_wdata;
+assign rv_wstrb = flash_loading ? flash_wstrb : mem_wstrb;
+
+// ===========================================================================
+// Millisecond counter
+// ===========================================================================
+localparam MS_DIV = FREQ/1000;
+reg [$clog2(MS_DIV)-1:0] time_cnt;
+
+always @(posedge clk) begin
+    if (!resetn) begin
+        time_reg <= 32'd0;
+        time_cnt <= 0;
+    end else begin
+        time_cnt <= time_cnt + 1'b1;
+        if (time_cnt == MS_DIV-1) begin
+            time_cnt <= 0;
+            time_reg <= time_reg + 32'd1;
+        end
+    end
+end
+
+endmodule
+
+
+// ---------------------------------------------------------------------------
+// PicoRV32 register file.  Two asynchronous read ports, one write port, which
+// GowinSynthesis maps onto LUT based distributed RAM.
+// ---------------------------------------------------------------------------
+module picosoc_regs (
+    input  wire        clk,
+    input  wire        wen,
+    input  wire [5:0]  waddr,
+    input  wire [5:0]  raddr1,
+    input  wire [5:0]  raddr2,
+    input  wire [31:0] wdata,
+    output wire [31:0] rdata1,
+    output wire [31:0] rdata2
+);
+
+(* syn_ramstyle = "distributed_ram" *)
+reg [31:0] regs [0:31];
+
+always @(posedge clk)
+    if (wen) regs[waddr[4:0]] <= wdata;
+
+assign rdata1 = regs[raddr1[4:0]];
+assign rdata2 = regs[raddr2[4:0]];
+
+endmodule
