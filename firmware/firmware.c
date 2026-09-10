@@ -2,7 +2,7 @@
 // Firmware for the PicoRV32 IO subsystem of the Tang Nano 20K PC Engine port.
 //
 // It mounts the microSD card with FatFs, shows a file browser on the OSD and
-// streams the .PCE image the user selects into the HuCard ROM area of the
+// streams the .PCE or .SGX image the user selects into the HuCard ROM area of the
 // SDRAM.  Structure and the SD / FatFs plumbing follow nand2mario's SNESTang
 // firmware (tag v0.7, GPLv3); the menu, the ROM loader and the controls are
 // specific to this project.
@@ -13,7 +13,7 @@
 // Controls (SNES pad)
 //   Up / Down     move the selection
 //   Left / Right  previous / next page
-//   A             open a directory or load the highlighted .PCE file
+//   A             open a directory or load the highlighted .PCE/.SGX file
 //   B             go back to the parent directory
 //   Select+Start  bring the menu back over a running game
 //
@@ -59,7 +59,7 @@ static void status(const char *msg) {
 static void title(void) {
     clear_line(ROW_TITLE);
     cursor(1, ROW_TITLE);
-    print("PCEtang - pick a .PCE file");
+    print("PCEtang - pick a ROM");
 }
 
 // Print a string right-truncated to `w` columns starting at column x.
@@ -98,21 +98,22 @@ static void message(const char *l1, const char *l2) {
 }
 
 // ---------------------------------------------------------------------------
-// .PCE filter
+// PC Engine / SuperGrafx ROM filter
 // ---------------------------------------------------------------------------
-static int is_pce(const char *name) {
+static int is_rom(const char *name) {
     int n = (int)strlen(name);
     if (n < 5)
         return 0;
-    return strcasecmp(name + n - 4, ".pce") == 0;
+    return strcasecmp(name + n - 4, ".pce") == 0 ||
+           strcasecmp(name + n - 4, ".sgx") == 0;
 }
 
 // ---------------------------------------------------------------------------
 // Directory listing
 //
 // Fills names[] / is_dir[] / sizes[] with up to `len` entries starting at
-// `start`, counting only the entries the menu shows (directories and .PCE
-// files).  *count receives the total number of such entries.
+// `start`, counting only the entries the menu shows (directories and .PCE or
+// .SGX files).  *count receives the total number of such entries.
 // Returns 0 on success.
 // ---------------------------------------------------------------------------
 static int load_dir(const char *dir, int start, int len, int *count) {
@@ -133,7 +134,7 @@ static int load_dir(const char *dir, int start, int len, int *count) {
             break;
         if (fno.fattrib & (AM_HID | AM_SYS))
             continue;
-        if (!(fno.fattrib & AM_DIR) && !is_pce(fno.fname))
+        if (!(fno.fattrib & AM_DIR) && !is_rom(fno.fname))
             continue;
 
         if (idx >= start && page_len < len) {
@@ -266,7 +267,7 @@ static void draw_page(int page, int total, int active) {
     clear_line(ROW_STATUS);
     cursor(1, ROW_STATUS);
     if (total == 0)
-        print("No .PCE files here");
+        print("No .PCE/.SGX files here");
     else
         printf("Page %d/%d  A=open B=back", page + 1, pages);
 }
