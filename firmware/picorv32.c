@@ -30,6 +30,10 @@ int overlay_status(void) {
     return overlay_on;
 }
 
+void selection_row(int y) {
+    reg_textdisp = 0x03000000 | ((uint32_t)(y & 31) << 8);
+}
+
 int putchar(int c) {
     if (c == '\n') {
         curx = 0;

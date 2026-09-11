@@ -89,6 +89,7 @@ module iosys #(
     output reg         image_valid,
     output reg  [7:0]  rom_sz,
     output reg  [22:0] rom_offset,
+    output reg         sgx_mode,
 
     // ---- 32 bit SDRAM port for the softcore ------------------------------
     output wire        rv_valid,
@@ -376,9 +377,10 @@ always @(posedge clk) begin
 
     // ---- control register -------------------------------------------------
     if (rl_ctrl_sel && (mem_wstrb != 4'b0)) begin
-        if (mem_wdata[7:0] == 8'd1) begin
+        if (mem_wdata[0]) begin
             loading      <= 1'b1;
             image_valid  <= 1'b0;
+            sgx_mode     <= mem_wdata[1];
             rl_addr      <= 23'd0;
             rl_cnt       <= 3'd0;
             rl_finishing <= 1'b0;
@@ -412,6 +414,7 @@ always @(posedge clk) begin
         image_valid  <= 1'b0;
         rom_sz       <= 8'd0;
         rom_offset   <= 23'd0;
+        sgx_mode     <= 1'b0;
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;

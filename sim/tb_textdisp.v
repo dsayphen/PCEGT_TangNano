@@ -99,8 +99,8 @@ task expect_pixel;
 endtask
 
 // font8x8_basic 'A' rows: 0C 1E 33 33 3F 33 33 00 (bit 0 = leftmost)
-localparam [23:0] TEXT   = 24'hE0_E0_20;
-localparam [23:0] CURSOR = 24'hFF_A0_20;
+localparam [23:0] TEXT   = 24'hA0_A0_A0;
+localparam [23:0] CURSOR = 24'hFF_FF_FF;
 localparam [23:0] BACK   = 24'h00_00_00;
 
 initial begin
@@ -114,6 +114,7 @@ initial begin
     // 'A' at column 5, row 3 and '>' (0x3E) in the cursor column of row 3
     wr(32'h0000_0000 | (5 << 16) | (3 << 8) | "A");
     wr(32'h0000_0000 | (0 << 16) | (3 << 8) | ">");
+    wr(32'h0300_0000 | (3 << 8));       // command 3 = select row 3
     // a glyph in the last legal cell
     wr(32'h0000_0000 | (31 << 16) | (19 << 8) | "Z");
     // a write outside the plane must be ignored
@@ -124,18 +125,18 @@ initial begin
     // ---- 'A' at column 5, row 3 -----------------------------------------
     // cell origin: x = 64 + 5*16 = 144, y = 80 + 3*16 = 128
     // font row 0 = 8'h0C -> bits 2 and 3 set -> font x 2..3 -> screen x 148..151
-    expect_pixel(144 + 4, 128 + 0, TEXT, "'A' row0 set pixel");
+    expect_pixel(144 + 4, 128 + 0, CURSOR, "'A' selected row pixel");
     expect_pixel(144 + 0, 128 + 0, BACK, "'A' row0 clear pixel");
     // font row 2 = 8'h33 -> bits 0,1,4,5 -> screen x 144..147 and 160..163
-    expect_pixel(144 + 0, 128 + 4, TEXT, "'A' row2 left stroke");
-    expect_pixel(144 + 8, 128 + 4, TEXT, "'A' right stroke");
+    expect_pixel(144 + 0, 128 + 4, CURSOR, "'A' row2 left stroke");
+    expect_pixel(144 + 8, 128 + 4, CURSOR, "'A' right stroke");
     // 2x vertical scaling: rows 4 and 5 of the screen are font row 2
-    expect_pixel(144 + 0, 128 + 5, TEXT, "'A' row2 doubled");
+    expect_pixel(144 + 0, 128 + 5, CURSOR, "'A' row2 doubled");
 
-    // ---- selection column ------------------------------------------------
+    // ---- selected row ----------------------------------------------------
     // '>' is 0x3E: rows 06 0C 18 30 18 0C 06 00
     // row 1 = 0x0C -> bits 2,3 -> screen x 64+4 .. 64+7
-    expect_pixel(64 + 4, 128 + 2, CURSOR, "cursor column colour");
+    expect_pixel(64 + 4, 128 + 2, CURSOR, "selected row marker colour");
 
     // ---- last cell --------------------------------------------------------
     // 'Z' = 0x5A, row 0 = 0x3F -> bits 0..5 set

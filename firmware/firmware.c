@@ -108,6 +108,11 @@ static int is_rom(const char *name) {
            strcasecmp(name + n - 4, ".sgx") == 0;
 }
 
+static int is_sgx(const char *name) {
+    int n = (int)strlen(name);
+    return n >= 5 && strcasecmp(name + n - 4, ".sgx") == 0;
+}
+
 // ---------------------------------------------------------------------------
 // Directory listing
 //
@@ -187,7 +192,7 @@ static int load_rom(const char *fname, uint32_t size) {
     uart_printf("loading %s, %d bytes\n", path_buf, (int)size);
 
     // holds the PC Engine in reset and publishes the image description
-    pce_load_start(size);
+    pce_load_start(size, is_sgx(fname));
 
     while (total < size) {
         UINT want = (UINT)((size - total) > sizeof(io_buf) ? sizeof(io_buf)
@@ -260,6 +265,7 @@ static void draw_page(int page, int total, int active) {
             putchar(' ');
         print_field(2, y, names[i], OSD_COLS - 2);
     }
+    selection_row(page_len ? ROW_FIRST + active : 31);
 
     int pages = (total + PAGESIZE - 1) / PAGESIZE;
     if (pages < 1)
@@ -277,6 +283,7 @@ static void move_cursor(int old_i, int new_i) {
     putchar(' ');
     cursor(0, ROW_FIRST + new_i);
     putchar('>');
+    selection_row(ROW_FIRST + new_i);
 }
 
 // Runs the browser until a ROM has been loaded.

@@ -33,7 +33,8 @@
 //
 // Register interface (one 32 bit write per character, mirrors SNESTang):
 //
-//   [25:24]  command  0 = write character, 1 = overlay on, 2 = overlay off
+//   [25:24]  command  0 = write character, 1 = overlay on, 2 = overlay off,
+//                        3 = select row
 //   [20:16]  x   0..31
 //   [12:8]   y   0..19
 //   [7:0]    character (0x20..0x7F, anything else prints as '?')
@@ -46,8 +47,8 @@ module textdisp #(
     parameter Y0     = 80,      // top edge of the text area, in pixels
     // 8:8:8 colours
     parameter [23:0] COLOR_BACK   = 24'h00_00_00,
-    parameter [23:0] COLOR_TEXT   = 24'hE0_E0_20,
-    parameter [23:0] COLOR_CURSOR = 24'hFF_A0_20
+    parameter [23:0] COLOR_TEXT   = 24'hA0_A0_A0,
+    parameter [23:0] COLOR_CURSOR = 24'hFF_FF_FF
 ) (
     // ---- softcore side -----------------------------------------------
     input  wire        clk,
@@ -99,15 +100,18 @@ always @(posedge clk)
 
 // overlay enable, owned by the clk domain
 reg overlay_r = 1'b1;
+reg [4:0] selected_row = 5'd31;
 assign overlay = overlay_r;
 
 always @(posedge clk) begin
     if (!resetn) begin
         overlay_r <= 1'b1;
+        selected_row <= 5'd31;
     end else if (reg_char_we[0]) begin
         case (cmd)
             2'd1: overlay_r <= 1'b1;
             2'd2: overlay_r <= 1'b0;
+            2'd3: selected_row <= text_y;
             default: ;
         endcase
     end
@@ -147,7 +151,7 @@ always @(posedge clk_pix) begin
     s0_de     <= osd_de;
     s0_xoff   <= tx[2:0];
     s0_yoff   <= ty[2:0];
-    s0_cursor <= (tx[7:3] == 5'd0);         // column 0 holds the selection mark
+    s0_cursor <= (ty[7:3] == selected_row);
     s0_char   <= char_rdata;
 end
 

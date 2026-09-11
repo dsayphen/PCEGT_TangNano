@@ -14,30 +14,35 @@ always #11.574 clk = ~clk;
 reg        rv_ld_wr = 0, rv_loading = 0, rv_image_valid = 0;
 reg [22:0] rv_ld_addr = 0, rv_rom_offset = 0;
 reg [7:0]  rv_ld_data = 0, rv_rom_sz = 0;
+reg        rv_sgx_mode = 0;
 wire       rv_ld_busy;
 
 reg        ua_ld_wr = 0, ua_loading = 0, ua_image_valid = 0;
 reg [22:0] ua_ld_addr = 0, ua_rom_offset = 0;
 reg [7:0]  ua_ld_data = 0, ua_rom_sz = 0;
+reg        ua_sgx_mode = 0;
 wire       ua_ld_busy;
 
 wire        ld_wr;
 wire [22:0] ld_addr, rom_offset;
 wire [7:0]  ld_data, rom_sz;
 reg         ld_busy = 0;
-wire        loading, image_valid, own_uart;
+wire        loading, image_valid, own_uart, sgx_mode;
 
 rom_source_arb dut (
     .clk(clk), .resetn(resetn),
     .rv_ld_wr(rv_ld_wr), .rv_ld_addr(rv_ld_addr), .rv_ld_data(rv_ld_data),
     .rv_loading(rv_loading), .rv_image_valid(rv_image_valid),
-    .rv_rom_sz(rv_rom_sz), .rv_rom_offset(rv_rom_offset), .rv_ld_busy(rv_ld_busy),
+    .rv_rom_sz(rv_rom_sz), .rv_rom_offset(rv_rom_offset),
+    .rv_sgx_mode(rv_sgx_mode), .rv_ld_busy(rv_ld_busy),
     .ua_ld_wr(ua_ld_wr), .ua_ld_addr(ua_ld_addr), .ua_ld_data(ua_ld_data),
     .ua_loading(ua_loading), .ua_image_valid(ua_image_valid),
-    .ua_rom_sz(ua_rom_sz), .ua_rom_offset(ua_rom_offset), .ua_ld_busy(ua_ld_busy),
+    .ua_rom_sz(ua_rom_sz), .ua_rom_offset(ua_rom_offset),
+    .ua_sgx_mode(ua_sgx_mode), .ua_ld_busy(ua_ld_busy),
     .ld_wr(ld_wr), .ld_addr(ld_addr), .ld_data(ld_data), .ld_busy(ld_busy),
     .loading(loading), .image_valid(image_valid),
-    .rom_sz(rom_sz), .rom_offset(rom_offset), .own_uart_o(own_uart)
+    .rom_sz(rom_sz), .rom_offset(rom_offset), .sgx_mode(sgx_mode),
+    .own_uart_o(own_uart)
 );
 
 integer errors = 0;
@@ -94,12 +99,13 @@ initial begin
     chk(ld_wr === 1'b1 && ld_data === 8'hAA, "softcore write reaches the port");
     @(posedge clk);
     rv_ld_wr <= 0; rv_loading <= 0; rv_image_valid <= 1; rv_rom_sz <= 8'h08;
-    rv_rom_offset <= 23'd512;
+    rv_rom_offset <= 23'd512; rv_sgx_mode <= 1'b1;
     @(posedge clk);
     @(posedge clk);
     chk(loading === 1'b0, "loading cleared");
     chk(image_valid === 1'b1 && rom_sz === 8'h08 && rom_offset === 23'd512,
         "menu image description published");
+    chk(sgx_mode === 1'b1, "menu SGX mode published");
 
     // ---- the UART takes over ---------------------------------------------
     @(posedge clk);
@@ -117,12 +123,14 @@ initial begin
     @(posedge clk);
     ua_ld_wr <= 0; rv_ld_wr <= 0;
     ua_loading <= 0; ua_image_valid <= 1; ua_rom_sz <= 8'h10; ua_rom_offset <= 23'd0;
+    ua_sgx_mode <= 1'b0;
     rv_image_valid <= 1; rv_rom_sz <= 8'h08; rv_rom_offset <= 23'd512;
     @(posedge clk);
     @(posedge clk);
     chk(own_uart === 1'b1, "the UART keeps ownership after its transfer");
     chk(rom_sz === 8'h10 && rom_offset === 23'd0 && image_valid === 1'b1,
         "UART image description stays published");
+    chk(sgx_mode === 1'b0, "UART defaults to PCE mode");
 
     // ---- and the menu can take it back -----------------------------------
     @(posedge clk);

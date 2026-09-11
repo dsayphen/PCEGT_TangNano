@@ -464,9 +464,13 @@ task read_vram;
     input [15:0] a;
     input [15:0] want;
     begin
-        @(posedge clk);
+        @(negedge clk);
         vram_addr <= a;
         vram_rd   <= 1'b1;
+        clkref    <= 1'b1;
+        @(posedge clk);
+        @(negedge clk);
+        clkref <= 1'b0;
         repeat (12) @(posedge clk);
         if (vram_dout !== want) begin
             $display("FAIL vram[%0h] = %h, expected %h",

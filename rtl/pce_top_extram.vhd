@@ -151,7 +151,7 @@ signal CPU_ROM_SEL_N	: std_logic;
 
 -- RAM signals
 signal RAM_DO			: std_logic_vector(7 downto 0);
-signal RAM_A			: std_logic_vector(12 downto 0);
+signal RAM_A			: std_logic_vector(14 downto 0);
 
 signal CPU_PRAM_SEL_N: std_logic;
 
@@ -222,7 +222,7 @@ component CODES is
 end component;
 
 signal VCE_HSYNC_F, VCE_HSYNC_R, VCE_VSYNC_F, VCE_VSYNC_R: std_logic;
-signal CLR_A	   : std_logic_vector(12 downto 0);
+signal CLR_A	   : std_logic_vector(14 downto 0);
 signal CLR_WE		: std_logic;
 
 signal VDC0_BORDER: std_logic;
@@ -684,7 +684,7 @@ end process;
 
 CPU_PRAM_SEL_N <= CPU_A(20) or not CPU_A(19) or not ROM_POP;
 
-RAM : entity work.dpram generic map (13,8)
+RAM : entity work.dpram generic map (15,8)
 port map (
 	clock		=> CLK,
 	address_a=> RAM_A,
@@ -697,9 +697,9 @@ port map (
 	wren_b	=> CLR_WE
 );
 
-INT_RAM_SEL <= '1' when USE_INTERNAL_RAM /= 0 and CPU_RAM_SEL_N = '0' and (SGX = '0' or CPU_A(14 downto 13) = "00") else '0';
+INT_RAM_SEL <= '1' when USE_INTERNAL_RAM /= 0 and CPU_RAM_SEL_N = '0' else '0';
 --
-RAM_A(12 downto 0)  <= CPU_A(12 downto 0);
+RAM_A <= CPU_A(14 downto 0) when SGX = '1' else "00" & CPU_A(12 downto 0);
 
 -- Backup RAM
 BRM_A <= CPU_A(10 downto 0);

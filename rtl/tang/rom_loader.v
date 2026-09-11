@@ -47,6 +47,7 @@ module rom_loader #(
     output reg         image_valid,
     output reg  [7:0]  rom_sz,
     output reg  [22:0] rom_offset,
+    output reg         sgx_mode,
     output reg         rx_activity      // toggles on every received byte
 );
 
@@ -183,6 +184,7 @@ always @(posedge clk) begin
         image_valid <= 1'b0;
         rom_sz      <= 8'd0;
         rom_offset  <= 23'd0;
+        sgx_mode    <= 1'b0;
         rx_activity <= 1'b0;
     end
 end
