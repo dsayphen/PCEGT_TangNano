@@ -517,7 +517,7 @@ pce_pad u_joy (
 );
 
 // ===========================================================================
-// Video: genlocked line doubler + OSD overlay + DVI transmitter
+// Video: genlocked line doubler + OSD overlay + HDMI transmitter
 // ===========================================================================
 wire [7:0] vga_r, vga_g, vga_b;
 wire       vga_hs, vga_vs, vga_de;
