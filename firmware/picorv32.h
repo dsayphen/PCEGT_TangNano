@@ -68,6 +68,7 @@ void clear(void);
 void clear_line(int y);
 void overlay(int on);
 int  overlay_status(void);
+void selection_row(int y);
 
 // ---- debug UART -----------------------------------------------------------
 void uart_init(int clkdiv);
@@ -97,8 +98,8 @@ uint8_t sd_send_command(uint8_t cmd, uint32_t arg);
 int     sd_readsector(uint32_t sector, uint8_t *buffer, uint32_t sector_count);
 
 // ---- ROM streaming to the PC Engine --------------------------------------
-static inline void pce_load_start(uint32_t size_bytes) {
-    reg_romload_ctrl = 1;
+static inline void pce_load_start(uint32_t size_bytes, int sgx) {
+    reg_romload_ctrl = 1 | (sgx ? 2 : 0);
     reg_romload_size = size_bytes;
 }
 static inline void pce_load_word(uint32_t w) {

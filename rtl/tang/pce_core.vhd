@@ -36,6 +36,7 @@ entity pce_core is
 		rom_a      : out std_logic_vector(21 downto 0);
 		rom_do     : in  std_logic_vector(7 downto 0);
 		rom_sz     : in  std_logic_vector(7 downto 0);
+		sgx_mode   : in  std_logic;
 
 		-- VDC0 video RAM (external SDRAM)
 		vram0_a    : out std_logic_vector(15 downto 0);
@@ -91,7 +92,7 @@ architecture rtl of pce_core is
 
 begin
 
-    sgx_i <= '1' when SGX_SUPPORT /= 0 else '0';
+    sgx_i <= sgx_mode when SGX_SUPPORT /= 0 else '0';
 
 	CORE : entity work.pce_top
 	generic map (

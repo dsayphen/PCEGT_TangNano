@@ -250,8 +250,6 @@ reg  [14:0] vram_addr_r;
 reg  [15:0] vram_din_r;
 reg         vram_we_r;
 wire [15:0] vram_dout_mem;
-reg  [1:0]  vram_ack_sync;
-reg  [15:0] vram_addr_seen;
 reg         clkref_d;
 reg         vram_rd_d;
 reg         vram_we_d;
@@ -259,30 +257,30 @@ reg         vram_we_d;
 assign vram_dout = vram_addr[15] ? 16'd0 : vram_dout_mem;
 
 always @(posedge clk) begin
+    if (!resetn)
+        clkref_d       <= 1'b0;
+    else
+        clkref_d       <= clkref;
+end
+
+always @(posedge clk_mem) begin
     if (!resetn) begin
         vram_req       <= 1'b0;
-        vram_ack_sync  <= 2'b00;
         vram_addr_r    <= 15'd0;
         vram_din_r     <= 16'd0;
         vram_we_r      <= 1'b0;
-        vram_addr_seen <= 16'hffff;
-        clkref_d       <= 1'b0;
         vram_rd_d      <= 1'b0;
         vram_we_d      <= 1'b0;
     end else begin
-        vram_ack_sync <= {vram_ack_sync[0], vram_ack};
-        clkref_d  <= clkref;
-        vram_rd_d <= vram_rd;
+        vram_rd_d <= vram_rd && clkref_d;
         vram_we_d <= vram_we;
+        vram_din_r <= vram_din;
 
-        if (vram_req == vram_ack_sync[1] && !vram_addr[15] &&
-            ((vram_we && (!vram_we_d || vram_addr != vram_addr_seen)) ||
-             (vram_rd && (clkref_d || !vram_rd_d ||
-                          vram_addr != vram_addr_seen)))) begin
+        if (vram_req == vram_ack && !vram_addr[15] &&
+            ((!vram_we_d && vram_we) ||
+             (!vram_rd_d && vram_rd && clkref_d))) begin
             vram_addr_r    <= vram_addr[14:0];
-            vram_din_r     <= vram_din;
             vram_we_r      <= vram_we;
-            vram_addr_seen <= vram_addr;
             vram_req       <= ~vram_req;
         end
     end
@@ -294,37 +292,29 @@ reg  [14:0] vram1_addr_r;
 reg  [15:0] vram1_din_r;
 reg         vram1_we_r;
 wire [15:0] vram1_dout_mem;
-reg  [1:0]  vram1_ack_sync;
-reg  [15:0] vram1_addr_seen;
 reg         vram1_rd_d;
 reg         vram1_we_d;
 
 assign vram1_dout = vram1_addr[15] ? 16'd0 : vram1_dout_mem;
 
-always @(posedge clk) begin
+always @(posedge clk_mem) begin
     if (!resetn) begin
         vram1_req       <= 1'b0;
-        vram1_ack_sync  <= 2'b00;
         vram1_addr_r    <= 15'd0;
         vram1_din_r     <= 16'd0;
         vram1_we_r      <= 1'b0;
-        vram1_addr_seen <= 16'hffff;
         vram1_rd_d      <= 1'b0;
         vram1_we_d      <= 1'b0;
     end else begin
-        vram1_ack_sync <= {vram1_ack_sync[0], vram1_ack};
-        vram1_rd_d <= vram1_rd;
+        vram1_rd_d <= vram1_rd && clkref_d;
         vram1_we_d <= vram1_we;
+        vram1_din_r <= vram1_din;
 
-        if (vram1_req == vram1_ack_sync[1] && !vram1_addr[15] &&
-            ((vram1_we && (!vram1_we_d ||
-                           vram1_addr != vram1_addr_seen)) ||
-             (vram1_rd && (clkref_d || !vram1_rd_d ||
-                           vram1_addr != vram1_addr_seen)))) begin
+        if (vram1_req == vram1_ack && !vram1_addr[15] &&
+            ((!vram1_we_d && vram1_we) ||
+             (!vram1_rd_d && vram1_rd && clkref_d))) begin
             vram1_addr_r    <= vram1_addr[14:0];
-            vram1_din_r     <= vram1_din;
             vram1_we_r      <= vram1_we;
-            vram1_addr_seen <= vram1_addr;
             vram1_req       <= ~vram1_req;
         end
     end

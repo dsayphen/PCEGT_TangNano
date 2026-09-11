@@ -170,6 +170,7 @@ wire        loading;
 wire        image_valid;
 wire [7:0]  rom_sz;
 wire [22:0] rom_offset;
+wire        sgx_mode;
 
 // ---- softcore / menu ------------------------------------------------------
 wire        rv_ld_wr;
@@ -180,6 +181,7 @@ wire        rv_loading;
 wire        rv_image_valid;
 wire [7:0]  rv_rom_sz;
 wire [22:0] rv_rom_offset;
+wire        rv_sgx_mode;
 
 wire        rv_valid;
 wire        rv_ready;
@@ -211,7 +213,7 @@ iosys #(
     .RV_BASE             (23'h40_0000)
 ) u_iosys (
     .clk              (clk_sys),
-    .resetn           (sys_resetn & ~btn_reset),
+    .resetn           (sys_resetn),
 
     .clk_pix          (clk_pix),
     .pix_resetn       (pix_resetn),
@@ -233,6 +235,7 @@ iosys #(
     .image_valid      (rv_image_valid),
     .rom_sz           (rv_rom_sz),
     .rom_offset       (rv_rom_offset),
+    .sgx_mode         (rv_sgx_mode),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -267,6 +270,7 @@ wire        ua_loading;
 wire        ua_image_valid;
 wire [7:0]  ua_rom_sz;
 wire [22:0] ua_rom_offset;
+wire        ua_sgx_mode;
 
 rom_loader #(
     .CLK_FREQ  (CLK_SYS_HZ),
@@ -283,6 +287,7 @@ rom_loader #(
     .image_valid (ua_image_valid),
     .rom_sz      (ua_rom_sz),
     .rom_offset  (ua_rom_offset),
+    .sgx_mode    (ua_sgx_mode),
     .rx_activity ()
 );
 
@@ -298,6 +303,7 @@ rom_source_arb u_arb (
     .rv_image_valid (rv_image_valid),
     .rv_rom_sz      (rv_rom_sz),
     .rv_rom_offset  (rv_rom_offset),
+    .rv_sgx_mode    (rv_sgx_mode),
     .rv_ld_busy     (rv_ld_busy),
 
     .ua_ld_wr       (ua_ld_wr),
@@ -307,6 +313,7 @@ rom_source_arb u_arb (
     .ua_image_valid (ua_image_valid),
     .ua_rom_sz      (ua_rom_sz),
     .ua_rom_offset  (ua_rom_offset),
+    .ua_sgx_mode    (ua_sgx_mode),
     .ua_ld_busy     (ua_ld_busy),
 
     .ld_wr          (ld_wr),
@@ -317,6 +324,7 @@ rom_source_arb u_arb (
     .image_valid    (image_valid),
     .rom_sz         (rom_sz),
     .rom_offset     (rom_offset),
+    .sgx_mode       (sgx_mode),
     .own_uart_o     ()
 );
 
@@ -444,6 +452,7 @@ pce_core #(
     .rom_a      (rom_a),
     .rom_do     (rom_do),
     .rom_sz     (rom_sz),
+    .sgx_mode   (sgx_mode),
 
     .vram0_a    (vram0_a),
     .vram0_do   (vram0_do),

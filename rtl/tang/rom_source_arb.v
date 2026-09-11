@@ -46,6 +46,7 @@ module rom_source_arb (
     input  wire        rv_image_valid,
     input  wire [7:0]  rv_rom_sz,
     input  wire [22:0] rv_rom_offset,
+    input  wire        rv_sgx_mode,
     output wire        rv_ld_busy,
 
     // ---- UART loader -----------------------------------------------------
@@ -56,6 +57,7 @@ module rom_source_arb (
     input  wire        ua_image_valid,
     input  wire [7:0]  ua_rom_sz,
     input  wire [22:0] ua_rom_offset,
+    input  wire        ua_sgx_mode,
     output wire        ua_ld_busy,
 
     // ---- aggregate -------------------------------------------------------
@@ -67,6 +69,7 @@ module rom_source_arb (
     output wire        image_valid,
     output wire [7:0]  rom_sz,
     output wire [22:0] rom_offset,
+    output wire        sgx_mode,
     output wire        own_uart_o      // 0 = softcore owns, 1 = UART owns
 );
 
@@ -87,6 +90,7 @@ assign loading     = own_uart_next ? ua_loading     : rv_loading;
 assign image_valid = own_uart_next ? ua_image_valid : rv_image_valid;
 assign rom_sz      = own_uart_next ? ua_rom_sz      : rv_rom_sz;
 assign rom_offset  = own_uart_next ? ua_rom_offset  : rv_rom_offset;
+assign sgx_mode    = own_uart_next ? ua_sgx_mode    : rv_sgx_mode;
 
 assign rv_ld_busy  = own_uart_next ? 1'b1 : ld_busy;
 assign ua_ld_busy  = own_uart_next ? ld_busy : 1'b1;
