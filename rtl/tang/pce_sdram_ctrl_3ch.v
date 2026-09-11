@@ -541,7 +541,16 @@ always @(posedge clk) begin
                 default: ;
             endcase
         end else if (init_done) begin
-            if (clkref && !clkref_r && !refresh_window && !refresh_block)
+            // Only a refresh command actually in flight (refresh_block) may
+            // delay resyncing the phase counter to the dot clock. Blocking
+            // on refresh_window itself (asserted for the whole vblank/reset
+            // window, not just the refresh cycle) let the schedule free-run
+            // out of phase with clkref for many dot clocks in a row, causing
+            // VDC0 to sample stale/wrong-window VRAM data - the root cause
+            // of the sprite/tile corruption seen whenever refresh_window was
+            // asserted during a VRAM access (confirmed in
+            // sim/tb_sprite_stream.v).
+            if (clkref && !clkref_r && !refresh_block)
                 cycle <= 3'd1;
             else
                 cycle <= cycle + 3'd1;
