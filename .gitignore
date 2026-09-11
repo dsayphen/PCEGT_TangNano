@@ -24,6 +24,8 @@ __pycache__/
 firmware/firmware.bin
 sim/prog.bin
 sim/prog.hex
+sim/roms/*.pce
+sim/roms/*.sgx
 
 # editor / OS noise
 *.bak

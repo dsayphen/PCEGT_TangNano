@@ -250,18 +250,11 @@ reg  [14:0] vram_addr_r;
 reg  [15:0] vram_din_r;
 reg         vram_we_r;
 wire [15:0] vram_dout_mem;
-reg         clkref_d;
+reg  [15:0] vram_addr_seen;
 reg         vram_rd_d;
 reg         vram_we_d;
 
 assign vram_dout = vram_addr[15] ? 16'd0 : vram_dout_mem;
-
-always @(posedge clk) begin
-    if (!resetn)
-        clkref_d       <= 1'b0;
-    else
-        clkref_d       <= clkref;
-end
 
 always @(posedge clk_mem) begin
     if (!resetn) begin
@@ -269,18 +262,20 @@ always @(posedge clk_mem) begin
         vram_addr_r    <= 15'd0;
         vram_din_r     <= 16'd0;
         vram_we_r      <= 1'b0;
+        vram_addr_seen <= 16'hffff;
         vram_rd_d      <= 1'b0;
         vram_we_d      <= 1'b0;
     end else begin
-        vram_rd_d <= vram_rd && clkref_d;
+        vram_rd_d <= vram_rd;
         vram_we_d <= vram_we;
-        vram_din_r <= vram_din;
 
-        if (vram_req == vram_ack && !vram_addr[15] &&
-            ((!vram_we_d && vram_we) ||
-             (!vram_rd_d && vram_rd && clkref_d))) begin
+        if (!vram_addr[15] &&
+            ((vram_we && (!vram_we_d || vram_addr != vram_addr_seen)) ||
+             (vram_rd && (!vram_rd_d || vram_addr != vram_addr_seen)))) begin
             vram_addr_r    <= vram_addr[14:0];
+            vram_din_r     <= vram_din;
             vram_we_r      <= vram_we;
+            vram_addr_seen <= vram_addr;
             vram_req       <= ~vram_req;
         end
     end
@@ -292,6 +287,7 @@ reg  [14:0] vram1_addr_r;
 reg  [15:0] vram1_din_r;
 reg         vram1_we_r;
 wire [15:0] vram1_dout_mem;
+reg  [15:0] vram1_addr_seen;
 reg         vram1_rd_d;
 reg         vram1_we_d;
 
@@ -303,18 +299,20 @@ always @(posedge clk_mem) begin
         vram1_addr_r    <= 15'd0;
         vram1_din_r     <= 16'd0;
         vram1_we_r      <= 1'b0;
+        vram1_addr_seen <= 16'hffff;
         vram1_rd_d      <= 1'b0;
         vram1_we_d      <= 1'b0;
     end else begin
-        vram1_rd_d <= vram1_rd && clkref_d;
+        vram1_rd_d <= vram1_rd;
         vram1_we_d <= vram1_we;
-        vram1_din_r <= vram1_din;
 
-        if (vram1_req == vram1_ack && !vram1_addr[15] &&
-            ((!vram1_we_d && vram1_we) ||
-             (!vram1_rd_d && vram1_rd && clkref_d))) begin
+        if (!vram1_addr[15] &&
+            ((vram1_we && (!vram1_we_d || vram1_addr != vram1_addr_seen)) ||
+             (vram1_rd && (!vram1_rd_d || vram1_addr != vram1_addr_seen)))) begin
             vram1_addr_r    <= vram1_addr[14:0];
+            vram1_din_r     <= vram1_din;
             vram1_we_r      <= vram1_we;
+            vram1_addr_seen <= vram1_addr;
             vram1_req       <= ~vram1_req;
         end
     end
@@ -544,7 +542,7 @@ always @(posedge clk) begin
             endcase
         end else if (init_done) begin
             if (clkref && !clkref_r && !refresh_window && !refresh_block)
-                cycle <= 3'd0;
+                cycle <= 3'd1;
             else
                 cycle <= cycle + 3'd1;
 
@@ -566,8 +564,6 @@ always @(posedge clk) begin
                     cmd           <= CMD_REFRESH;
                     refresh_block <= 1'b1;
                     refresh_turn  <= 1'b0;
-                    we_latch[0]   <= 1'b0;
-                    oe_latch[0]   <= 1'b0;
                 end else begin
                     refresh_turn <= 1'b1;
                 end
@@ -623,7 +619,6 @@ always @(posedge clk) begin
                     oe_latch[2] <= 1'b0;
                 end
 
-                // Loader writes use the otherwise idle VDC0 command slot.
                 if (active[0] && we_latch[0] &&
                     vram_req == vram_ack) begin
                     host_cas_done <= 1'b1;
@@ -676,7 +671,8 @@ always @(posedge clk) begin
             end
 
             // Host read CAS at cycle 5.
-            if (cycle == 3'd5 && active[0] && !we_latch[0]) begin
+            if (cycle == 3'd5 && active[0] && !we_latch[0] &&
+                !host_cas_done) begin
                 host_cas_done <= 1'b1;
                 cmd           <= CMD_READ;
                 addr_out      <= {3'b100, addr_latch[0][9:2]};
