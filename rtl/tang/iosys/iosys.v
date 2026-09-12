@@ -269,9 +269,16 @@ reg  [31:0] rl_size;
 reg         rl_finishing;
 reg  [19:0] rl_timeout;
 
+// Cleared automatically at the start of every load (see below) so that a
+// smaller/different ROM never inherits stray bytes left over in the HuCard
+// area by the previous image.
+reg         rl_clearing;
+reg  [22:0] rl_clear_addr;
+
 // the ROM data register stalls the softcore while the previous word is being
-// pushed into the SDRAM
-wire rl_data_ready = (rl_cnt == 3'd0);
+// pushed into the SDRAM, and while the HuCard area is being cleared at the
+// start of a new load
+wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
@@ -370,6 +377,24 @@ wire rl_size_ok = (rl_size != 32'd0) && (rl_size <= ROM_MAX_SIZE);
 always @(posedge clk) begin
     ld_wr <= 1'b0;
 
+    // ---- clear the whole HuCard area at the start of a new load ----------
+    // Runs before any real data is accepted (rl_data_ready is held low, see
+    // above), so the softcore's pce_load_word() calls simply stall on
+    // mem_ready until this finishes.  Without this, a ROM smaller than (or
+    // differently shaped from) the previous one would leave the old game's
+    // bytes readable past its own end, which HuCard mirroring can expose as
+    // corruption specific to "reload a different/smaller game" scenarios.
+    if (rl_clearing) begin
+        if (!ld_busy && !ld_wr) begin
+            ld_wr         <= 1'b1;
+            ld_addr       <= rl_clear_addr;
+            ld_data       <= 8'h00;
+            rl_clear_addr <= rl_clear_addr + 23'd1;
+            if (rl_clear_addr == ROM_MAX_SIZE[22:0] - 23'd1)
+                rl_clearing <= 1'b0;
+        end
+    end else begin
+
     // ---- accept a word from the softcore ---------------------------------
     if (rl_data_sel && (mem_wstrb != 4'b0) && rl_data_ready) begin
         rl_buf <= mem_wdata;
@@ -388,16 +413,20 @@ always @(posedge clk) begin
         rl_addr <= rl_addr + 23'd1;
     end
 
+    end
+
     // ---- control register -------------------------------------------------
     if (rl_ctrl_sel && (mem_wstrb != 4'b0)) begin
         if (mem_wdata[0]) begin
-            loading      <= 1'b1;
-            image_valid  <= 1'b0;
-            sgx_mode     <= mem_wdata[1];
-            rl_addr      <= 23'd0;
-            rl_cnt       <= 3'd0;
-            rl_finishing <= 1'b0;
-            rl_timeout   <= 20'd0;
+            loading       <= 1'b1;
+            image_valid   <= 1'b0;
+            sgx_mode      <= mem_wdata[1];
+            rl_addr       <= 23'd0;
+            rl_cnt        <= 3'd0;
+            rl_finishing  <= 1'b0;
+            rl_timeout    <= 20'd0;
+            rl_clearing   <= 1'b1;
+            rl_clear_addr <= 23'd0;
         end else if (mem_wdata[7:0] == 8'd0) begin
             rl_finishing <= 1'b1;
             rl_timeout   <= 20'd0;
@@ -416,7 +445,7 @@ always @(posedge clk) begin
     // ---- end of transfer: wait for the SDRAM to really drain -------------
     if (rl_finishing) begin
         rl_timeout <= rl_timeout + 20'd1;
-        if ((rl_cnt == 3'd0 && !ld_wr && ld_idle) || (&rl_timeout)) begin
+        if ((rl_cnt == 3'd0 && !rl_clearing && !ld_wr && ld_idle) || (&rl_timeout)) begin
             rl_finishing <= 1'b0;
             loading      <= 1'b0;
             rom_sz       <= rl_size[23:16];
@@ -442,6 +471,8 @@ always @(posedge clk) begin
         rl_size      <= 32'd0;
         rl_finishing <= 1'b0;
         rl_timeout   <= 20'd0;
+        rl_clearing  <= 1'b0;
+        rl_clear_addr<= 23'd0;
     end
 end
 
