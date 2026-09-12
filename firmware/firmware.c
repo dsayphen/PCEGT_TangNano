@@ -16,7 +16,8 @@
 //   A             open a directory or load the highlighted .PCE/.SGX file
 //   B             go back to the parent directory
 //   Select+Start  bring the menu back over a running game
-//   Select+Up/Down cycle the display zoom (1x / 2x / stretch) over a running game
+//   Select+Up/Down    cycle the display zoom (2x / stretch) over a running game
+//   Select+Left/Right cycle the scanline strength (0/25/50/100%) over a running game
 //
 
 #include "picorv32.h"
@@ -98,18 +99,38 @@ static void message(const char *l1, const char *l2) {
     wait_button();
 }
 
-// Cycle the display zoom mode (1x -> 2x -> stretch -> ...) and flash the new
+// Cycle the display zoom mode (2x -> stretch -> ...) and flash the new
 // setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
 // (reg_video_zoom) and rtl/tang/video_scandoubler.v.
 static void zoom_cycle(void) {
-    static const char *names[3] = { "Zoom: 1x", "Zoom: 2x", "Zoom: stretch" };
-    static int zoom = 2;         // matches the hardware reset default (stretch)
+    static const char *names[2] = { "Zoom: 2x", "Zoom: stretch" };
+    static int zoom = 1;         // matches the hardware reset default (stretch)
 
-    zoom = (zoom + 1) % 3;
+    zoom = (zoom + 1) % 2;
     reg_video_zoom = zoom;
 
     clear();
     print_field(1, 10, names[zoom], OSD_COLS - 2);
+    overlay(1);
+    delay(600);
+    overlay(0);
+}
+
+// Cycle the scanline strength (0/25/50/100%) and flash the new setting on
+// the OSD for a moment.  `dir` is +1 to increase, -1 to decrease; the value
+// wraps around in both directions.  Kept in sync with
+// rtl/tang/iosys/iosys.v (reg_scanline) and rtl/tang/video_scandoubler.v.
+static void scanline_cycle(int dir) {
+    static const char *names[4] = {
+        "Scanlines: off", "Scanlines: 25%", "Scanlines: 50%", "Scanlines: 100%"
+    };
+    static int level = 0;        // matches the hardware reset default (off)
+
+    level = (level + dir + 4) % 4;
+    reg_scanline = level;
+
+    clear();
+    print_field(1, 10, names[level], OSD_COLS - 2);
     overlay(1);
     delay(600);
     overlay(0);
@@ -427,7 +448,8 @@ int main(void) {
 
     // The console is running now.  Stay alive so the user can bring the menu
     // back with Select+Start and pick another game without a power cycle,
-    // and Select+Up/Down cycles the display zoom mode.
+    // Select+Up/Down cycles the display zoom mode and Select+Left/Right
+    // cycles the scanline strength.
     for (;;) {
         uint32_t raw = joy_raw();
         uint32_t e = joy_edge();
@@ -444,6 +466,8 @@ int main(void) {
             browse();
         } else if ((raw & JOY_SELECT) && (e & (JOY_UP | JOY_DOWN))) {
             zoom_cycle();
+        } else if ((raw & JOY_SELECT) && (e & (JOY_LEFT | JOY_RIGHT))) {
+            scanline_cycle((e & JOY_RIGHT) ? 1 : -1);
         }
         delay(20);
     }
