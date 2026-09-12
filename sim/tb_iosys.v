@@ -151,6 +151,7 @@ pce_sdram_ctrl_3ch #(.FREQ(86_400_000)) mem (
     .ld_busy       (ld_busy),
     .ld_idle       (ld_idle),
     .ld_active     (loading),
+    .vdc_reset     (loading),
 
     .rom_rd        (rom_rd),
     .rom_a         (rom_a),

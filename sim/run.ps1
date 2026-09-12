@@ -77,12 +77,13 @@ if ($CROSS) {
 }
 
 # ---------------------------------------------------------------------------
-foreach ($tb in @('tb_textdisp', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload')) {
+foreach ($tb in @('tb_textdisp', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vdc_stale_addr')) {
     $files = switch ($tb) {
         'tb_textdisp'       { @('sim/tb_textdisp.v', 'rtl/tang/iosys/textdisp.v', 'rtl/tang/iosys/font_rom.v') }
         'tb_rom_source_arb' { @('sim/tb_rom_source_arb.v', 'rtl/tang/rom_source_arb.v') }
         'tb_sprite_stream'  { @('sim/tb_sprite_stream.v', 'sim/sdram_model.v', 'rtl/tang/pce_sdram_ctrl_3ch.v') }
         'tb_sdram_reload'   { @('sim/tb_sdram_reload.v', 'sim/sdram_model.v', 'rtl/tang/pce_sdram_ctrl_3ch.v') }
+        'tb_vdc_stale_addr' { @('sim/tb_vdc_stale_addr.v', 'sim/sdram_model.v', 'rtl/tang/pce_sdram_ctrl_3ch.v') }
     }
     & $iverilog -g2005-sv -o "sim/$tb.vvp" @files
     if ($LASTEXITCODE) { throw "iverilog failed for $tb" }
