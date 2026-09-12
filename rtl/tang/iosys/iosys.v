@@ -30,6 +30,7 @@
 //   0x0200_0034                  ROM load data     (4 bytes, little endian)
 //   0x0200_0038                  ROM image size in bytes
 //   0x0200_0040                  joypad, read only
+//   0x0200_0044                  video zoom mode (0=1x, 1=2x, 2=stretch)
 //   0x0200_0050                  milliseconds since reset, read only
 //   0x0200_0060                  core id, read only
 //
@@ -90,6 +91,10 @@ module iosys #(
     output reg  [7:0]  rom_sz,
     output reg  [22:0] rom_offset,
     output reg         sgx_mode,
+
+    // ---- video scaler control ---------------------------------------------
+    // 0 = 1x (native pixel size), 1 = 2x, 2 = stretch to fill the screen
+    output reg  [1:0]  video_zoom,
 
     // ---- 32 bit SDRAM port for the softcore ------------------------------
     output wire        rv_valid,
@@ -240,6 +245,7 @@ wire rl_ctrl_sel   = mem_valid && (mem_addr == 32'h0200_0030);
 wire rl_data_sel   = mem_valid && (mem_addr == 32'h0200_0034);
 wire rl_size_sel   = mem_valid && (mem_addr == 32'h0200_0038);
 wire joy_sel       = mem_valid && (mem_addr == 32'h0200_0040);
+wire zoom_sel      = mem_valid && (mem_addr == 32'h0200_0044);
 wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 
@@ -264,13 +270,15 @@ reg  [19:0] rl_timeout;
 wire rl_data_ready = (rl_cnt == 3'd0);
 
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
-                   rl_ctrl_sel || rl_size_sel || joy_sel || time_sel || id_sel ||
+                   rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel ||
+                   time_sel || id_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
 
 assign mem_rdata = ram_sel      ? rv_rdata :
                    joy_sel      ? {20'b0, joy1} :
+                   zoom_sel     ? {30'b0, video_zoom} :
                    uart_div_sel ? uart_div_do :
                    uart_dat_sel ? uart_dat_do :
                    time_sel     ? time_reg :
@@ -394,6 +402,9 @@ always @(posedge clk) begin
     if (rl_size_sel && (mem_wstrb != 4'b0))
         rl_size <= mem_wdata;
 
+    if (zoom_sel && (mem_wstrb != 4'b0))
+        video_zoom <= mem_wdata[1:0];
+
     // ---- end of transfer: wait for the SDRAM to really drain -------------
     if (rl_finishing) begin
         rl_timeout <= rl_timeout + 20'd1;
@@ -415,6 +426,7 @@ always @(posedge clk) begin
         rom_sz       <= 8'd0;
         rom_offset   <= 23'd0;
         sgx_mode     <= 1'b0;
+        video_zoom   <= 2'd2;      // stretch, matches the previous fixed behaviour
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;

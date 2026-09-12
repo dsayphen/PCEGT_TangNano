@@ -16,6 +16,7 @@
 //   A             open a directory or load the highlighted .PCE/.SGX file
 //   B             go back to the parent directory
 //   Select+Start  bring the menu back over a running game
+//   Select+Up/Down cycle the display zoom (1x / 2x / stretch) over a running game
 //
 
 #include "picorv32.h"
@@ -95,6 +96,23 @@ static void message(const char *l1, const char *l2) {
         print_field(1, 9, l2, OSD_COLS - 2);
     status("Press A to continue");
     wait_button();
+}
+
+// Cycle the display zoom mode (1x -> 2x -> stretch -> ...) and flash the new
+// setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
+// (reg_video_zoom) and rtl/tang/video_scandoubler.v.
+static void zoom_cycle(void) {
+    static const char *names[3] = { "Zoom: 1x", "Zoom: 2x", "Zoom: stretch" };
+    static int zoom = 2;         // matches the hardware reset default (stretch)
+
+    zoom = (zoom + 1) % 3;
+    reg_video_zoom = zoom;
+
+    clear();
+    print_field(1, 10, names[zoom], OSD_COLS - 2);
+    overlay(1);
+    delay(600);
+    overlay(0);
 }
 
 // ---------------------------------------------------------------------------
@@ -408,9 +426,13 @@ int main(void) {
     browse();
 
     // The console is running now.  Stay alive so the user can bring the menu
-    // back with Select+Start and pick another game without a power cycle.
+    // back with Select+Start and pick another game without a power cycle,
+    // and Select+Up/Down cycles the display zoom mode.
     for (;;) {
-        if ((joy_raw() & JOY_MENU) == JOY_MENU) {
+        uint32_t raw = joy_raw();
+        uint32_t e = joy_edge();
+
+        if ((raw & JOY_MENU) == JOY_MENU) {
             delay(300);                     // let the buttons be released
             overlay(1);
             if (mount_card() != 0) {
@@ -420,6 +442,8 @@ int main(void) {
                 continue;
             }
             browse();
+        } else if ((raw & JOY_SELECT) && (e & (JOY_UP | JOY_DOWN))) {
+            zoom_cycle();
         }
         delay(20);
     }
