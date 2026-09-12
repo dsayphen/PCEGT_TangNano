@@ -226,6 +226,37 @@ task check1;
     end
 endtask
 
+// Count requests actually issued to the scheduler. The VDC has no handshake:
+// it samples RAM_DI at a fixed point in every slot, so the bridge must issue
+// EXACTLY one fetch per slot. One extra (or one missing) request permanently
+// shifts every later read by one slot - which is what "shifted tiles" and
+// "desynced sprites" look like on screen.
+integer req_count0 = 0;
+integer req_count1 = 0;
+reg vram_req_d, vram1_req_d;
+always @(posedge clk_mem) begin
+    vram_req_d  <= mem.vram_req;
+    vram1_req_d <= mem.vram1_req;
+    if (mem.vram_req  !== vram_req_d)  req_count0 = req_count0 + 1;
+    if (mem.vram1_req !== vram1_req_d) req_count1 = req_count1 + 1;
+end
+
+task check_req_counts;
+    input [255:0] label;
+    input integer expect0;
+    input integer expect1;
+    begin
+        if (req_count0 !== expect0 || req_count1 !== expect1) begin
+            $display("FAIL %0s: requests issued VRAM0=%0d (expected %0d), VRAM1=%0d (expected %0d)",
+                      label, req_count0, expect0, req_count1, expect1);
+            errors = errors + 1;
+        end else begin
+            $display("ok   %0s: exactly %0d VRAM0 and %0d VRAM1 requests issued",
+                      label, req_count0, req_count1);
+        end
+    end
+endtask
+
 // The address the restarted VDC lands on again after the reload. On real
 // hardware this is simply whatever slot the VDC settles on while it is held
 // in core_reset, which it then re-fetches as its first real access.
@@ -268,7 +299,17 @@ initial begin
     $display("--- reload: ld_active high, vram_rd stays high (as RAM_RD does) ---");
     ld_active <= 1'b1;
     vdc_reset <= 1'b1;          // rst_trigger asserts core_reset
-    repeat (400) @(posedge clk);
+
+    // While the core is in reset the VDC's combinational RAM_A keeps moving
+    // around (the SLOT decoder is still running off a free counter) before
+    // settling. The bridge must ignore all of it.
+    repeat (40) @(posedge clk);
+    vram_addr  <= 16'h0AA0;  vram1_addr <= 16'h0AA0;
+    repeat (40) @(posedge clk);
+    vram_addr  <= 16'h0550;  vram1_addr <= 16'h0550;
+    repeat (40) @(posedge clk);
+    vram_addr  <= STALE_A;   vram1_addr <= STALE_A;   // settles on the stale slot
+    repeat (280) @(posedge clk);
 
     // The new game writes different VRAM contents at the same addresses.
     poke_vram0(STALE_A, 16'hC0DE);
@@ -278,8 +319,14 @@ initial begin
     // core_reset lingers well past ld_active on real hardware (rst_cnt runs
     // for another 64k clocks), with RAM_RD still parked high.
     repeat (200) @(posedge clk);
+
+    // From here on, no request may be issued until the first real slot.
+    req_count0 = 0;
+    req_count1 = 0;
+
     vdc_reset <= 1'b0;
     repeat (10) @(posedge clk);
+    check_req_counts("reset-release", 0, 0);
 
     // -----------------------------------------------------------------
     // "Game 2" starts. Its first access targets the very address the bridge
@@ -288,8 +335,15 @@ initial begin
     // compare against the stale vram_addr_seen.
     // -----------------------------------------------------------------
     $display("--- game 2: first fetch hits the stale address ---");
+    // Both bridges are armed and both addresses are parked on STALE_A, so the
+    // first clkref slot legitimately fetches for VDC0 and VDC1 alike (that is
+    // exactly what happens in SGX mode).
     vdc_slot0(STALE_A);  check0("reload-stale", 16'hC0DE);
+    check_req_counts("first-slot-after-reload", 1, 1);
+    // The second slot re-presents the same address, which is now in
+    // addr_seen, so no further request may be issued.
     vdc_slot1(STALE_A);  check1("reload-stale", 16'hD00D);
+    check_req_counts("no-duplicate-fetch", 1, 1);
 
     if (errors == 0)
         $display("\n*** tb_vdc_stale_addr PASSED ***");
