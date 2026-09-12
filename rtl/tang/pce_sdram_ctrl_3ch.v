@@ -274,6 +274,16 @@ always @(posedge clk_mem) begin
         vram_addr_seen <= 16'hffff;
         vram_rd_d      <= 1'b0;
         vram_we_d      <= 1'b0;
+    end else if (ld_active) begin
+        // A new ROM is being streamed in: VDC0 is held in core reset for
+        // the whole transfer, so it can never legitimately request VRAM
+        // right now. Keep tracking vram_ack so the request/ack pair stays
+        // perfectly matched (idle) the instant loading ends, instead of
+        // possibly carrying over a half-finished toggle from the previous
+        // game into the freshly booted one.
+        vram_req  <= vram_ack;
+        vram_rd_d <= 1'b0;
+        vram_we_d <= 1'b0;
     end else begin
         vram_rd_d <= vram_rd;
         vram_we_d <= vram_we;
@@ -311,6 +321,12 @@ always @(posedge clk_mem) begin
         vram1_addr_seen <= 16'hffff;
         vram1_rd_d      <= 1'b0;
         vram1_we_d      <= 1'b0;
+    end else if (ld_active) begin
+        // See the matching comment on the VDC0 channel above: VDC1/SGX is
+        // also held in core reset for the whole transfer.
+        vram1_req  <= vram1_ack;
+        vram1_rd_d <= 1'b0;
+        vram1_we_d <= 1'b0;
     end else begin
         vram1_rd_d <= vram1_rd;
         vram1_we_d <= vram1_we;
