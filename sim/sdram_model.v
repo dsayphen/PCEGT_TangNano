@@ -39,6 +39,9 @@ localparam CMD_READ     = 3'b101;
 
 wire [20:0] full_addr = {BA, row[BA], A[7:0]};
 
+reg        rd_v1, rd_v2;
+reg [20:0] rd_a1, rd_a2;
+
 integer i;
 initial begin
     for (i = 0; i < 2097152; i = i + 1)
@@ -50,9 +53,6 @@ initial begin
     rd_v1   = 0;
     rd_v2   = 0;
 end
-
-reg        rd_v1, rd_v2;
-reg [20:0] rd_a1, rd_a2;
 
 always @(negedge clk) begin
     rd_v1 <= 1'b0;

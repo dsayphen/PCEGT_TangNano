@@ -68,6 +68,15 @@ module pce_sdram_ctrl_3ch #(
 // -------------------------------------------------------------------------
 // 16-bit host port: loader writes and cached HuCard reads
 // -------------------------------------------------------------------------
+wire init_done_mem;
+reg [1:0] init_done_mem_sync;
+always @(posedge clk) begin
+    if (!resetn)
+        init_done_mem_sync <= 2'b00;
+    else
+        init_done_mem_sync <= {init_done_mem_sync[0], init_done_mem};
+end
+
 wire [22:0] rom_addr_eff = {1'b0, rom_a} + rom_offset;
 
 reg         host_req;
@@ -318,15 +327,6 @@ always @(posedge clk_mem) begin
     end
 end
 
-wire init_done_mem;
-reg [1:0] init_done_mem_sync;
-always @(posedge clk) begin
-    if (!resetn)
-        init_done_mem_sync <= 2'b00;
-    else
-        init_done_mem_sync <= {init_done_mem_sync[0], init_done_mem};
-end
-
 pce_sdram_interleaved #(
     .FREQ(FREQ)
 ) memory (
@@ -365,6 +365,7 @@ pce_sdram_interleaved #(
     .vram_req(vram_req),
     .vram_ack(vram_ack),
     .vram_we(vram_we_r),
+    .vram_active(vram_rd),
     .vram1_addr(vram1_addr_r),
     .vram1_din(vram1_din_r),
     .vram1_dout(vram1_dout_mem),
@@ -418,6 +419,7 @@ module pce_sdram_interleaved #(
     input  wire        vram_req,
     output reg         vram_ack,
     input  wire        vram_we,
+    input  wire        vram_active,
 
     input  wire [14:0] vram1_addr,
     input  wire [15:0] vram1_din,
@@ -464,17 +466,10 @@ reg [15:0] refresh_cnt;
 // directly compete with the VDC0 SATB/sprite burst fetch right at the start
 // of vblank, spread single refresh commands across the whole frame and only
 // issue one when the bus is genuinely idle (no channel active and no VRAM0/
-// VRAM1 request freshly pending). This mirrors nand2mario/snestang's
+// VRAM1 request freshly pending, and no active VDC0 read window). This mirrors
+// nand2mario/snestang's
 // sdram_nano.v, which refreshes off a free-running cycle counter instead of
 // a vblank-gated burst. 64ms/8192 rows -> ~7.8us between refreshes.
-localparam integer RFRSH_CYCLES = FREQ / 128_000;
-wire       vram_pending  = (vram_req  != vram_ack);
-wire       vram1_pending = (vram1_req != vram1_ack);
-wire       need_refresh  = refresh_cnt >= RFRSH_CYCLES[15:0];
-wire       refresh_now   = need_refresh &&
-                            !active[0] && !active[1] && !active[2] &&
-                            !vram_pending && !vram1_pending;
-
 reg [22:0] addr_latch [0:2];
 reg [15:0] din_latch  [0:2];
 reg [1:0]  ds_latch   [0:2];
@@ -485,6 +480,23 @@ reg [2:0]  we_latch;
 reg [2:0]  active;
 reg [1:0]  channel1_port;
 reg        host_cas_done;
+
+// Distributed, on-demand refresh (SNESTang model): instead of concentrating
+// all refresh commands into the vblank window (refresh_window), where they
+// directly compete with the VDC0 SATB/sprite burst fetch right at the start
+// of vblank, spread single refresh commands across the whole frame and only
+// issue one when the bus is genuinely idle (no channel active and no VRAM0/
+// VRAM1 request freshly pending). This mirrors nand2mario/snestang's
+// sdram_nano.v, which refreshes off a free-running cycle counter instead of
+// a vblank-gated burst. 64ms/8192 rows -> ~7.8us between refreshes.
+localparam integer RFRSH_CYCLES = FREQ / 128_000;
+wire       vram_pending  = (vram_req  != vram_ack);
+wire       vram1_pending = (vram1_req != vram1_ack);
+wire       need_refresh  = refresh_cnt >= RFRSH_CYCLES[15:0];
+wire       refresh_now   = need_refresh &&
+                            !active[0] && !active[1] && !active[2] &&
+                            !vram_pending && !vram1_pending &&
+                            !vram_active;
 
 localparam CHANNEL1_NONE  = 2'd0;
 localparam CHANNEL1_RV    = 2'd1;
