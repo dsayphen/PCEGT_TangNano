@@ -28,16 +28,26 @@
 // The horizontal zoom mode (zoom_in, from iosys' video_zoom register) selects
 // how they are mapped onto the 640 pixel wide output:
 //
-//   0 = 1x       one output pixel per source dot (step=256), no scaling.
-//   1 = 2x       two output pixels per source dot (step=128).
-//   2 = stretch  upscaled to fill all 640 pixels (step=108/144/216), the
+//   0 = 2x       two output pixels per source dot (step=128).
+//   1 = stretch  upscaled to fill all 640 pixels (step=108/144/216), the
 //                previous fixed behaviour and the reset default, giving the
 //                correct 4:3 aspect ratio as on a real TV.
 //
-// 1x/2x pictures narrower than 640 pixels are centered with black pillarbox
-// borders; a 2x picture wider than 640 pixels is centered and cropped.  The
-// vertical dimension is always exactly doubled by the line buffer above and
-// is not affected by the zoom mode.
+// A 2x picture narrower than 640 pixels is centered with black pillarbox
+// borders; wider than 640 (e.g. the 540 dot mode) it is centered and cropped.
+//
+// The vertical dimension is always exactly doubled by the line buffer above
+// (a true 1:1, unscaled vertical mode is not possible here: the 5:3 system /
+// pixel clock ratio genlocks the doubler so that one core scan line *always*
+// maps to exactly two HDMI lines - there is no frame buffer to reposition or
+// skip lines).  Instead, scan_in selects a scanline effect that darkens the
+// duplicated copy of every line, which is the closest equivalent a
+// line-doubler architecture like this one can offer to an unscaled picture:
+//
+//   0 = off        both copies at full brightness (previous behaviour).
+//   1 = 25 %       duplicate copy dimmed to 75 % brightness.
+//   2 = 50 %       duplicate copy dimmed to 50 % brightness.
+//   3 = 100 %      duplicate copy fully black (hard scanlines).
 //
 
 module video_scandoubler (
@@ -51,7 +61,8 @@ module video_scandoubler (
     input  wire        vs_in,         // VIDEO_VS, active high
     input  wire        hbl_in,        // VIDEO_HBL, high during blanking
     input  wire [1:0]  dcc_in,        // VIDEO_DCC, VCE dot clock select
-    input  wire [1:0]  zoom_in,       // 0 = 1x, 1 = 2x, 2 = stretch to fill
+    input  wire [1:0]  zoom_in,       // 0 = 2x, 1 = stretch to fill
+    input  wire [1:0]  scan_in,       // 0/1/2/3 = 0/25/50/100% scanlines
 
     // ---- HDMI side (clk_pix, 25.92 MHz) --------------------------------
     input  wire        clk_pix,
@@ -97,6 +108,7 @@ reg        line_tgl;      // toggles at the end of every core scan line
 reg        frame_tgl;     // toggles at the start of every core frame
 reg [1:0]  dcc_lat;
 reg [1:0]  zoom_lat;
+reg [1:0]  scan_lat;
 
 wire [8:0] pix_in = {g_in, r_in, b_in};
 
@@ -111,6 +123,7 @@ initial begin
     frame_tgl = 1'b0;
     dcc_lat   = 2'b10;
     zoom_lat  = 2'b10;
+    scan_lat  = 2'b00;
     lb_we     = 1'b0;
 end
 
@@ -137,6 +150,7 @@ always @(posedge clk_sys) begin
         wr_bank  <= ~wr_bank;
         dcc_lat  <= dcc_in;
         zoom_lat <= zoom_in;
+        scan_lat <= scan_in;
         line_tgl <= ~line_tgl;
     end
 
@@ -170,6 +184,8 @@ reg [1:0] dcc_sync0;
 reg [1:0] dcc_sync;
 reg [1:0] zoom_sync0;
 reg [1:0] zoom_sync;
+reg [1:0] scan_sync0;
+reg [1:0] scan_sync;
 
 wire line_ev  = line_sync[2]  ^ line_sync[1];
 wire frame_ev = frame_sync[2] ^ frame_sync[1];
@@ -185,6 +201,7 @@ reg [1:0]  de_p;
 reg [1:0]  deg_p;      // pipeline for the (possibly narrower) game window
 reg [1:0]  hs_p;
 reg [1:0]  vs_p;
+reg [1:0]  half_p;      // pipeline for "half" (0 = first copy, 1 = duplicate)
 
 // Source (core) active width in dots, one of 270 / 360 / 540 depending on
 // the VCE dot clock.
@@ -197,15 +214,14 @@ always @(*) begin
     endcase
 end
 
-// Requested on-screen width for the current zoom mode: native size (1x),
-// doubled (2x), or stretched to fill the 640 pixel wide output.  Clipped to
-// the output width so an oversized 2x picture is centered and cropped
-// instead of overflowing into the sync/porch area (see left_skip below).
+// Requested on-screen width for the current zoom mode: doubled (2x) or
+// stretched to fill the 640 pixel wide output.  Clipped to the output width
+// so an oversized 2x picture is centered and cropped instead of overflowing
+// into the sync/porch area (see left_skip below).
 reg [10:0] want_w;
 always @(*) begin
-    case (zoom_sync)
-        2'b00:   want_w = src_w;          // 1x - pixel accurate, no scaling
-        2'b01:   want_w = src_w << 1;     // 2x - integer double
+    case (zoom_sync[0])
+        1'b0:    want_w = src_w << 1;     // 2x - integer double
         default: want_w = H_ACTIVE;       // stretch - fill the screen
     endcase
 end
@@ -221,9 +237,8 @@ wire [10:0] left_skip = overflow >> 1;
 
 reg  [8:0]  step;
 always @(*) begin
-    case (zoom_sync)
-        2'b00:   step = 9'd256;   // 1x: one source dot per output pixel
-        2'b01:   step = 9'd128;   // 2x: one source dot per two output pixels
+    case (zoom_sync[0])
+        1'b0:    step = 9'd128;   // 2x: one source dot per two output pixels
         default: begin
             case (dcc_sync)
                 2'b00:   step = 9'd108;   // 270 source dots -> 640
@@ -235,6 +250,25 @@ always @(*) begin
 end
 
 wire [9:0] hdmi_line = {vline[8:0], half};
+
+// Scanline attenuation: darkens the duplicated copy of a line (half == 1)
+// according to scan_sync (0/25/50/100%).  The first copy (half == 0) is
+// never touched.
+function [7:0] scanline_atten;
+    input [7:0] v;
+    input [1:0] level;
+    input       dup;
+    begin
+        if (!dup)
+            scanline_atten = v;
+        else case (level)
+            2'b00:   scanline_atten = v;                   // off
+            2'b01:   scanline_atten = v - (v >> 2);         // 75% brightness
+            2'b10:   scanline_atten = v >> 1;               // 50% brightness
+            default: scanline_atten = 8'd0;                 // fully black
+        endcase
+    end
+endfunction
 
 // Fixed-point starting offset into the source line for the accumulator,
 // used only when left_skip is non-zero (2x overflow case above).
@@ -274,6 +308,8 @@ always @(posedge clk_pix) begin
     dcc_sync   <= dcc_sync0;
     zoom_sync0 <= zoom_lat;
     zoom_sync  <= zoom_sync0;
+    scan_sync0 <= scan_lat;
+    scan_sync  <= scan_sync0;
 
     // ---- free running counters ------------------------------------------
     if (hcnt == H_TOTAL - 11'd1) begin
@@ -310,15 +346,16 @@ always @(posedge clk_pix) begin
     deg_p <= {deg_p[0], de_game};
     hs_p <= {hs_p[0], hs_c};
     vs_p <= {vs_p[0], vs_c};
+    half_p <= {half_p[0], half};
 
     vga_de <= de_p[1];
     vga_hs <= hs_p[1];
     vga_vs <= vs_p[1];
 
     if (deg_p[1]) begin
-        vga_r <= {lb_rdata[5:3], lb_rdata[5:3], lb_rdata[5:4]};
-        vga_g <= {lb_rdata[8:6], lb_rdata[8:6], lb_rdata[8:7]};
-        vga_b <= {lb_rdata[2:0], lb_rdata[2:0], lb_rdata[2:1]};
+        vga_r <= scanline_atten({lb_rdata[5:3], lb_rdata[5:3], lb_rdata[5:4]}, scan_sync, half_p[1]);
+        vga_g <= scanline_atten({lb_rdata[8:6], lb_rdata[8:6], lb_rdata[8:7]}, scan_sync, half_p[1]);
+        vga_b <= scanline_atten({lb_rdata[2:0], lb_rdata[2:0], lb_rdata[2:1]}, scan_sync, half_p[1]);
     end else begin
         vga_r <= 8'd0;
         vga_g <= 8'd0;
@@ -335,6 +372,7 @@ always @(posedge clk_pix) begin
         deg_p      <= 2'b00;
         hs_p       <= 2'b00;
         vs_p       <= 2'b00;
+        half_p     <= 2'b00;
         vga_de     <= 1'b0;
     end
 end

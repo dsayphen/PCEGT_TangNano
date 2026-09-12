@@ -172,6 +172,7 @@ wire [7:0]  rom_sz;
 wire [22:0] rom_offset;
 wire        sgx_mode;
 wire [1:0]  video_zoom;
+wire [1:0]  scanline;
 
 // ---- softcore / menu ------------------------------------------------------
 wire        rv_ld_wr;
@@ -238,6 +239,7 @@ iosys #(
     .rom_offset       (rv_rom_offset),
     .sgx_mode         (rv_sgx_mode),
     .video_zoom       (video_zoom),
+    .scanline         (scanline),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -535,6 +537,7 @@ video_scandoubler u_scandoubler (
     .hbl_in     (vid_hbl),
     .dcc_in     (vid_dcc),
     .zoom_in    (video_zoom),
+    .scan_in    (scanline),
 
     .clk_pix    (clk_pix),
     .pix_resetn (pix_resetn),
