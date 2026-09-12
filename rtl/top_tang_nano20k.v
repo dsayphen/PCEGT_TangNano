@@ -349,7 +349,6 @@ wire        vram1_we;
 wire        vid_ce;
 wire        vid_vbl;
 wire        vram_refresh_window;
-wire        core_reset;
 
 pce_sdram_ctrl_3ch #(
     .FREQ (86_400_000)
@@ -378,7 +377,6 @@ pce_sdram_ctrl_3ch #(
     .ld_busy       (ld_busy),
     .ld_idle       (ld_idle),
     .ld_active     (loading),
-    .vdc_reset     (core_reset),
 
     .rom_rd        (rom_rd),
     .rom_a         (rom_a),
@@ -432,7 +430,7 @@ always @(posedge clk_sys) begin
         rst_cnt <= rst_cnt + 17'd1;
 end
 
-assign core_reset = ~rst_cnt[16];
+wire core_reset = ~rst_cnt[16];
 assign vram_refresh_window = core_reset || vid_vbl;
 
 // ===========================================================================

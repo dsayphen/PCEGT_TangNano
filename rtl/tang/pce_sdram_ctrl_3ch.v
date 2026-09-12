@@ -37,14 +37,6 @@ module pce_sdram_ctrl_3ch #(
     output wire        ld_idle,
     input  wire        ld_active,
 
-    // Asserted while the VDCs are held in reset (top-level `core_reset`).
-    // The VDC's RAM_RD is a combinational level that is NOT reset-gated, so
-    // the bridges below must invalidate their address-compare state here;
-    // otherwise the first access of a newly loaded game is silently dropped
-    // when it happens to target the same address the previous game left
-    // behind. See sim/tb_vdc_stale_addr.v.
-    input  wire        vdc_reset,
-
     input  wire        rom_rd,
     input  wire [21:0] rom_a,
     input  wire [22:0] rom_offset,
@@ -260,40 +252,7 @@ end
 // VDC0 bridge. The VDC changes its memory slot on clkref; the request remains
 // stable until the bank-3 slot accepts it. Address bit 15 is outside the
 // physical 32K-word VRAM and reads as zero.
-//
-// `vdc_reset` arrives from the clk_sys domain, so resynchronise it here
-// before using it in the clk_mem domain.
 // -------------------------------------------------------------------------
-reg [2:0] vdc_reset_sync;
-always @(posedge clk_mem) begin
-    if (!resetn)
-        vdc_reset_sync <= 3'b111;
-    else
-        vdc_reset_sync <= {vdc_reset_sync[1:0], vdc_reset};
-end
-wire vdc_in_reset = vdc_reset_sync[2];
-
-// The VDC has no handshake: it samples RAM_DI at a fixed point in every dot
-// slot, so the bridge must issue exactly one fetch per slot and stay aligned
-// to clkref forever. Coming out of reset the parked address compare would
-// otherwise fire the instant `vdc_in_reset` drops - at an arbitrary point
-// inside a slot - adding one extra fetch and shifting every later read by one
-// slot. Re-arm on the first clkref edge instead, so the first request of the
-// new game lands on a real slot boundary.
-reg clkref_d;
-always @(posedge clk_mem) begin
-    if (!resetn) clkref_d <= 1'b0;
-    else         clkref_d <= clkref;
-end
-wire clkref_rise = clkref && !clkref_d;
-
-reg vdc_armed;
-always @(posedge clk_mem) begin
-    if (!resetn)            vdc_armed <= 1'b0;
-    else if (vdc_in_reset)  vdc_armed <= 1'b0;
-    else if (clkref_rise)   vdc_armed <= 1'b1;
-end
-
 reg         vram_req;
 wire        vram_ack;
 reg  [14:0] vram_addr_r;
@@ -315,21 +274,6 @@ always @(posedge clk_mem) begin
         vram_addr_seen <= 16'hffff;
         vram_rd_d      <= 1'b0;
         vram_we_d      <= 1'b0;
-    end else if (vdc_in_reset || !vdc_armed) begin
-        // The VDC is held in reset (or reset has just released and we are
-        // waiting for the next clkref slot boundary to re-arm): its
-        // combinational RAM_RD/RAM_A carry no legitimate access, so don't
-        // forward them.
-        //
-        // Only the address compare is parked - 16'hffff has bit 15 set, which
-        // the bridge never matches, so the first real access after re-arming
-        // is guaranteed to issue a request even if it targets the same
-        // address the previous game left behind. The rd/we delay registers
-        // keep tracking their inputs so reset release cannot manufacture a
-        // rising edge on top of that.
-        vram_addr_seen <= 16'hffff;
-        vram_rd_d      <= vram_rd;
-        vram_we_d      <= vram_we;
     end else begin
         vram_rd_d <= vram_rd;
         vram_we_d <= vram_we;
@@ -367,11 +311,6 @@ always @(posedge clk_mem) begin
         vram1_addr_seen <= 16'hffff;
         vram1_rd_d      <= 1'b0;
         vram1_we_d      <= 1'b0;
-    end else if (vdc_in_reset || !vdc_armed) begin
-        // Same rationale as the VDC0 bridge above.
-        vram1_addr_seen <= 16'hffff;
-        vram1_rd_d      <= vram1_rd;
-        vram1_we_d      <= vram1_we;
     end else begin
         vram1_rd_d <= vram1_rd;
         vram1_we_d <= vram1_we;
