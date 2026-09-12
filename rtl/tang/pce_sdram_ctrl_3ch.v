@@ -457,7 +457,23 @@ reg [2:0] cycle;
 reg       clkref_r;
 
 reg        refresh_block;
-reg        refresh_turn;
+reg [15:0] refresh_cnt;
+
+// Distributed, on-demand refresh (SNESTang model): instead of concentrating
+// all refresh commands into the vblank window (refresh_window), where they
+// directly compete with the VDC0 SATB/sprite burst fetch right at the start
+// of vblank, spread single refresh commands across the whole frame and only
+// issue one when the bus is genuinely idle (no channel active and no VRAM0/
+// VRAM1 request freshly pending). This mirrors nand2mario/snestang's
+// sdram_nano.v, which refreshes off a free-running cycle counter instead of
+// a vblank-gated burst. 64ms/8192 rows -> ~7.8us between refreshes.
+localparam integer RFRSH_CYCLES = FREQ / 128_000;
+wire       vram_pending  = (vram_req  != vram_ack);
+wire       vram1_pending = (vram1_req != vram1_ack);
+wire       need_refresh  = refresh_cnt >= RFRSH_CYCLES[15:0];
+wire       refresh_now   = need_refresh &&
+                            !active[0] && !active[1] && !active[2] &&
+                            !vram_pending && !vram1_pending;
 
 reg [22:0] addr_latch [0:2];
 reg [15:0] din_latch  [0:2];
@@ -469,8 +485,6 @@ reg [2:0]  we_latch;
 reg [2:0]  active;
 reg [1:0]  channel1_port;
 reg        host_cas_done;
-wire       refresh_now = refresh_window && refresh_turn &&
-                         !active[0] && !active[1] && !active[2];
 
 localparam CHANNEL1_NONE  = 2'd0;
 localparam CHANNEL1_RV    = 2'd1;
@@ -491,7 +505,7 @@ always @(posedge clk) begin
         cycle         <= 3'd0;
         clkref_r      <= 1'b0;
         refresh_block <= 1'b0;
-        refresh_turn  <= 1'b1;
+        refresh_cnt   <= 16'd0;
         host_ack      <= 1'b0;
         rv_ack        <= 1'b0;
         vram_ack      <= 1'b0;
@@ -541,19 +555,26 @@ always @(posedge clk) begin
                 default: ;
             endcase
         end else if (init_done) begin
-            // Only a refresh command actually in flight (refresh_block) may
-            // delay resyncing the phase counter to the dot clock. Blocking
-            // on refresh_window itself (asserted for the whole vblank/reset
-            // window, not just the refresh cycle) let the schedule free-run
-            // out of phase with clkref for many dot clocks in a row, causing
-            // VDC0 to sample stale/wrong-window VRAM data - the root cause
-            // of the sprite/tile corruption seen whenever refresh_window was
-            // asserted during a VRAM access (confirmed in
+            // The phase counter resyncs to clkref every dot clock unless a
+            // refresh command is actually in flight (refresh_block). Refresh
+            // itself is now distributed across the whole frame based on
+            // refresh_cnt (see note above), not concentrated into vblank, so
+            // it no longer collides systematically with the VDC0 SATB/sprite
+            // burst fetch at the start of vblank (confirmed in
             // sim/tb_sprite_stream.v).
             if (clkref && !clkref_r && !refresh_block)
                 cycle <= 3'd1;
             else
                 cycle <= cycle + 3'd1;
+
+            // Free-running refresh timer: reset only when a refresh is
+            // actually issued below, otherwise keep counting so need_refresh
+            // stays asserted (and refresh_now keeps trying) until the bus is
+            // idle enough to take it.
+            if (cycle == 3'd0 && refresh_now)
+                refresh_cnt <= 16'd0;
+            else
+                refresh_cnt <= refresh_cnt + 16'd1;
 
             // Complete the host read from its cycle-5 CAS.
             if (cycle == 3'd0) begin
@@ -567,14 +588,9 @@ always @(posedge clk) begin
                     host_cas_done <= 1'b0;
                 end
 
-                if (!refresh_window)
-                    refresh_turn <= 1'b1;
                 if (refresh_now) begin
                     cmd           <= CMD_REFRESH;
                     refresh_block <= 1'b1;
-                    refresh_turn  <= 1'b0;
-                end else begin
-                    refresh_turn <= 1'b1;
                 end
             end
 
