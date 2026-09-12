@@ -372,6 +372,7 @@ pce_sdram_interleaved #(
     .vram1_req(vram1_req),
     .vram1_ack(vram1_ack),
     .vram1_we(vram1_we_r),
+    .vram1_active(vram1_rd),
     .init_done(init_done_mem)
 );
 
@@ -427,6 +428,7 @@ module pce_sdram_interleaved #(
     input  wire        vram1_req,
     output reg         vram1_ack,
     input  wire        vram1_we,
+    input  wire        vram1_active,
     output reg         init_done
 );
 
@@ -496,7 +498,7 @@ wire       need_refresh  = refresh_cnt >= RFRSH_CYCLES[15:0];
 wire       refresh_now   = need_refresh &&
                             !active[0] && !active[1] && !active[2] &&
                             !vram_pending && !vram1_pending &&
-                            !vram_active;
+                            !vram_active && !vram1_active;
 
 localparam CHANNEL1_NONE  = 2'd0;
 localparam CHANNEL1_RV    = 2'd1;
