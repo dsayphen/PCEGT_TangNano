@@ -253,6 +253,19 @@ end
 // stable until the bank-3 slot accepts it. Address bit 15 is outside the
 // physical 32K-word VRAM and reads as zero.
 // -------------------------------------------------------------------------
+// ld_active (loading) lives in the clk_sys domain; the VRAM request
+// generators below run on clk_mem. Cross it properly with a 2-FF
+// synchronizer instead of sampling it directly (a direct cross caused real
+// instability - see git history).
+reg [1:0] ld_active_mem_sync;
+always @(posedge clk_mem) begin
+    if (!resetn)
+        ld_active_mem_sync <= 2'b00;
+    else
+        ld_active_mem_sync <= {ld_active_mem_sync[0], ld_active};
+end
+wire ld_active_mem = ld_active_mem_sync[1];
+
 reg         vram_req;
 wire        vram_ack;
 reg  [14:0] vram_addr_r;
@@ -274,6 +287,16 @@ always @(posedge clk_mem) begin
         vram_addr_seen <= 16'hffff;
         vram_rd_d      <= 1'b0;
         vram_we_d      <= 1'b0;
+    end else if (ld_active_mem) begin
+        // A new ROM is being streamed in: VDC0 is held in core reset for
+        // the whole transfer, so it can never legitimately request VRAM
+        // right now. Keep tracking vram_ack so the request/ack pair stays
+        // perfectly matched (idle) the instant loading ends, instead of
+        // possibly carrying over a half-finished toggle from the previous
+        // game into the freshly booted one.
+        vram_req  <= vram_ack;
+        vram_rd_d <= 1'b0;
+        vram_we_d <= 1'b0;
     end else begin
         vram_rd_d <= vram_rd;
         vram_we_d <= vram_we;
@@ -311,6 +334,12 @@ always @(posedge clk_mem) begin
         vram1_addr_seen <= 16'hffff;
         vram1_rd_d      <= 1'b0;
         vram1_we_d      <= 1'b0;
+    end else if (ld_active_mem) begin
+        // See the matching comment on the VDC0 channel above: VDC1/SGX is
+        // also held in core reset for the whole transfer.
+        vram1_req  <= vram1_ack;
+        vram1_rd_d <= 1'b0;
+        vram1_we_d <= 1'b0;
     end else begin
         vram1_rd_d <= vram1_rd;
         vram1_we_d <= vram1_we;
