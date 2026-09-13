@@ -61,7 +61,7 @@ static void status(const char *msg) {
 static void title(void) {
     clear_line(ROW_TITLE);
     cursor(1, ROW_TITLE);
-    print("PCEtang - pick a ROM");
+    print("PCEngine - pick a ROM");
 }
 
 // Print a string right-truncated to `w` columns starting at column x.
@@ -99,18 +99,87 @@ static void message(const char *l1, const char *l2) {
     wait_button();
 }
 
+// ---------------------------------------------------------------------------
+// Video configuration & Persistence
+// ---------------------------------------------------------------------------
+// Saved at the root of the SD card so the last zoom/scanline settings survive
+// a power cycle. The file contains four bytes:
+//   byte 0: magic
+//   byte 1: version
+//   byte 2: zoom (0..1)
+//   byte 3: scanline level (0..3)
+#define VIDEO_CFG_FILE    "video.cfg"
+#define VIDEO_CFG_MAGIC   0x56
+#define VIDEO_CFG_VERSION 0x01
+
+static int video_zoom = 1;       // hardware reset default: stretch
+static int video_scanline = 0;   // hardware reset default: off
+
+static void video_config_load(void) {
+    FIL f;
+    UINT br;
+    uint8_t cfg[4];
+
+    // Defaults are kept if the file does not exist or is invalid.
+    video_zoom = 1;
+    video_scanline = 0;
+
+    if (f_open(&f, VIDEO_CFG_FILE, FA_READ) != FR_OK)
+        goto apply;
+
+    if (f_read(&f, cfg, sizeof(cfg), &br) != FR_OK || br != sizeof(cfg)) {
+        f_close(&f);
+        goto apply;
+    }
+    f_close(&f);
+
+    if (cfg[0] != VIDEO_CFG_MAGIC ||
+        cfg[1] != VIDEO_CFG_VERSION ||
+        cfg[2] > 1 ||
+        cfg[3] > 3)
+        goto apply;
+
+    video_zoom = cfg[2];
+    video_scanline = cfg[3];
+
+apply:
+    reg_video_zoom = video_zoom;
+    reg_scanline = video_scanline;
+}
+
+static void video_config_save(void) {
+    FIL f;
+    UINT bw;
+    uint8_t cfg[4];
+
+    cfg[0] = VIDEO_CFG_MAGIC;
+    cfg[1] = VIDEO_CFG_VERSION;
+    cfg[2] = (uint8_t)video_zoom;
+    cfg[3] = (uint8_t)video_scanline;
+
+    if (f_open(&f, VIDEO_CFG_FILE, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
+        uart_print("warning: cannot save video.cfg\n");
+        return;
+    }
+
+    if (f_write(&f, cfg, sizeof(cfg), &bw) != FR_OK || bw != sizeof(cfg))
+        uart_print("warning: cannot write video.cfg\n");
+
+    f_close(&f);
+}
+
 // Cycle the display zoom mode (2x -> stretch -> ...) and flash the new
 // setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
 // (reg_video_zoom) and rtl/tang/video_scandoubler.v.
 static void zoom_cycle(void) {
     static const char *names[2] = { "Zoom: 2x", "Zoom: stretch" };
-    static int zoom = 1;         // matches the hardware reset default (stretch)
 
-    zoom = (zoom + 1) % 2;
-    reg_video_zoom = zoom;
+    video_zoom = (video_zoom + 1) % 2;
+    reg_video_zoom = video_zoom;
+    video_config_save();
 
     clear();
-    print_field(1, 10, names[zoom], OSD_COLS - 2);
+    print_field(1, 10, names[video_zoom], OSD_COLS - 2);
     overlay(1);
     delay(600);
     overlay(0);
@@ -124,13 +193,13 @@ static void scanline_cycle(int dir) {
     static const char *names[4] = {
         "Scanlines: off", "Scanlines: 25%", "Scanlines: 50%", "Scanlines: 100%"
     };
-    static int level = 0;        // matches the hardware reset default (off)
 
-    level = (level + dir + 4) % 4;
-    reg_scanline = level;
+    video_scanline = (video_scanline + dir + 4) % 4;
+    reg_scanline = video_scanline;
+    video_config_save();
 
     clear();
-    print_field(1, 10, names[level], OSD_COLS - 2);
+    print_field(1, 10, names[video_scanline], OSD_COLS - 2);
     overlay(1);
     delay(600);
     overlay(0);
@@ -444,15 +513,33 @@ int main(void) {
         break;
     }
 
+    // Restore the last video settings saved on the SD card.
+    video_config_load();
+
     browse();
 
     // The console is running now.  Stay alive so the user can bring the menu
     // back with Select+Start and pick another game without a power cycle,
     // Select+Up/Down cycles the display zoom mode and Select+Left/Right
     // cycles the scanline strength.
+    // Select must be held for at least 500 ms before it can be used
+    // as a modifier for the zoom/scanline shortcuts.
+    int select_armed = 0;
+    int select_count = 0;
+
     for (;;) {
         uint32_t raw = joy_raw();
         uint32_t e = joy_edge();
+
+        if (!(raw & JOY_SELECT)) {
+            // Select released: require another 500 ms hold next time.
+            select_armed = 0;
+            select_count = 0;
+        } else if (!select_armed) {
+            // This loop runs every 20 ms, so 25 iterations = 500 ms.
+            if (++select_count >= 25)
+                select_armed = 1;
+        }
 
         if ((raw & JOY_MENU) == JOY_MENU) {
             delay(300);                     // let the buttons be released
@@ -464,9 +551,13 @@ int main(void) {
                 continue;
             }
             browse();
-        } else if ((raw & JOY_SELECT) && (e & (JOY_UP | JOY_DOWN))) {
+        } else if (select_armed &&
+                   (raw & JOY_SELECT) &&
+                   (e & (JOY_UP | JOY_DOWN))) {
             zoom_cycle();
-        } else if ((raw & JOY_SELECT) && (e & (JOY_LEFT | JOY_RIGHT))) {
+        } else if (select_armed &&
+                   (raw & JOY_SELECT) &&
+                   (e & (JOY_LEFT | JOY_RIGHT))) {
             scanline_cycle((e & JOY_RIGHT) ? 1 : -1);
         }
         delay(20);
