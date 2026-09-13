@@ -178,8 +178,10 @@ when it finishes. Sending another image at any time replaces the current one.
   HuCard address-mangling scheme (128K, 256K, 384K, 512K, 768K, SF2 2560K,
   otherwise linear).
 * Interleaved/"swapped" dumps are not supported.
-* SuperGrafx (`.sgx`) images will load but will run as plain HuCard software
-  because the second VDC is not built.
+* SuperGrafx (`.sgx`) images load and run with the second VDC (`SGX_SUPPORT = 1`,
+  see the feature table above): both VDC1 and the VPC mixer are built and
+  `sgx_mode` (set from the `.sgx` extension by the loader) enables the
+  SuperGrafx address decoding and VRAM1 access at runtime.
 
 ---
 

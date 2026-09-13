@@ -7,7 +7,7 @@
 .global _start
 .type _start, @function
 
-.equ    STACK_TOP, 0x200000       # 2 MiB of RAM
+.equ    STACK_TOP, 0x1F0000       # 1984 KiB of RAM (avoids VDC1 VRAM window at 0x1F0000..0x1FFFFF)
 
 _start:
     li  sp,STACK_TOP    # load stack pointer

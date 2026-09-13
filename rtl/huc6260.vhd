@@ -35,6 +35,12 @@ entity huc6260 is
 		BORDER	: in std_logic;
 		GRID		: in std_logic_vector(1 downto 0);
 
+		-- Debug overlay: raw BUSY_N from each VDC, used to draw two bars in
+		-- the top-left corner of the picture.  Purely diagnostic; wire both
+		-- to '1' to disable (bars collapse to zero width).
+		DBG_BUSY0_N	: in std_logic := '1';
+		DBG_BUSY1_N	: in std_logic := '1';
+
 		-- NTSC/RGB Video Output
 		R			: out std_logic_vector(2 downto 0);
 		G			: out std_logic_vector(2 downto 0);
@@ -96,6 +102,11 @@ signal V_CNT	: std_logic_vector(9 downto 0) := (others => '0');
 
 signal HBL_FF, HBL_FF2	: std_logic;
 signal VBL_FF, VBL_FF2	: std_logic;
+
+-- Debug overlay: BUSY_N pulse-width tracking, one bar per VDC
+signal dbg_busy0_run, dbg_busy1_run : unsigned(9 downto 0) := (others => '0');
+signal dbg_busy0_max, dbg_busy1_max : unsigned(9 downto 0) := (others => '0');
+signal dbg_busy0_bar, dbg_busy1_bar : unsigned(9 downto 0) := (others => '0');
 
 -- Clock generation
 signal CLKEN_CNT	: std_logic_vector(2 downto 0) := (others => '0');
@@ -302,6 +313,39 @@ begin
 	end if;
 end process;
 
+-- Debug overlay: track the longest run of DBG_BUSY0_N/DBG_BUSY1_N = '0'
+-- seen during each frame (in CLK cycles), latching it for display at the
+-- start of the next frame. Purely diagnostic (SGX desync investigation).
+process( CLK )
+begin
+	if rising_edge( CLK ) then
+		if DBG_BUSY0_N = '0' then
+			dbg_busy0_run <= dbg_busy0_run + 1;
+			if dbg_busy0_run + 1 > dbg_busy0_max then
+				dbg_busy0_max <= dbg_busy0_run + 1;
+			end if;
+		else
+			dbg_busy0_run <= (others => '0');
+		end if;
+
+		if DBG_BUSY1_N = '0' then
+			dbg_busy1_run <= dbg_busy1_run + 1;
+			if dbg_busy1_run + 1 > dbg_busy1_max then
+				dbg_busy1_max <= dbg_busy1_run + 1;
+			end if;
+		else
+			dbg_busy1_run <= (others => '0');
+		end if;
+
+		if V_CNT = 0 and H_CNT = 0 then
+			dbg_busy0_bar <= dbg_busy0_max;
+			dbg_busy0_max <= (others => '0');
+			dbg_busy1_bar <= dbg_busy1_max;
+			dbg_busy1_max <= (others => '0');
+		end if;
+	end if;
+end process;
+
 -- Blank
 process( CLK )
 begin
@@ -357,6 +401,24 @@ begin
 				G_FF <= COLOR(8 downto 6);
 				R_FF <= COLOR(5 downto 3);
 				B_FF <= COLOR(2 downto 0);
+			end if;
+
+			-- Debug overlay: two BUSY_N max-duration bars in the top-left
+			-- corner (red = VDC0, green = VDC1), one CLK-cycle-wide pixel
+			-- per cycle the VDC held BUSY_N low during the previous frame.
+			-- Diagnostic only for the SGX desync investigation.
+			if to_integer(unsigned(V_CNT)) >= TOP_BL_LINES and
+			   to_integer(unsigned(V_CNT)) <  TOP_BL_LINES + 4 then
+				if to_integer(unsigned(H_CNT)) >= LEFT_BL_CLOCKS and
+				   to_integer(unsigned(H_CNT)) <  LEFT_BL_CLOCKS + to_integer(dbg_busy0_bar) then
+					R <= "111"; G <= "000"; B <= "000";
+				end if;
+			elsif to_integer(unsigned(V_CNT)) >= TOP_BL_LINES + 8 and
+			      to_integer(unsigned(V_CNT)) <  TOP_BL_LINES + 12 then
+				if to_integer(unsigned(H_CNT)) >= LEFT_BL_CLOCKS and
+				   to_integer(unsigned(H_CNT)) <  LEFT_BL_CLOCKS + to_integer(dbg_busy1_bar) then
+					R <= "000"; G <= "111"; B <= "000";
+				end if;
 			end if;
 		end if;
 	end if;
