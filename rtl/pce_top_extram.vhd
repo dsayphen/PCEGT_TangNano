@@ -431,7 +431,11 @@ port map(
 	BORDER_EN=> BORDER_EN,
 	BORDER	=> BORDER,
 	GRID		=> GRID,
-		
+
+	-- Debug overlay (SGX desync investigation): BUSY_N duration bars
+	DBG_BUSY0_N => VDC0_BUSY_N,
+	DBG_BUSY1_N => VDC1_BUSY_N,
+
 	-- NTSC/RGB Video Output
 	R			=> VIDEO_R,
 	G			=> VIDEO_G,

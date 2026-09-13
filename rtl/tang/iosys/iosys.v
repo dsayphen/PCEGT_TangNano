@@ -271,20 +271,19 @@ reg  [19:0] rl_timeout;
 
 // Cleared automatically at the start of every load (see below) so that a
 // smaller/different ROM never inherits stray bytes left over in the HuCard
-// area by the previous image, and so that the VDC VRAMs never start a new
+// area by the previous image, and so that the VDC0 VRAM never starts a new
 // game holding the previous game's tiles, BAT and sprite attribute table.
 reg         rl_clearing;
 reg  [22:0] rl_clear_addr;
-reg  [1:0]  rl_clear_phase;
+reg         rl_clear_phase;
 
-// Physical byte windows the two VDC VRAMs occupy inside the 8 MiB SDRAM,
+// Physical byte window VDC0 VRAM occupies inside the 8 MiB SDRAM (bank 3),
 // derived from the RAS/CAS mapping in rtl/tang/pce_sdram_ctrl_3ch.v:
 //   VDC0 -> bank 3, {2'b11, 5'b11111, vram_addr[14:1],  2'b00} = 0x7f0000
-//   VDC1 -> bank 2, {2'b10, 5'b11111, vram1_addr[14:1], 2'b00} = 0x5f0000
-// 32K words of 16 bits = 64 KiB each. The VDC1 window is the top 64 KiB of
-// the softcore's 2 MiB RAM window, which baremetal.ld deliberately keeps out
-// of reach (RAM LENGTH = 0x1f0000), so clearing it cannot disturb firmware.
-localparam [22:0] VRAM1_CLEAR_BASE = 23'h5f_0000;
+// 32K words of 16 bits = 64 KiB.
+// Note: We do NOT clear VDC1 (0x5f0000) here because the existing firmware
+// in SPI flash places its stack top at 0x200000 (0x5fffff), which would be
+// clobbered while the softcore is running FatFs.
 localparam [22:0] VRAM0_CLEAR_BASE = 23'h7f_0000;
 localparam [22:0] VRAM_CLEAR_SPAN  = 23'h01_0000;
 
@@ -390,7 +389,7 @@ wire rl_size_ok = (rl_size != 32'd0) && (rl_size <= ROM_MAX_SIZE);
 always @(posedge clk) begin
     ld_wr <= 1'b0;
 
-    // ---- clear the HuCard area and both VDC VRAMs before a new load ------
+    // ---- clear the HuCard area and VDC0 VRAM before a new load ----------
     // Runs before any real data is accepted (rl_data_ready is held low, see
     // above), so the softcore's pce_load_word() calls simply stall on
     // mem_ready until this finishes.  Without this, a ROM smaller than (or
@@ -398,8 +397,8 @@ always @(posedge clk) begin
     // bytes readable past its own end, which HuCard mirroring can expose as
     // corruption specific to "reload a different/smaller game" scenarios.
     //
-    // The VRAM windows matter for the same reason: nothing else ever zeroes
-    // them, so on a reload the newly started game inherits the previous
+    // The VDC0 VRAM window matters for the same reason: nothing else ever zeroes
+    // it, so on a reload the newly started game inherits the previous
     // game's tiles, BAT and SATB. A game only uploads the VRAM it actually
     // uses, so whatever it leaves untouched still reads back as the previous
     // game's data - which shows up as shifted tiles and mispositioned
@@ -410,23 +409,16 @@ always @(posedge clk) begin
             ld_addr       <= rl_clear_addr;
             ld_data       <= 8'h00;
             rl_clear_addr <= rl_clear_addr + 23'd1;
-            case (rl_clear_phase)
-                2'd0:
-                    if (rl_clear_addr == ROM_MAX_SIZE[22:0] - 23'd1) begin
-                        rl_clear_phase <= 2'd1;
-                        rl_clear_addr  <= VRAM1_CLEAR_BASE;
-                    end
-                2'd1:
-                    if (rl_clear_addr ==
-                        VRAM1_CLEAR_BASE + VRAM_CLEAR_SPAN - 23'd1) begin
-                        rl_clear_phase <= 2'd2;
-                        rl_clear_addr  <= VRAM0_CLEAR_BASE;
-                    end
-                default:
-                    if (rl_clear_addr ==
-                        VRAM0_CLEAR_BASE + VRAM_CLEAR_SPAN - 23'd1)
-                        rl_clearing <= 1'b0;
-            endcase
+            if (!rl_clear_phase) begin
+                if (rl_clear_addr == ROM_MAX_SIZE[22:0] - 23'd1) begin
+                    rl_clear_phase <= 1'b1;
+                    rl_clear_addr  <= VRAM0_CLEAR_BASE;
+                end
+            end else begin
+                if (rl_clear_addr ==
+                    VRAM0_CLEAR_BASE + VRAM_CLEAR_SPAN - 23'd1)
+                    rl_clearing <= 1'b0;
+            end
         end
     end else begin
 
@@ -462,7 +454,7 @@ always @(posedge clk) begin
             rl_timeout    <= 20'd0;
             rl_clearing   <= 1'b1;
             rl_clear_addr <= 23'd0;
-            rl_clear_phase<= 2'd0;
+            rl_clear_phase<= 1'b0;
         end else if (mem_wdata[7:0] == 8'd0) begin
             rl_finishing <= 1'b1;
             rl_timeout   <= 20'd0;
@@ -509,7 +501,7 @@ always @(posedge clk) begin
         rl_timeout   <= 20'd0;
         rl_clearing  <= 1'b0;
         rl_clear_addr<= 23'd0;
-        rl_clear_phase <= 2'd0;
+        rl_clear_phase <= 1'b0;
     end
 end
 

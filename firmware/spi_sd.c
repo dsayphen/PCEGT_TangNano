@@ -223,7 +223,6 @@ int sd_init() {
 
 int sd_readsector(uint32_t start_block, uint8_t *buffer, uint32_t sector_count) {
     uint8_t response;
-    int retries = 0;
     // DEBUG("sd_readsector: %d %d\n", start_block, sector_count);
     if (sector_count == 0)
         return 0;
@@ -235,7 +234,16 @@ int sd_readsector(uint32_t start_block, uint8_t *buffer, uint32_t sector_count) 
             return 0;
         }
 
-        // Wait for start of block indicator
+        // Wait for start of block indicator. `retries` must be reset for
+        // every sector: it used to be declared outside this loop and just
+        // kept accumulating across the whole multi-sector transfer, so on a
+        // large file (thousands of sectors) the budget for the *last*
+        // sectors could already be exhausted by jitter accumulated over
+        // earlier ones, occasionally aborting (or nearly aborting) partway
+        // through - exactly the kind of intermittent, size-dependent read
+        // problem a big HuCard image (e.g. Street Fighter II, ~2.5 MiB)
+        // would hit far more often than a small one.
+        int retries = 0;
         while(spi_receive() != CMD_START_OF_BLOCK) {
             // Timeout
             if(retries > 5000) {

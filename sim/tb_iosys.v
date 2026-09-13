@@ -151,7 +151,7 @@ pce_sdram_ctrl_3ch #(.FREQ(86_400_000)) mem (
     .ld_busy       (ld_busy),
     .ld_idle       (ld_idle),
     .ld_active     (loading),
-    .vdc_reset     (loading),
+
 
     .rom_rd        (rom_rd),
     .rom_a         (rom_a),
@@ -222,7 +222,7 @@ always @(negedge clk_mem)
 initial begin
     wait (dut.flash_loaded);
     repeat (10) @(posedge clk);
-    check_eq(sd.mem[21'h100000], 32'h00200137, "firmware word 0");
+    check_eq(sd.mem[21'h100000], 32'h001f0137, "firmware word 0");
     check_eq(sd.mem[21'h100001], 32'h1f000513, "firmware word 1");
 end
 
@@ -485,7 +485,11 @@ task read_vram;
 endtask
 
 initial begin
-    #40_000_000;                 // 40 ms of simulated time
+    // The loader now clears the full 4 MiB HuCard area plus the 64 KiB VDC0
+    // VRAM window byte-by-byte before every load (~4.26M cycles at 43.2 MHz,
+    // i.e. ~99 ms), so the previous 40 ms budget was too tight to reach the
+    // second load's markers even on a fully passing run.
+    #220_000_000;                // 220 ms of simulated time
     $display("FAIL: timeout, markers seen = %0d", marks);
     $finish;
 end

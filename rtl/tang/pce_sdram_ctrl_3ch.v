@@ -145,8 +145,24 @@ always @(posedge clk) begin
             wr_data    <= ld_data;
         end
 
-        if (ld_active)
+        // A reload in progress invalidates everything the ROM read path
+        // knows about. Clearing cache_valid alone is not enough: rom_addr_r
+        // is only reset to its sentinel at power-on, so if the very first
+        // address the CPU fetches after the reloaded game's reset happens to
+        // equal the last address read by the *previous* game (very likely
+        // for bank-switched HuCards such as SF2, whose reset/IRQ vectors sit
+        // at bank-relative addresses that can coincide across loads), the
+        // `rom_addr_r != rom_addr_eff` guard below stays false and the CPU
+        // silently gets served the stale `rom_do_r` byte instead of ever
+        // issuing a fresh SDRAM read. Forcing rom_addr_r back to its
+        // impossible sentinel (and dropping any pending request left over
+        // from the previous game) guarantees the first post-reload access
+        // always misses and re-fetches.
+        if (ld_active) begin
             cache_valid <= 1'b0;
+            rom_addr_r  <= 23'h7fffff;
+            rom_pending <= 1'b0;
+        end
 
         if (rom_rd && !rom_pending && rom_addr_r != rom_addr_eff) begin
             rom_addr_r <= rom_addr_eff;

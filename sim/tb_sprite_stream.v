@@ -82,7 +82,6 @@ pce_sdram_ctrl_3ch #(.FREQ(86_400_000)) mem (
     .ld_busy       (),
     .ld_idle       (),
     .ld_active     (1'b0),
-    .vdc_reset     (1'b0),
 
     .rom_rd        (1'b0),
     .rom_a         (22'd0),
@@ -135,11 +134,22 @@ sdram_model sd (
 localparam NUM_TILES = 40;
 integer t, w;
 reg [15:0] expect_word [0:NUM_TILES*4-1];
+reg [15:0] expect_word1 [0:NUM_TILES*4-1];
 
 function [20:0] phys_word_addr;
     input [15:0] a;
     begin
         phys_word_addr = 21'h1FC000 + {6'd0, a[14:1]};
+    end
+endfunction
+
+// Same fixed row/column pattern as VRAM0 but bank 2 (SDRAM_BA = 2'b10)
+// instead of bank 3, matching the vram1 bridge's address latch in
+// pce_sdram_ctrl_3ch.v ({7'b1011111, vram1_addr, 1'b0} / BA <= 2'b10).
+function [20:0] phys_word_addr1;
+    input [15:0] a;
+    begin
+        phys_word_addr1 = 21'h17C000 + {6'd0, a[14:1]};
     end
 endfunction
 
@@ -150,6 +160,10 @@ initial begin
             // select in the real HUC6270 address formula), and give each
             // word a distinctive, easily recognisable pattern.
             expect_word[t*4+w] = {t[7:0], w[3:0], 4'hA};
+            // Distinct pattern (nibble 5'hB instead of 5'hA) so a VRAM0/
+            // VRAM1 cross-talk bug (e.g. one channel's data landing in the
+            // other's output) is unambiguous in the failure message.
+            expect_word1[t*4+w] = {t[7:0], w[3:0], 4'hB};
         end
     end
 end
@@ -169,6 +183,20 @@ task preload_all;
             else
                 word32[15:0] = expect_word[p];
             sd.mem[phys_word_addr(a)] = word32;
+        end
+    end
+endtask
+
+task preload_all1;
+    begin
+        for (p = 0; p < NUM_TILES*4; p = p + 1) begin
+            a = p * 64;
+            word32 = sd.mem[phys_word_addr1(a)];
+            if (a[0])
+                word32[31:16] = expect_word1[p];
+            else
+                word32[15:0] = expect_word1[p];
+            sd.mem[phys_word_addr1(a)] = word32;
         end
     end
 endtask
@@ -236,6 +264,56 @@ task stream_all_tiles;
     end
 endtask
 
+// ===========================================================================
+// SGX scenario: VDC0 and VDC1 both stream tiles concurrently at full dot
+// clock rate, exactly as they do on real hardware once SGX_SUPPORT is
+// active (both HUC6270 instances are clocked by the same VDC_CLKEN/clkref
+// from the shared VCE, see rtl/pce_top_extram.vhd). No existing testbench
+// before this one ever drove vram1_addr/vram1_rd while vram_addr/vram_rd
+// were also live, so genuine VDC0+VDC1 concurrency was previously untested.
+// ===========================================================================
+task stream_both_vdcs;
+    input [255:0] label;
+    begin
+        errcount_before = errors;
+    // RAM_A and RAM_RD are driven by the same combinational process in
+    // the real HUC6270 (see rtl/huc6270.vhd, the unclocked
+    // process(SLOT, BG_RAM_ADDR, SPR_RAM_ADDR, ...) block): they always
+    // change atomically together. Asserting *_rd here before setting
+    // the first address would (unrealistically) present a stale
+    // leftover address for one instant - match real hardware instead.
+    @(negedge clk);
+    vram_addr  <= 16'd0;
+    vram1_addr <= 16'd0;
+    vram_rd    <= 1'b1;
+    vram1_rd   <= 1'b1;
+    for (p = 0; p < NUM_TILES*4; p = p + 1) begin
+        @(negedge clk);
+        vram_addr  <= p * 64;
+        vram1_addr <= p * 64;
+        clkref     <= 1'b1;
+            @(posedge clk);
+            @(negedge clk);
+            clkref <= 1'b0;
+            repeat (4) @(posedge clk);
+            if (vram_dout !== expect_word[p]) begin
+                $display("FAIL %0s: VDC0 tile word %0d (vram_addr=%h) = %h, expected %h",
+                          label, p, p*64, vram_dout, expect_word[p]);
+                errors = errors + 1;
+            end
+            if (vram1_dout !== expect_word1[p]) begin
+                $display("FAIL %0s: VDC1 tile word %0d (vram1_addr=%h) = %h, expected %h",
+                          label, p, p*64, vram1_dout, expect_word1[p]);
+                errors = errors + 1;
+            end
+        end
+        vram_rd  <= 1'b0;
+        vram1_rd <= 1'b0;
+        if (errors == errcount_before)
+            $display("ok   %0s: all %0d VDC0+VDC1 words correct", label, NUM_TILES*4*2);
+    end
+endtask
+
 initial begin
     $dumpfile("sim/tb_sprite_stream.vcd");
     $dumpvars(0, tb_sprite_stream);
@@ -264,6 +342,17 @@ initial begin
     $display("--- streaming %0d tiles, with refresh + channel-1 contention ---", NUM_TILES);
     bg_run = 1'b1; bg_ref = 1'b1; bg_rv = 1'b1;
     stream_all_tiles("contended");
+    bg_run = 1'b0;
+
+    preload_all1;
+    repeat (30) @(posedge clk);
+
+    $display("--- streaming %0d tiles on VDC0+VDC1 concurrently, quiet bus ---", NUM_TILES);
+    stream_both_vdcs("both-quiet");
+
+    $display("--- streaming %0d tiles on VDC0+VDC1 concurrently, with refresh + channel-1 contention ---", NUM_TILES);
+    bg_run = 1'b1; bg_ref = 1'b1; bg_rv = 1'b1;
+    stream_both_vdcs("both-contended");
     bg_run = 1'b0;
 
     if (errors == 0)
