@@ -15,6 +15,7 @@
 #define DEV_SD 0
 
 int sd_initialized = 0;
+int sd_writesector(uint32_t start_block, const uint8_t *buffer, uint32_t sector_count);
 
 DSTATUS disk_status (BYTE pdrv)
 {
@@ -47,11 +48,16 @@ DRESULT disk_read (BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
     return sd_readsector((uint32_t)sector, (uint8_t *)buff, count) ? RES_OK : RES_ERROR;
 }
 
-#if FF_FS_READONLY == 0
+#if FF_FS_READONLY == 0 || defined(_FS_READONLY)
 DRESULT disk_write (BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count)
 {
-    (void)pdrv; (void)buff; (void)sector; (void)count;
-    return RES_ERROR;       /* the card is mounted read only */
+    if (pdrv != DEV_SD)
+        return RES_PARERR;
+    if (!sd_initialized)
+        return RES_NOTRDY;
+
+    // Utilise sd_writesector (ou une boucle sd_writesector selon l'API de votre spi_sd.c)
+    return sd_writesector((uint32_t)sector, (const uint8_t *)buff, count) ? RES_OK : RES_ERROR;
 }
 #endif
 

@@ -98,6 +98,7 @@ uint32_t joy_edge(void);
 int     sd_init(void);
 uint8_t sd_send_command(uint8_t cmd, uint32_t arg);
 int     sd_readsector(uint32_t sector, uint8_t *buffer, uint32_t sector_count);
+// int 	sd_writesector(uint32_t start_block, uint8_t *buffer, uint32_t sector_count);
 
 // ---- ROM streaming to the PC Engine --------------------------------------
 static inline void pce_load_start(uint32_t size_bytes, int sgx) {

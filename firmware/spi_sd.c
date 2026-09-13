@@ -274,3 +274,46 @@ int sd_readsector(uint32_t start_block, uint8_t *buffer, uint32_t sector_count) 
     // DEBUG("sd_readsector: return\n");
     return 1;
 }
+
+int sd_writesector(uint32_t start_block, const uint8_t *buffer, uint32_t sector_count) {
+    if (sector_count == 0)
+        return 0;
+
+    while (sector_count--) {
+        // Envoi de la commande de rédaction d'un bloc (CMD24)
+        uint8_t response = sd_send_command(CMD24_WRITE_SINGLE_BLOCK, start_block++);
+        if (response != 0x00)
+            return 0;
+
+        // Clocks de préparation (au moins 8 bits)
+        spi_send(0xFF);
+
+        // Envoi du jeton de début de bloc (0xFE)
+        spi_send(CMD_START_OF_BLOCK);
+
+        // Transmettre les 512 octets du secteur
+        for (int i = 0; i < 512; i++) {
+            spi_send(*buffer++);
+        }
+
+        // Dummy CRC 16-bit
+        spi_send(0xFF);
+        spi_send(0xFF);
+
+        // Lecture du "Data Response Token" (XXX00101 -> Mask 0x1F == 0x05)
+        response = spi_receive();
+        if ((response & 0x1F) != CMD_DATA_ACCEPTED)
+            return 0;
+
+        // Attente de la fin de programmation (la carte maintient MISO bas pendant l'écriture)
+        int retries = 0;
+        while (spi_receive() == 0x00) {
+            if (++retries > 50000)
+                return 0; // Timeout d'écriture
+        }
+
+        spi_send(0xFF);
+    }
+
+    return 1;
+}
