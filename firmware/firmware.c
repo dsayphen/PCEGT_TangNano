@@ -22,6 +22,7 @@
 
 #include "picorv32.h"
 #include "fatfs/ff.h"
+#include "font8x8.h"
 
 // ---------------------------------------------------------------------------
 // OSD layout, 32 x 20 characters
@@ -48,6 +49,44 @@ static int page_len;            // entries actually on this page
 
 static char path_buf[PWD_SIZE + NAME_MAX + 2];
 static uint8_t io_buf[2048];
+
+// Conversion d'un entier 8-bit en chaîne de caractères texte
+static int u8_to_str(char *buf, uint8_t val) {
+    if (val >= 100) {
+        buf[0] = '0' + (val / 100);
+        buf[1] = '0' + ((val / 10) % 10);
+        buf[2] = '0' + (val % 10);
+        buf[3] = '\0';
+        return 3;
+    } else if (val >= 10) {
+        buf[0] = '0' + (val / 10);
+        buf[1] = '0' + (val % 10);
+        buf[2] = '\0';
+        return 2;
+    } else {
+        buf[0] = '0' + val;
+        buf[1] = '\0';
+        return 1;
+    }
+}
+
+// Comparaison de chaînes sans string.h
+static int starts_with(const char *line, const char *prefix) {
+    while (*prefix) {
+        if (*line++ != *prefix++) return 0;
+    }
+    return 1;
+}
+
+// Extraction de la valeur numérique
+static uint8_t parse_u8(const char *str) {
+    uint8_t val = 0;
+    while (*str >= '0' && *str <= '9') {
+        val = val * 10 + (*str - '0');
+        str++;
+    }
+    return val;
+}
 
 // ---------------------------------------------------------------------------
 // Small OSD helpers
@@ -103,76 +142,85 @@ static void message(const char *l1, const char *l2) {
 // Video configuration & Persistence
 // ---------------------------------------------------------------------------
 // Saved at the root of the SD card so the last zoom/scanline settings survive
-// a power cycle. The file contains four bytes:
-//   byte 0: magic
-//   byte 1: version
-//   byte 2: zoom (0..1)
-//   byte 3: scanline level (0..3)
-#define VIDEO_CFG_FILE    "video.cfg"
-#define VIDEO_CFG_MAGIC   0x56
-#define VIDEO_CFG_VERSION 0x01
+// a power cycle. 
+
+#define VIDEO_CFG_FILE    "/video.cfg"
 
 static int video_zoom = 1;       // hardware reset default: stretch
 static int video_scanline = 0;   // hardware reset default: off
 
 static void video_config_load(void) {
-    FIL f;
-    UINT br;
-    uint8_t cfg[4];
+    FIL file;
+    char line[64];
 
-    // Defaults are kept if the file does not exist or is invalid.
-    video_zoom = 1;
-    video_scanline = 0;
-
-    if (f_open(&f, VIDEO_CFG_FILE, FA_READ) != FR_OK)
-        goto apply;
-
-    if (f_read(&f, cfg, sizeof(cfg), &br) != FR_OK || br != sizeof(cfg)) {
-        f_close(&f);
-        goto apply;
+    if (f_open(&file, "/video.cfg", FA_READ) != FR_OK) {
+        return; // Conserve les valeurs par défaut si le fichier n'existe pas encore
     }
-    f_close(&f);
 
-    if (cfg[0] != VIDEO_CFG_MAGIC ||
-        cfg[1] != VIDEO_CFG_VERSION ||
-        cfg[2] > 1 ||
-        cfg[3] > 3)
-        goto apply;
+    // f_gets fonctionne parfaitement maintenant grâce à FF_USE_STRFUNC = 1
+    while (f_gets(line, sizeof(line), &file)) {
+        // Ignore les commentaires (#), les lignes vides et les saut de ligne
+        if (line[0] == '#' || line[0] == '\r' || line[0] == '\n' || line[0] == '\0') {
+            continue;
+        }
 
-    video_zoom = cfg[2];
-    video_scanline = cfg[3];
+        if (starts_with(line, "reg_video_zoom=")) {
+            reg_video_zoom = parse_u8(line + 15);
+        } else if (starts_with(line, "reg_scanline=")) {
+            reg_scanline = parse_u8(line + 13);
+        }
+    }
 
-apply:
-    reg_video_zoom = video_zoom;
-    reg_scanline = video_scanline;
+    f_close(&file);
 }
 
 static void video_config_save(void) {
-    FIL f;
+    FIL file;
     UINT bw;
-    uint8_t cfg[4];
+    char num[4];
+    int len;
 
-    cfg[0] = VIDEO_CFG_MAGIC;
-    cfg[1] = VIDEO_CFG_VERSION;
-    cfg[2] = (uint8_t)video_zoom;
-    cfg[3] = (uint8_t)video_scanline;
-
-    if (f_open(&f, VIDEO_CFG_FILE, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
-        uart_print("warning: cannot save video.cfg\n");
+    if (f_open(&file, "/video.cfg", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
         return;
     }
 
-    if (f_write(&f, cfg, sizeof(cfg), &bw) != FR_OK || bw != sizeof(cfg))
-        uart_print("warning: cannot write video.cfg\n");
+    // Commentaires explicatifs rédigés directement dans le fichier CFG
+    const char *header = 
+        "# PCEngine / SuperGrafx Video Settings\n"
+        "# -----------------------------------\n"
+        "# reg_video_zoom :\n"
+        "#   0 = Original / Integer Scale (1x)\n"
+        "#   1 = Stretched / Fit Screen (Full)\n"
+        "#\n"
+        "# reg_scanline :\n"
+        "#   0 = Off (No Scanlines)\n"
+        "#   1 = 25% Intensity\n"
+        "#   2 = 50% Intensity\n"
+        "#   3 = 100% Intensity\n"
+        "# -----------------------------------\n";
 
-    f_close(&f);
+    f_write(&file, header, (UINT)strlen(header), &bw); // Écrit la documentation complète
+
+    // Écriture de reg_video_zoom
+    f_write(&file, "reg_video_zoom=", 15, &bw);
+    len = u8_to_str(num, reg_video_zoom);
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+
+    // Écriture de reg_scanline
+    f_write(&file, "reg_scanline=", 13, &bw);
+    len = u8_to_str(num, reg_scanline);
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+
+    f_close(&file);
 }
 
 // Cycle the display zoom mode (2x -> stretch -> ...) and flash the new
 // setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
 // (reg_video_zoom) and rtl/tang/video_scandoubler.v.
 static void zoom_cycle(void) {
-    static const char *names[2] = { "Zoom: 2x", "Zoom: stretch" };
+    static const char *names[2] = { "Zoom: Integer", "Zoom: Stretch" };
 
     video_zoom = (video_zoom + 1) % 2;
     reg_video_zoom = video_zoom;

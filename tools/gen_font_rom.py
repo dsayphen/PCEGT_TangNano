@@ -19,7 +19,11 @@ DST = os.path.join(ROOT, "rtl", "tang", "iosys", "font_rom.v")
 FIRST_CHAR = 0x20
 LAST_CHAR = 0x7F
 
-
+def reverse_bits(b):
+    """Inverse l'ordre des 8 bits (ex: 0b10000000 -> 0b00000001) pour corriger l'effet miroir."""
+    return int(f"{b:08b}"[::-1], 2)
+    
+    
 def read_font():
     glyphs = {}
     with open(SRC, "r", encoding="ascii") as fh:
@@ -70,7 +74,8 @@ def main():
         ch = chr(c) if 0x20 < c < 0x7F else " "
         out.append("        // 0x%02X '%s'" % (c, ch))
         for r in range(8):
-            out.append("        10'd%-3d: data <= 8'h%02X;" % (idx * 8 + r, rows[r]))
+            row_reversed = reverse_bits(rows[r])
+            out.append("        10'd%-3d: data <= 8'h%02X;" % (idx * 8 + r, row_reversed))
     out.append("        default: data <= 8'h00;")
     out.append("    endcase")
     out.append("end")
