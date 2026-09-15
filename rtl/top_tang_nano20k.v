@@ -222,6 +222,7 @@ iosys #(
     .osd_x            (osd_x),
     .osd_y            (osd_y),
     .osd_de           (osd_de),
+	.pce_rgb          (video_rgb_core),
     .osd_on           (osd_on),
     .osd_rgb          (osd_rgb),
     .osd_active       (osd_active),

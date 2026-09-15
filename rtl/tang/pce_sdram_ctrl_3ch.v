@@ -145,24 +145,8 @@ always @(posedge clk) begin
             wr_data    <= ld_data;
         end
 
-        // A reload in progress invalidates everything the ROM read path
-        // knows about. Clearing cache_valid alone is not enough: rom_addr_r
-        // is only reset to its sentinel at power-on, so if the very first
-        // address the CPU fetches after the reloaded game's reset happens to
-        // equal the last address read by the *previous* game (very likely
-        // for bank-switched HuCards such as SF2, whose reset/IRQ vectors sit
-        // at bank-relative addresses that can coincide across loads), the
-        // `rom_addr_r != rom_addr_eff` guard below stays false and the CPU
-        // silently gets served the stale `rom_do_r` byte instead of ever
-        // issuing a fresh SDRAM read. Forcing rom_addr_r back to its
-        // impossible sentinel (and dropping any pending request left over
-        // from the previous game) guarantees the first post-reload access
-        // always misses and re-fetches.
-        if (ld_active) begin
+        if (ld_active)
             cache_valid <= 1'b0;
-            rom_addr_r  <= 23'h7fffff;
-            rom_pending <= 1'b0;
-        end
 
         if (rom_rd && !rom_pending && rom_addr_r != rom_addr_eff) begin
             rom_addr_r <= rom_addr_eff;
@@ -658,8 +642,10 @@ always @(posedge clk) begin
 
             // VDC0 RAS at cycle 2.
             if (cycle == 3'd2 && !refresh_block) begin
-                active[2] <= vram_req != vram_ack;
-                if (vram_req != vram_ack) begin
+                //active[2] <= vram_req != vram_ack;
+                if (!active[2] && vram_req != vram_ack) begin
+					active[2] <= 1'b1;
+					
                     addr_latch[2] <= {7'b1111111, vram_addr, 1'b0};
                     din_latch[2]  <= vram_din;
                     ds_latch[2]   <= 2'b11;
@@ -686,14 +672,13 @@ always @(posedge clk) begin
                                      {~ds_latch[0], 2'b11} :
                                      {2'b11, ~ds_latch[0]};
                 end
+
             end
 
             // VDC1 / PicoRV32 CAS at cycle 3.
             if (cycle == 3'd3 && active[1]) begin
-                if (channel1_port == CHANNEL1_VRAM1)
-                    vram1_ack <= vram1_req;
                 cmd      <= we_latch[1] ? CMD_WRITE : CMD_READ;
-                addr_out <= {3'b100, addr_latch[1][9:2]};
+                addr_out <= {3'b100, addr_latch[1][10:3]};
                 SDRAM_BA <= addr_latch[1][22:21];
                 if (we_latch[1]) begin
                     dq_oen    <= 1'b0;
@@ -712,7 +697,6 @@ always @(posedge clk) begin
 
             // VDC0 CAS at cycle 4.
             if (cycle == 3'd4 && active[2]) begin
-                vram_ack <= vram_req;
                 cmd      <= we_latch[2] ? CMD_WRITE : CMD_READ;
                 addr_out <= {3'b100, addr_latch[2][9:2]};
                 SDRAM_BA <= 2'b11;
@@ -747,6 +731,8 @@ always @(posedge clk) begin
                                       dq_in[31:16] : dq_in[15:0];
                     else
                         vram1_dout <= din_latch[1];
+						
+					vram1_ack <= vram1_req;
                 end
                 active[1] <= 1'b0;
             end
@@ -758,6 +744,9 @@ always @(posedge clk) begin
                                  dq_in[31:16] : dq_in[15:0];
                 else
                     vram_dout <= din_latch[2];
+					
+				// ACK only when the SDRAM transaction is actually completed.
+				vram_ack <= vram_req;
                 active[2] <= 1'b0;
             end
             if (cycle == 3'd7 && !refresh_block && !active[0] &&

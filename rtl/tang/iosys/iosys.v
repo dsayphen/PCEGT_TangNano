@@ -72,6 +72,7 @@ module iosys #(
     input  wire [10:0] osd_x,
     input  wire [9:0]  osd_y,
     input  wire        osd_de,
+	input  wire [23:0] pce_rgb,
     output wire        osd_on,
     output wire [23:0] osd_rgb,
     output wire        osd_active,        // clk domain copy of the overlay flag
@@ -334,6 +335,10 @@ picorv32 #(
 // ===========================================================================
 // Peripherals
 // ===========================================================================
+
+// Couleur brute sortie du générateur de texte OSD (avant mélange)
+wire [23:0] osd_raw_rgb;
+
 textdisp u_disp (
     .clk         (clk),
     .resetn      (resetn),
@@ -347,8 +352,34 @@ textdisp u_disp (
     .osd_y       (osd_y),
     .osd_de      (osd_de),
     .osd_on      (osd_on),
-    .osd_rgb     (osd_rgb)
+    .osd_rgb     (osd_raw_rgb)  // <- On branche la couleur brute ici
 );
+
+// --- Mixer vidéo : Alpha Blending / Transparence In-Game ---
+reg [23:0] final_osd_rgb;
+
+// Si tu reçois le bus RGB du jeu (ex: pce_rgb), on extrait ses composantes.
+// Si le signal du jeu s'appelle autrement dans ton top (ex: video_rgb), adapte le nom ici.
+wire [7:0] game_r = pce_rgb[23:16];
+wire [7:0] game_g = pce_rgb[15:8];
+wire [7:0] game_b = pce_rgb[7:0];
+
+always @(*) begin
+    if (osd_active && osd_de) begin
+        if (osd_on) begin
+            // Caractère / Texte : 100% opaque (Blanc)
+            final_osd_rgb = osd_raw_rgb;
+        end else begin
+            // Fond de l'OSD : Transparence 50% sur l'image du jeu (décalage >> 1)
+            final_osd_rgb = { (game_r >> 1), (game_g >> 1), (game_b >> 1) };
+        end
+    end else begin
+        // OSD inactif
+        final_osd_rgb = 24'h000000;
+    end
+end
+
+assign osd_rgb = final_osd_rgb;
 
 simpleuart u_uart (
     .clk          (clk),

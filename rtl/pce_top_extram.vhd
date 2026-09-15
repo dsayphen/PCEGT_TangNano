@@ -6,7 +6,7 @@ use IEEE.STD_LOGIC_TEXTIO.all;
 
 entity pce_top is
 	generic (
-		SGX_SUPPORT   : integer := 0;
+		SGX_SUPPORT   : integer := 1;
 		CHEAT_SUPPORT : integer := 0;
 		PSG_O_WIDTH: integer := 16;
 		MAX_SPRITES: integer := 16;

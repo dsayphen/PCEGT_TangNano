@@ -100,7 +100,7 @@ static void status(const char *msg) {
 static void title(void) {
     clear_line(ROW_TITLE);
     cursor(1, ROW_TITLE);
-    print("PCEngine - pick a ROM");
+    print("PC-Engine / SuperGrafx");
 }
 
 // Print a string right-truncated to `w` columns starting at column x.
@@ -429,9 +429,9 @@ static void draw_page(int page, int total, int active) {
     clear_line(ROW_STATUS);
     cursor(1, ROW_STATUS);
     if (total == 0)
-        print("No .PCE/.SGX files here");
+        print("     -- NO PCE/SGX ROMS --");
     else
-        printf("Page %d/%d  A=open B=back", page + 1, pages);
+        printf("Page %d/%d  1=OK 2=Back", page + 1, pages);
 }
 
 static void move_cursor(int old_i, int new_i) {
@@ -524,6 +524,72 @@ static void browse(void) {
     }
 }
 
+// Affiche et gère le menu in-game suspendu
+int ingame_menu(void) {
+    int selected = 0;
+    const int item_count = 4;
+    
+    // Activer l'overlay OSD (fond transparent géré par iosys.v)
+    overlay(1);
+    
+    for (;;) {
+        clear();
+        
+        // En-tête
+        cursor(2, 1);
+        print("=== GAME PAUSED ===");
+        
+        // Items du menu
+        cursor(2, 3);
+        print(selected == 0 ? "> 1. Resume Game" : "  1. Resume Game");
+        
+        cursor(2, 4);
+        print(selected == 1 ? "> 2. Video Settings" : "  2. Video Settings");
+        
+        cursor(2, 5);
+        print(selected == 2 ? "> 3. Reset Game" : "  3. Reset Game");
+        
+        cursor(2, 6);
+        print(selected == 3 ? "> 4. Return to Browser" : "  4. Return to Browser");
+
+        // Attente d'un événement touche (joy_edge)
+        uint32_t e = joy_edge();
+        
+        if (e & JOY_UP) {
+            selected = (selected - 1 + item_count) % item_count;
+        } else if (e & JOY_DOWN) {
+            selected = (selected + 1) % item_count;
+        } else if ((e & JOY_A) || (e & JOY_START)) {
+            // Action sur l'item sélectionné
+            if (selected == 0) {
+                // Resume
+                break;
+            } else if (selected == 1) {
+                // Sous-menu vidéo (zoom, scanlines, etc.)
+                video_settings_menu();
+            } else if (selected == 2) {
+                // Reset du cœur PCE
+                reset_core();
+                break;
+            } else if (selected == 3) {
+                // Quitter le jeu et retourner au navigateur de fichiers
+                overlay(0);
+                return 1; // Signal pour revenir à la boucle d'exploration SD
+            }
+        } else if (e & JOY_B) {
+            // Bouton B = Annuler / Reprendre le jeu
+            break;
+        }
+        
+        delay(20);
+    }
+    
+    // Masquer l'OSD et rendre le contrôle au jeu
+    clear();
+    overlay(0);
+    return 0; // Continuer l'exécution du jeu
+}
+
 // ---------------------------------------------------------------------------
 // Mounting
 // ---------------------------------------------------------------------------
@@ -607,7 +673,19 @@ int main(void) {
                    (raw & JOY_SELECT) &&
                    (e & (JOY_LEFT | JOY_RIGHT))) {
             scanline_cycle((e & JOY_RIGHT) ? 1 : -1);
+        } else if (select_armed &&
+                   (raw & JOY_SELECT) &&
+                   (e & (JOY_START))) {
+				// Lancement du menu in-game
+				int exit_to_browser = ingame_menu();
+				
+				if (exit_to_browser) {
+					// On sort de la boucle de jeu pour relancer le browser SD
+					break; 
+				}
         }
+		
+		ingame_menu
         delay(20);
     }
 
