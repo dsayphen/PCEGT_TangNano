@@ -38,6 +38,10 @@ entity pce_core is
 		rom_sz     : in  std_logic_vector(7 downto 0);
 		sgx_mode   : in  std_logic;
 		pause      : in  std_logic := '0';   -- '1' freezes the HuC6280 (WAIT_N); video keeps scanning out
+		cheat_enable : in std_logic := '0';
+		cheat_code : in std_logic_vector(127 downto 0) := (others => '0');
+		cheat_load : in std_logic := '0';
+		cheat_reset : in std_logic := '0';
 
 		-- VDC0 video RAM (external SDRAM)
 		vram0_a    : out std_logic_vector(15 downto 0);
@@ -78,7 +82,7 @@ architecture rtl of pce_core is
 
     signal sgx_i    : std_logic;
 
-	signal gg_code_z : std_logic_vector(128 downto 0) := (others => '0');
+	signal gg_code_i : std_logic_vector(128 downto 0);
 	signal ff_byte   : std_logic_vector(7 downto 0) := x"FF";
 	signal zero_byte : std_logic_vector(7 downto 0) := x"00";
 	signal zero_nib  : std_logic_vector(3 downto 0) := x"0";
@@ -98,7 +102,7 @@ begin
 	CORE : entity work.pce_top
 	generic map (
 		SGX_SUPPORT      => SGX_SUPPORT,
-		CHEAT_SUPPORT    => 0,
+		LITE             => 0,
 		PSG_O_WIDTH      => 20,
 		MAX_SPRITES      => 16,
 		USE_INTERNAL_RAM => 1,
@@ -135,9 +139,9 @@ begin
         VRAM1_WE    => vram1_we,
         VRAM1_DI    => vram1_di,
 
-		GG_EN       => '0',
-		GG_CODE     => gg_code_z,
-		GG_RESET    => '0',
+		GG_EN       => not cheat_enable,
+		GG_CODE     => gg_code_i,
+		GG_RESET    => cheat_reset,
 		GG_AVAIL    => open,
 
 		SP64        => '0',
@@ -206,6 +210,8 @@ begin
 		VIDEO_HBL   => vid_hbl,
 		VIDEO_VBL   => vid_vbl
 	);
+
+	gg_code_i <= cheat_load & cheat_code;
 
 	aud_l <= std_logic_vector(psg_l);
 	aud_r <= std_logic_vector(psg_r);

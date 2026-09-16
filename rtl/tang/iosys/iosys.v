@@ -40,6 +40,10 @@
 //                                 one cycle (used by the in-game pause menu's
 //                                 "Reset Game", equivalent to the reset
 //                                 button - the SDRAM still holds the ROM)
+//   0x0200_0064 .. 0x0200_0070  Game Genie code payload, bits 0..127
+//   0x0200_0074                  cheat command: bit0 loads the payload,
+//                                 bit1 resets all loaded cheats
+//   0x0200_0078                  cheat enable (1 = active)
 //   0x0200_0060                  core id, read only
 //
 // ROM description
@@ -111,6 +115,10 @@ module iosys #(
     // ---- in-game pause menu ------------------------------------------------
     output reg          pause,        // '1' freezes the HuC6280 (see pce_core.pause)
     output reg          soft_reset,   // one clk pulse per write to 0x0200_0058
+    output reg          cheat_enable,
+    output reg  [127:0] cheat_code,
+    output reg          cheat_load,
+    output reg          cheat_reset,
 
     // ---- 32 bit SDRAM port for the softcore ------------------------------
     output wire        rv_valid,
@@ -268,6 +276,12 @@ wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
 wire pause_sel     = mem_valid && (mem_addr == 32'h0200_0054);
 wire reset_sel     = mem_valid && (mem_addr == 32'h0200_0058);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
+wire cheat_code0_sel = mem_valid && (mem_addr == 32'h0200_0064);
+wire cheat_code1_sel = mem_valid && (mem_addr == 32'h0200_0068);
+wire cheat_code2_sel = mem_valid && (mem_addr == 32'h0200_006c);
+wire cheat_code3_sel = mem_valid && (mem_addr == 32'h0200_0070);
+wire cheat_cmd_sel   = mem_valid && (mem_addr == 32'h0200_0074);
+wire cheat_en_sel    = mem_valid && (mem_addr == 32'h0200_0078);
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -311,6 +325,8 @@ wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
                    pad_mode_sel || time_sel || pause_sel || reset_sel || id_sel ||
+                   cheat_code0_sel || cheat_code1_sel || cheat_code2_sel || cheat_code3_sel ||
+                   cheat_cmd_sel || cheat_en_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -321,6 +337,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    scan_sel     ? {30'b0, scanline} :
                    pad_mode_sel ? {31'b0, pad_mode} :
                    pause_sel    ? {31'b0, pause} :
+                               cheat_en_sel ? {31'b0, cheat_enable} :
                    uart_div_sel ? uart_div_do :
                    uart_dat_sel ? uart_dat_do :
                    time_sel     ? time_reg :
@@ -521,6 +538,23 @@ always @(posedge clk) begin
     if (pad_mode_sel && (mem_wstrb != 4'b0))
         pad_mode <= mem_wdata[0];
 
+    if (cheat_code0_sel && (mem_wstrb != 4'b0))
+        cheat_code[31:0] <= mem_wdata;
+    if (cheat_code1_sel && (mem_wstrb != 4'b0))
+        cheat_code[63:32] <= mem_wdata;
+    if (cheat_code2_sel && (mem_wstrb != 4'b0))
+        cheat_code[95:64] <= mem_wdata;
+    if (cheat_code3_sel && (mem_wstrb != 4'b0))
+        cheat_code[127:96] <= mem_wdata;
+    cheat_load <= 1'b0;
+    cheat_reset <= 1'b0;
+    if (cheat_cmd_sel && (mem_wstrb != 4'b0)) begin
+        cheat_load <= mem_wdata[0];
+        cheat_reset <= mem_wdata[1];
+    end
+    if (cheat_en_sel && (mem_wstrb != 4'b0))
+        cheat_enable <= mem_wdata[0];
+
     // Level: the firmware sets it on entering the pause menu, clears it on
     // Resume. Pulse: any write produces exactly one clk_sys cycle high,
     // long enough for the top level's existing reset stretcher to pick up.
@@ -555,6 +589,10 @@ always @(posedge clk) begin
         pad_mode     <= 1'b0;
         pause        <= 1'b0;
         soft_reset   <= 1'b0;
+        cheat_enable <= 1'b0;
+        cheat_code   <= 128'd0;
+        cheat_load   <= 1'b0;
+        cheat_reset  <= 1'b0;
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;

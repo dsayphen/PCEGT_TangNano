@@ -173,6 +173,10 @@ wire [22:0] rom_offset;
 wire        sgx_mode;
 wire        pause;           // from iosys, freezes pce_core's HuC6280 (WAIT_N)
 wire        soft_reset;      // from iosys, one clk_sys pulse -> stretched core_reset
+wire        cheat_enable;
+wire [127:0] cheat_code;
+wire        cheat_load;
+wire        cheat_reset;
 wire [1:0]  video_zoom;
 wire [1:0]  scanline;
 
@@ -247,6 +251,10 @@ iosys #(
     .scanline         (scanline),
     .pause            (pause),
     .soft_reset       (soft_reset),
+    .cheat_enable     (cheat_enable),
+    .cheat_code       (cheat_code),
+    .cheat_load       (cheat_load),
+    .cheat_reset      (cheat_reset),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -466,6 +474,10 @@ pce_core #(
     .rom_sz     (rom_sz),
     .sgx_mode   (sgx_mode),
     .pause      (pause),
+    .cheat_enable (cheat_enable),
+    .cheat_code (cheat_code),
+    .cheat_load (cheat_load),
+    .cheat_reset (cheat_reset),
 
     .vram0_a    (vram0_a),
     .vram0_do   (vram0_do),

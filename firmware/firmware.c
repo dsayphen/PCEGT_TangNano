@@ -153,11 +153,18 @@ static void message(const char *l1, const char *l2) {
 
 #define VIDEO_CFG_FILE    "/video.cfg"
 #define GAME_CFG_DIR      "/pcecfg"
+#define CHEAT_DIR         "/cheat"
+#define MAX_CHEATS        32
+#define CHEAT_CODE_MAX    256
 
 static int video_zoom = 1;       // hardware reset default: stretch
 static int video_scanline = 0;   // hardware reset default: off
 static int game_pad_mode = 0;     // 0 = 2-button pad, 1 = 6-button pad
+static int cheat_count = 0;
 static char current_game_cfg[PWD_SIZE];
+static char cheat_codes[MAX_CHEATS][CHEAT_CODE_MAX];
+static char cheat_desc[MAX_CHEATS][NAME_MAX];
+static uint8_t cheat_enabled[MAX_CHEATS];
 
 static void strip_extension(char *name) {
     char *dot = strrchr(name, '.');
@@ -186,6 +193,156 @@ static void build_game_cfg_path(const char *rom_name, char *out, int out_size) {
     strncat(out, "/", out_size - strlen(out));
     strncat(out, base, out_size - strlen(out));
     strncat(out, ".cfg", out_size - strlen(out));
+}
+
+static void build_game_cheat_path(const char *rom_name, char *out, int out_size) {
+    char base[NAME_MAX];
+    const char *p = strrchr(rom_name, '/');
+    const char *n = p ? p + 1 : rom_name;
+    int i = 0;
+
+    while (n[i] && n[i] != '.' && i < (int)sizeof(base) - 1) {
+        base[i] = n[i];
+        i++;
+    }
+    base[i] = '\0';
+    if (out_size <= 0)
+        return;
+    strcpy(out, CHEAT_DIR);
+    strncat(out, "/", out_size - strlen(out));
+    strncat(out, base, out_size - strlen(out));
+    strncat(out, ".cht", out_size - strlen(out));
+}
+
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static int parse_hex(const char *s, const char **end, uint32_t *value) {
+    uint32_t v = 0;
+    int digits = 0;
+    while (hex_digit(*s) >= 0) {
+        v = (v << 4) | (uint32_t)hex_digit(*s++);
+        digits++;
+    }
+    if (end) *end = s;
+    if (value) *value = v;
+    return digits != 0;
+}
+
+static int cheat_index_and_field(char *line, int *index, char **field) {
+    char *p = line + 5;
+    int n = 0;
+    if (!starts_with(line, "cheat") || *p < '0' || *p > '9')
+        return 0;
+    while (*p >= '0' && *p <= '9')
+        n = n * 10 + (*p++ - '0');
+    if (*p++ != '_' || n >= MAX_CHEATS)
+        return 0;
+    *index = n;
+    *field = p;
+    return 1;
+}
+
+static char *cheat_field_value(char *field, const char *name) {
+    while (*field == ' ' || *field == '\t') field++;
+    if (!starts_with(field, name))
+        return 0;
+    field += strlen(name);
+    while (*field == ' ' || *field == '\t') field++;
+    if (*field++ != '=')
+        return 0;
+    while (*field == ' ' || *field == '\t') field++;
+    return field;
+}
+
+static int parse_bool(const char *value) {
+    return starts_with(value, "true") || starts_with(value, "1");
+}
+
+static void cheat_hw_reset(void) {
+    reg_cheat_cmd = 2;
+}
+
+static void cheat_hw_load(uint32_t address, uint8_t value) {
+    reg_cheat_code0 = value;
+    reg_cheat_code1 = 0;
+    reg_cheat_code2 = address & 0x001fffff;
+    reg_cheat_code3 = 0;
+    reg_cheat_cmd = 1;
+}
+
+static void apply_cheats_to_hw(void) {
+    int any_enabled = 0;
+
+    reg_cheat_enable = 0;
+    cheat_hw_reset();
+    for (int i = 0; i < cheat_count; i++) {
+        if (!cheat_enabled[i])
+            continue;
+        any_enabled = 1;
+        const char *p = cheat_codes[i];
+        while (*p) {
+            uint32_t address;
+            uint32_t value;
+            const char *end;
+            if (!parse_hex(p, &end, &address) || *end != ':') break;
+            p = end + 1;
+            if (!parse_hex(p, &end, &value) || value > 0xff || address > 0x1fffff)
+                break;
+            cheat_hw_load(address, (uint8_t)value);
+            p = (*end == '+') ? end + 1 : end;
+        }
+    }
+    reg_cheat_enable = any_enabled;
+}
+
+static void load_cheat_file(const char *rom_name) {
+    FIL file;
+    char line[CHEAT_CODE_MAX + 32];
+    char path[PWD_SIZE];
+    int index;
+    char *field;
+
+    cheat_count = 0;
+    memset(cheat_codes, 0, sizeof(cheat_codes));
+    memset(cheat_desc, 0, sizeof(cheat_desc));
+    memset(cheat_enabled, 0, sizeof(cheat_enabled));
+    build_game_cheat_path(rom_name, path, sizeof(path));
+    if (f_open(&file, path, FA_READ) != FR_OK)
+        return;
+
+    while (f_gets(line, sizeof(line), &file)) {
+        if (!cheat_index_and_field(line, &index, &field))
+            continue;
+        char *value = cheat_field_value(field, "code");
+        if (value) {
+            while (*value == '\"') value++;
+            int i = 0;
+            while (*value && *value != '\"' && *value != '\r' && *value != '\n' &&
+                   i < CHEAT_CODE_MAX - 1)
+                cheat_codes[index][i++] = *value++;
+            cheat_codes[index][i] = '\0';
+        }
+        value = cheat_field_value(field, "desc");
+        if (value) {
+            while (*value == '\"') value++;
+            int i = 0;
+            while (*value && *value != '\"' && *value != '\r' && *value != '\n' &&
+                   i < NAME_MAX - 1)
+                cheat_desc[index][i++] = *value++;
+            cheat_desc[index][i] = '\0';
+        }
+        value = cheat_field_value(field, "enable");
+        if (value)
+            cheat_enabled[index] = parse_bool(value);
+        if (index + 1 > cheat_count)
+            cheat_count = index + 1;
+    }
+    f_close(&file);
 }
 
 static int detect_6button_game(const char *rom_name) {
@@ -242,12 +399,20 @@ static int game_pad_mode_load(const char *rom_name) {
         return mode;
     }
 
+    memset(cheat_enabled, 0, sizeof(cheat_enabled));
+
     while (f_gets(line, sizeof(line), &file)) {
         if (line[0] == '#' || line[0] == '\r' || line[0] == '\n' || line[0] == '\0')
             continue;
         if (starts_with(line, "pad_mode=")) {
             mode = (parse_u8(line + 9) != 0);
-            break;
+        } else if (line[0] == 'c' && line[1] == 'h' && line[2] == 'e' &&
+                   line[3] == 'a' && line[4] == 't' && line[5] >= '0' &&
+                   line[5] <= '9') {
+            int index = parse_u8(line + 5);
+            char *equals = strchr(line, '=');
+            if (equals && index < cheat_count)
+                cheat_enabled[index] = (parse_u8(equals + 1) != 0);
         }
     }
 
@@ -271,12 +436,26 @@ static void game_pad_mode_save(void) {
     if (f_open(&file, cfg_path, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
         return;
 
-    f_write(&file, "# PC Engine pad mode\n", 22, &bw);
+    f_write(&file, "# PC Engine game settings\n", 26, &bw);
     f_write(&file, "pad_mode=", 9, &bw);
     if (game_pad_mode)
         f_write(&file, "1\n", 2, &bw);
     else
         f_write(&file, "0\n", 2, &bw);
+    for (int i = 0; i < cheat_count; i++) {
+        if (!cheat_enabled[i])
+            continue;
+        char index = (char)('0' + i);
+        f_write(&file, "cheat", 5, &bw);
+        if (i >= 10) {
+            char tens = (char)('0' + i / 10);
+            f_write(&file, &tens, 1, &bw);
+        }
+        index = (char)('0' + i % 10);
+        f_write(&file, &index, 1, &bw);
+        f_write(&file, "=", 1, &bw);
+        f_write(&file, cheat_enabled[i] ? "1\n" : "0\n", 2, &bw);
+    }
 
     f_close(&file);
 }
@@ -463,7 +642,9 @@ static int load_rom(const char *fname, uint32_t size) {
     int last_pct = -1;
 
     build_game_cfg_path(fname, current_game_cfg, sizeof(current_game_cfg));
+    load_cheat_file(fname);
     game_pad_mode = game_pad_mode_load(fname);
+    apply_cheats_to_hw();
     apply_pad_mode_to_hw();
 
     if (size < ROM_MIN_SIZE) {
@@ -723,12 +904,60 @@ static void video_settings_menu(void) {
     }
 }
 
+static void cheat_menu(void) {
+    int selected = 0;
+    const int visible = 15;
+
+    for (;;) {
+        int page = selected / visible;
+        int first = page * visible;
+        int last = first + visible;
+        if (last > cheat_count)
+            last = cheat_count;
+
+        clear();
+        cursor(2, 1);
+        print("=== CHEATS ===");
+        if (cheat_count == 0) {
+            cursor(2, 8);
+            print("No cheats found");
+        } else {
+            for (int i = first; i < last; i++) {
+                int y = 3 + i - first;
+                cursor(0, y);
+                putchar(i == selected ? '>' : ' ');
+                print_field(2, y, cheat_desc[i][0] ? cheat_desc[i] : "Unnamed cheat", 25);
+                cursor(29, y);
+                print(cheat_enabled[i] ? "ON" : "--");
+            }
+        }
+        cursor(1, 19);
+        print("A: toggle   B: back");
+
+        uint32_t e = joy_edge();
+        if (e & JOY_UP) {
+            selected = selected ? selected - 1 : (cheat_count ? cheat_count - 1 : 0);
+        } else if (e & JOY_DOWN) {
+            selected = (cheat_count && selected + 1 < cheat_count) ? selected + 1 : 0;
+        } else if (e & (JOY_A | JOY_LEFT | JOY_RIGHT)) {
+            if (cheat_count) {
+                cheat_enabled[selected] = !cheat_enabled[selected];
+                apply_cheats_to_hw();
+                game_pad_mode_save();
+            }
+        } else if (e & JOY_B) {
+            break;
+        }
+        delay(20);
+    }
+}
+
 // Affiche et gère le menu in-game suspendu (Select+Start).
 // Returns 1 if the caller should go back to the ROM browser, 0 to keep
 // running the current game.
 static int ingame_menu(void) {
     int selected = 0;
-    const int item_count = 5;
+    const int item_count = 6;
     static const char *pad_menu_names[2] = { "Pad: 2 Buttons", "Pad: 6 Buttons" };
 
     reg_pause = 1;      // freeze the HuC6280 - VDC keeps scanning the same
@@ -757,6 +986,11 @@ static int ingame_menu(void) {
         cursor(14, 7);
         print(pad_menu_names[game_pad_mode]);
 
+        cursor(2, 8);
+        print(selected == 5 ? "> 6. Cheat Menu" : "  6. Cheat Menu");
+        cursor(14, 8);
+        print(cheat_count ? "Available" : "Not found");
+
         uint32_t e = joy_edge();
 
         if (e & JOY_UP) {
@@ -776,11 +1010,13 @@ static int ingame_menu(void) {
                 overlay(0);
                 reg_pause = 0;
                 return 1;
-            } else {
+            } else if (selected == 4) {
                 game_pad_mode = (game_pad_mode + ((e & JOY_RIGHT) ? 1 : -1) + 2) % 2;
                 apply_pad_mode_to_hw();
                 game_pad_mode_save();
                 delay(100);
+            } else {
+                cheat_menu();
             }
         } else if (e & JOY_B) {
             break;

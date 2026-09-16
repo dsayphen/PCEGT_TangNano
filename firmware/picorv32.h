@@ -30,6 +30,12 @@
 #define reg_scanline       (*(volatile uint32_t*)0x02000048)
 #define reg_pad_mode       (*(volatile uint32_t*)0x0200004c)
 #define reg_time           (*(volatile uint32_t*)0x02000050)
+#define reg_cheat_code0    (*(volatile uint32_t*)0x02000064)
+#define reg_cheat_code1    (*(volatile uint32_t*)0x02000068)
+#define reg_cheat_code2    (*(volatile uint32_t*)0x0200006c)
+#define reg_cheat_code3    (*(volatile uint32_t*)0x02000070)
+#define reg_cheat_cmd      (*(volatile uint32_t*)0x02000074)
+#define reg_cheat_enable   (*(volatile uint32_t*)0x02000078)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
 
 // ---------------------------------------------------------------------------
