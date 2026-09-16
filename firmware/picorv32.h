@@ -28,6 +28,7 @@
 #define reg_joystick       (*(volatile uint32_t*)0x02000040)
 #define reg_video_zoom     (*(volatile uint32_t*)0x02000044)
 #define reg_scanline       (*(volatile uint32_t*)0x02000048)
+#define reg_pad_mode       (*(volatile uint32_t*)0x0200004c)
 #define reg_time           (*(volatile uint32_t*)0x02000050)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
 

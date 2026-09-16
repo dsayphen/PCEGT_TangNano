@@ -88,6 +88,7 @@ module iosys #(
     // SNES bit order: 0:B 1:Y 2:Select 3:Start 4:Up 5:Down 6:Left 7:Right
     //                 8:A 9:X 10:L 11:R
     input  wire [11:0] joy1,
+    output reg         pad_mode,
 
     // ---- HuCard ROM write port (same shape as rom_loader.v) --------------
     output reg         ld_wr,
@@ -262,6 +263,7 @@ wire rl_size_sel   = mem_valid && (mem_addr == 32'h0200_0038);
 wire joy_sel       = mem_valid && (mem_addr == 32'h0200_0040);
 wire zoom_sel      = mem_valid && (mem_addr == 32'h0200_0044);
 wire scan_sel      = mem_valid && (mem_addr == 32'h0200_0048);
+wire pad_mode_sel  = mem_valid && (mem_addr == 32'h0200_004c);
 wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
 wire pause_sel     = mem_valid && (mem_addr == 32'h0200_0054);
 wire reset_sel     = mem_valid && (mem_addr == 32'h0200_0058);
@@ -308,7 +310,7 @@ wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
-                   time_sel || pause_sel || reset_sel || id_sel ||
+                   pad_mode_sel || time_sel || pause_sel || reset_sel || id_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -317,6 +319,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    joy_sel      ? {20'b0, joy1} :
                    zoom_sel     ? {30'b0, video_zoom} :
                    scan_sel     ? {30'b0, scanline} :
+                   pad_mode_sel ? {31'b0, pad_mode} :
                    pause_sel    ? {31'b0, pause} :
                    uart_div_sel ? uart_div_do :
                    uart_dat_sel ? uart_dat_do :
@@ -515,6 +518,9 @@ always @(posedge clk) begin
     if (scan_sel && (mem_wstrb != 4'b0))
         scanline <= mem_wdata[1:0];
 
+    if (pad_mode_sel && (mem_wstrb != 4'b0))
+        pad_mode <= mem_wdata[0];
+
     // Level: the firmware sets it on entering the pause menu, clears it on
     // Resume. Pulse: any write produces exactly one clk_sys cycle high,
     // long enough for the top level's existing reset stretcher to pick up.
@@ -546,6 +552,7 @@ always @(posedge clk) begin
         sgx_mode     <= 1'b0;
         video_zoom   <= 2'd1;      // stretch, matches the previous fixed behaviour
         scanline     <= 2'd0;      // off, matches the previous fixed behaviour
+        pad_mode     <= 1'b0;
         pause        <= 1'b0;
         soft_reset   <= 1'b0;
         rl_buf       <= 32'd0;

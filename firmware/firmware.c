@@ -152,9 +152,138 @@ static void message(const char *l1, const char *l2) {
 // a power cycle. 
 
 #define VIDEO_CFG_FILE    "/video.cfg"
+#define GAME_CFG_DIR      "/pcecfg"
 
 static int video_zoom = 1;       // hardware reset default: stretch
 static int video_scanline = 0;   // hardware reset default: off
+static int game_pad_mode = 0;     // 0 = 2-button pad, 1 = 6-button pad
+static char current_game_cfg[PWD_SIZE];
+
+static void strip_extension(char *name) {
+    char *dot = strrchr(name, '.');
+    if (dot && strchr(dot, '/'))
+        return;
+    if (dot)
+        *dot = '\0';
+}
+
+static void build_game_cfg_path(const char *rom_name, char *out, int out_size) {
+    char base[NAME_MAX];
+    const char *p = strrchr(rom_name, '/');
+    const char *n = p ? p + 1 : rom_name;
+    const int len = (int)strlen(n);
+    int i = 0;
+
+    while (i < len && i < (int)sizeof(base) - 1 && n[i] != '.') {
+        base[i] = n[i];
+        i++;
+    }
+    base[i] = '\0';
+
+    if (out_size <= 0)
+        return;
+    strcpy(out, GAME_CFG_DIR);
+    strncat(out, "/", out_size - strlen(out));
+    strncat(out, base, out_size - strlen(out));
+    strncat(out, ".cfg", out_size - strlen(out));
+}
+
+static int detect_6button_game(const char *rom_name) {
+    const char *n = strrchr(rom_name, '/');
+    const char *name = n ? n + 1 : rom_name;
+    static const char *known[] = {
+        "street fighter ii",
+        "advanced variable geo",
+        "battlefield",
+        "emerald",
+        "fire pro jyoshi",
+        "wresling universe",
+        "flash hiders",
+        "garou densetsu",
+        "kakutou haou densetsu",
+        "linda cube",
+        "mahjong sword",
+        "martial champions",
+        "princess maker 2",
+        "ryuuko no ken",
+        "sotsugyou ii",
+        "super real mahjong p",
+        "tengai makyo",
+        "world heroes 2",
+        "ys iv",
+        "darius",
+        "ddragon",
+        "cadash",
+        "wonderboy",
+        "gradius",
+        "final fight"
+    };
+    for (int i = 0; i < (int)(sizeof(known) / sizeof(known[0])); i++) {
+        if (strcasestr(name, known[i]))
+            return 1;
+    }
+    return 0;
+}
+
+static int game_pad_mode_load(const char *rom_name) {
+    FIL file;
+    char line[64];
+    char cfg_path[PWD_SIZE];
+    int mode = detect_6button_game(rom_name);
+
+    build_game_cfg_path(rom_name, cfg_path, sizeof(cfg_path));
+    strcpy(current_game_cfg, cfg_path);
+
+    if (f_mkdir(GAME_CFG_DIR) != FR_OK && f_mkdir(GAME_CFG_DIR) != FR_EXIST) {
+        // keep the default and continue; the SD may be read-only
+    }
+
+    if (f_open(&file, cfg_path, FA_READ) != FR_OK) {
+        return mode;
+    }
+
+    while (f_gets(line, sizeof(line), &file)) {
+        if (line[0] == '#' || line[0] == '\r' || line[0] == '\n' || line[0] == '\0')
+            continue;
+        if (starts_with(line, "pad_mode=")) {
+            mode = (parse_u8(line + 9) != 0);
+            break;
+        }
+    }
+
+    f_close(&file);
+    return mode;
+}
+
+static void game_pad_mode_save(void) {
+    FIL file;
+    UINT bw;
+    char cfg_path[PWD_SIZE];
+
+    if (current_game_cfg[0] == '\0')
+        return;
+    strcpy(cfg_path, current_game_cfg);
+
+    if (f_mkdir(GAME_CFG_DIR) != FR_OK && f_mkdir(GAME_CFG_DIR) != FR_EXIST) {
+        return;
+    }
+
+    if (f_open(&file, cfg_path, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
+        return;
+
+    f_write(&file, "# PC Engine pad mode\n", 22, &bw);
+    f_write(&file, "pad_mode=", 9, &bw);
+    if (game_pad_mode)
+        f_write(&file, "1\n", 2, &bw);
+    else
+        f_write(&file, "0\n", 2, &bw);
+
+    f_close(&file);
+}
+
+static void apply_pad_mode_to_hw(void) {
+    reg_pad_mode = game_pad_mode ? 1u : 0u;
+}
 
 static void video_config_load(void) {
     FIL file;
@@ -332,6 +461,10 @@ static int load_rom(const char *fname, uint32_t size) {
     UINT br;
     uint32_t total = 0;
     int last_pct = -1;
+
+    build_game_cfg_path(fname, current_game_cfg, sizeof(current_game_cfg));
+    game_pad_mode = game_pad_mode_load(fname);
+    apply_pad_mode_to_hw();
 
     if (size < ROM_MIN_SIZE) {
         message("File is too small", "not a HuCard image");
@@ -595,7 +728,8 @@ static void video_settings_menu(void) {
 // running the current game.
 static int ingame_menu(void) {
     int selected = 0;
-    const int item_count = 4;
+    const int item_count = 5;
+    static const char *pad_menu_names[2] = { "Pad: 2 Buttons", "Pad: 6 Buttons" };
 
     reg_pause = 1;      // freeze the HuC6280 - VDC keeps scanning the same
     overlay(1);         // VRAM out, so the picture just holds still
@@ -603,11 +737,9 @@ static int ingame_menu(void) {
     for (;;) {
         clear();
 
-        // En-tête
         cursor(2, 1);
         print("=== GAME PAUSED ===");
 
-        // Items du menu
         cursor(2, 3);
         print(selected == 0 ? "> 1. Resume Game" : "  1. Resume Game");
 
@@ -620,34 +752,43 @@ static int ingame_menu(void) {
         cursor(2, 6);
         print(selected == 3 ? "> 4. Return to Browser" : "  4. Return to Browser");
 
+        cursor(2, 7);
+        print(selected == 4 ? "> 5. Pad Mode" : "  5. Pad Mode");
+        cursor(14, 7);
+        print(pad_menu_names[game_pad_mode]);
+
         uint32_t e = joy_edge();
 
         if (e & JOY_UP) {
             selected = (selected - 1 + item_count) % item_count;
         } else if (e & JOY_DOWN) {
             selected = (selected + 1) % item_count;
-        } else if ((e & JOY_A) || (e & JOY_START)) {
+        } else if (e & (JOY_LEFT | JOY_RIGHT | JOY_A | JOY_START)) {
             if (selected == 0) {
-                break;                    // Resume
+                break;
             } else if (selected == 1) {
                 video_settings_menu();
             } else if (selected == 2) {
                 reset_core();
-                break;                    // core is resetting, leave the menu
-            } else {
+                break;
+            } else if (selected == 3) {
                 clear();
                 overlay(0);
                 reg_pause = 0;
-                return 1;                 // signal: back to the SD browser
+                return 1;
+            } else {
+                game_pad_mode = (game_pad_mode + ((e & JOY_RIGHT) ? 1 : -1) + 2) % 2;
+                apply_pad_mode_to_hw();
+                game_pad_mode_save();
+                delay(100);
             }
         } else if (e & JOY_B) {
-            break;                        // cancel / resume
+            break;
         }
 
         delay(20);
     }
 
-    // Masquer l'OSD et rendre le contrôle au jeu
     clear();
     overlay(0);
     reg_pause = 0;

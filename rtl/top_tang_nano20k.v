@@ -203,6 +203,7 @@ wire        osd_de;
 
 wire [11:0] pad_btn;
 wire [11:0] menu_btn = pad_btn | {3'b000, btn_select, 8'b0000_0000};
+wire        pad_mode;
 wire        sdram_init_done;
 
 // DAT1 / DAT2 are unused in SPI mode and must be held high, DAT3 is the chip
@@ -230,6 +231,7 @@ iosys #(
     .osd_active       (osd_active),
 
     .joy1             (menu_btn),
+    .pad_mode         (pad_mode),
 
     .ld_wr            (rv_ld_wr),
     .ld_addr          (rv_ld_addr),
@@ -514,17 +516,22 @@ wire [11:0] game_btn = osd_active ? 12'd0 : pad_btn;
 // SNES bit order: 0:B 1:Y 2:Select 3:Start 4:Up 5:Down 6:Left 7:Right
 //                 8:A 9:X 10:L 11:R
 pce_pad u_joy (
-    .clk     (clk_sys),
-    .joy_out (joy_out),
-    .joy_in  (joy_in),
-    .up      (game_btn[4]),
-    .down    (game_btn[5]),
-    .left    (game_btn[6]),
-    .right   (game_btn[7]),
-    .btn_i   (game_btn[8] | game_btn[9]),   // SNES A / X  -> PCE I
-    .btn_ii  (game_btn[0] | game_btn[1]),   // SNES B / Y  -> PCE II
-    .sel     (game_btn[2]),                 // SNES Select -> Select
-    .run     (game_btn[3])                  // SNES Start -> Run
+    .clk      (clk_sys),
+    .joy_out  (joy_out),
+    .joy_in   (joy_in),
+    .pad_mode (pad_mode),
+    .up       (game_btn[4]),
+    .down     (game_btn[5]),
+    .left     (game_btn[6]),
+    .right    (game_btn[7]),
+    .btn_i    (game_btn[8]),                  // SNES A -> PCE I
+    .btn_ii   (game_btn[0]),                  // SNES B -> PCE II
+    .btn_iii  (game_btn[9]),                  // SNES X -> PCE III
+    .btn_iv   (game_btn[1]),                  // SNES Y -> PCE IV
+    .btn_v    (game_btn[10]),                 // SNES L -> PCE V
+    .btn_vi   (game_btn[11]),                 // SNES R -> PCE VI
+    .sel      (game_btn[2]),                  // SNES Select -> Select
+    .run      (game_btn[3])                   // SNES Start -> Run
 );
 
 // ===========================================================================
