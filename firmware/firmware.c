@@ -973,23 +973,23 @@ static int ingame_menu(void) {
         print(selected == 0 ? "> 1. Resume Game" : "  1. Resume Game");
 
         cursor(2, 4);
-        print(selected == 1 ? "> 2. Video Settings" : "  2. Video Settings");
-
-        cursor(2, 5);
-        print(selected == 2 ? "> 3. Reset Game" : "  3. Reset Game");
-
-        cursor(2, 6);
-        print(selected == 3 ? "> 4. Return to Browser" : "  4. Return to Browser");
-
-        cursor(2, 7);
-        print(selected == 4 ? "> 5. Pad Mode" : "  5. Pad Mode");
-        cursor(14, 7);
+        print(selected == 1 ? "> 2. Pad Mode" : "  2. Pad Mode");
+        cursor(14, 4);
         print(pad_menu_names[game_pad_mode]);
 
-        cursor(2, 8);
-        print(selected == 5 ? "> 6. Cheat Menu" : "  6. Cheat Menu");
-        cursor(14, 8);
+        cursor(2, 5);
+        print(selected == 2 ? "> 3. Video Settings" : "  3. Video Settings");
+
+        cursor(2, 6);
+        print(selected == 3 ? "> 4. Cheat Menu" : "  4. Cheat Menu");
+        cursor(14, 6);
         print(cheat_count ? "Available" : "Not found");
+
+        cursor(2, 7);
+        print(selected == 4 ? "> 5. Reset Game" : "  5. Reset Game");
+
+        cursor(2, 8);
+        print(selected == 5 ? "> 6. Return to Browser" : "  6. Return to Browser");
 
         uint32_t e = joy_edge();
 
@@ -999,24 +999,30 @@ static int ingame_menu(void) {
             selected = (selected + 1) % item_count;
         } else if (e & (JOY_LEFT | JOY_RIGHT | JOY_A | JOY_START)) {
             if (selected == 0) {
+                // Resume Game
                 break;
             } else if (selected == 1) {
-                video_settings_menu();
-            } else if (selected == 2) {
-                reset_core();
-                break;
-            } else if (selected == 3) {
-                clear();
-                overlay(0);
-                reg_pause = 0;
-                return 1;
-            } else if (selected == 4) {
+                // Pad Mode
                 game_pad_mode = (game_pad_mode + ((e & JOY_RIGHT) ? 1 : -1) + 2) % 2;
                 apply_pad_mode_to_hw();
                 game_pad_mode_save();
                 delay(100);
-            } else {
+            } else if (selected == 2) {
+                // Video Settings
+                video_settings_menu();
+            } else if (selected == 3)  {
+                // Cheat Menu
                 cheat_menu();
+            } else if (selected == 4) {
+                // Reset Game
+                reset_core();
+                break;
+            } else if (selected == 5) {
+                // Return to Browser
+                clear();
+                overlay(0);
+                reg_pause = 0;
+                return 1;
             }
         } else if (e & JOY_B) {
             break;
