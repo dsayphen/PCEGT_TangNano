@@ -30,6 +30,13 @@ set_false_path -from [get_ports {s2}]
 set_false_path -from [get_ports {uart_rx}]
 set_false_path -from [get_ports {pad_data}]
 
+// clk_mem = 2x clk_sys, same PLL. VDC0/VDC1 address/data sampled into
+// clk_mem only need to be stable within one clk_sys period (2 clk_mem
+// periods), not one clk_mem period - see the -9ns setup violations on
+// u_mem/vram_addr_r / u_mem/memory/cmd before this was added.
+set_multicycle_path -from [get_clocks {clk_sys}] -to [get_clocks {clk_mem}] -setup 2
+set_multicycle_path -from [get_clocks {clk_sys}] -to [get_clocks {clk_mem}] -hold  1
+
 // The SD card answers on CMD/DAT0 in its own clock domain (the card retimes
 // them to the sd_clk this design generates, so they are not launched by any
 // clock the analyser knows about).  sd_file_reader samples them on the rising
