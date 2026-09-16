@@ -37,6 +37,7 @@ entity pce_core is
 		rom_do     : in  std_logic_vector(7 downto 0);
 		rom_sz     : in  std_logic_vector(7 downto 0);
 		sgx_mode   : in  std_logic;
+		pause      : in  std_logic := '0';   -- '1' freezes the HuC6280 (WAIT_N); video keeps scanning out
 
 		-- VDC0 video RAM (external SDRAM)
 		vram0_a    : out std_logic_vector(15 downto 0);
@@ -189,7 +190,7 @@ begin
 		BG_EN       => '1',
 		SPR_EN      => '1',
 		GRID_EN     => "00",
-		CPU_PAUSE_EN=> '0',
+		CPU_PAUSE_EN=> pause,
 
 		BORDER_EN   => '0',
 		ReducedVBL  => '1',

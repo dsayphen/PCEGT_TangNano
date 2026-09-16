@@ -182,11 +182,15 @@ always @(posedge clk_pix) begin
 end
 
 // ---- stage 2 : colour -----------------------------------------------------
+// osd_on now marks only the lit pixels of a glyph stroke, not the whole
+// frame: the caller (iosys.v) uses it to composite opaque text over a
+// dimmed copy of the live picture, instead of blanking the screen to
+// COLOR_BACK everywhere overlay_pix is set.
+wire glyph_lit = s1_de && s1_box && font_data[s1_xoff];
+
 always @(posedge clk_pix) begin
-    osd_on  <= overlay_pix;
-    osd_rgb <= COLOR_BACK;
-    if (s1_de && s1_box && font_data[s1_xoff])
-        osd_rgb <= s1_cursor ? COLOR_CURSOR : COLOR_TEXT;
+    osd_on  <= overlay_pix && glyph_lit;
+    osd_rgb <= s1_cursor ? COLOR_CURSOR : COLOR_TEXT;
 
     if (!pix_resetn) begin
         osd_on  <= 1'b0;

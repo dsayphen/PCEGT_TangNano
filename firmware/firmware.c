@@ -15,7 +15,9 @@
 //   Left / Right  previous / next page
 //   A             open a directory or load the highlighted .PCE/.SGX file
 //   B             go back to the parent directory
-//   Select+Start  bring the menu back over a running game
+//   Select+Start  pause a running game and open the pause menu (transparent
+//                 OSD): Resume / Video Settings / Reset Game / Return to
+//                 Browser
 //   Select+Up/Down    cycle the display zoom (2x / stretch) over a running game
 //   Select+Left/Right cycle the scanline strength (0/25/50/100%) over a running game
 //
@@ -23,6 +25,11 @@
 #include "picorv32.h"
 #include "fatfs/ff.h"
 #include "font8x8.h"
+
+// TODO: move alongside reg_video_zoom / reg_scanline in picorv32.h.
+// See rtl/tang/iosys/iosys.v for the register semantics.
+#define reg_pause       (*(volatile uint32_t*)0x02000054)  // bit0: freeze HuC6280
+#define reg_soft_reset  (*(volatile uint32_t*)0x02000058)  // any write pulses core_reset
 
 // ---------------------------------------------------------------------------
 // OSD layout, 32 x 20 characters
@@ -524,70 +531,127 @@ static void browse(void) {
     }
 }
 
-// Affiche et gère le menu in-game suspendu
-int ingame_menu(void) {
+// Pulses the core reset. The SDRAM still holds the last loaded ROM, so this
+// is equivalent to pressing a physical Reset button - no reload from SD.
+static void reset_core(void) {
+    reg_soft_reset = 1;
+}
+
+// Small video settings screen reachable from the pause menu. Adjusts the
+// same reg_video_zoom / reg_scanline state (and .cfg file) as the
+// Select+Up/Down/Left/Right shortcuts; kept separate from zoom_cycle() /
+// scanline_cycle() because those flash their own transient overlay, which
+// would fight with the pause menu that is already on screen.
+static void video_settings_menu(void) {
+    static const char *zoom_names[2] = { "Zoom: Integer", "Zoom: Stretch" };
+    static const char *scan_names[4] = {
+        "Scanlines: off", "Scanlines: 25%", "Scanlines: 50%", "Scanlines: 100%"
+    };
     int selected = 0;
-    const int item_count = 4;
-    
-    // Activer l'overlay OSD (fond transparent géré par iosys.v)
-    overlay(1);
-    
+    const int item_count = 2;
+
     for (;;) {
         clear();
-        
+        cursor(2, 1);
+        print("=== VIDEO SETTINGS ===");
+
+        cursor(2, 3);
+        print(selected == 0 ? "> " : "  ");
+        print(zoom_names[video_zoom]);
+
+        cursor(2, 4);
+        print(selected == 1 ? "> " : "  ");
+        print(scan_names[video_scanline]);
+
+        cursor(2, 6);
+        print("Left/Right: change   B: back");
+
+        uint32_t e = joy_edge();
+
+        if (e & JOY_UP) {
+            selected = (selected - 1 + item_count) % item_count;
+        } else if (e & JOY_DOWN) {
+            selected = (selected + 1) % item_count;
+        } else if (e & (JOY_LEFT | JOY_RIGHT | JOY_A)) {
+            int dir = (e & JOY_LEFT) ? -1 : 1;
+            if (selected == 0) {
+                video_zoom = (video_zoom + 1) % 2;
+                reg_video_zoom = video_zoom;
+            } else {
+                video_scanline = (video_scanline + dir + 4) % 4;
+                reg_scanline = video_scanline;
+            }
+            video_config_save();
+        } else if (e & JOY_B) {
+            break;
+        }
+
+        delay(20);
+    }
+}
+
+// Affiche et gère le menu in-game suspendu (Select+Start).
+// Returns 1 if the caller should go back to the ROM browser, 0 to keep
+// running the current game.
+static int ingame_menu(void) {
+    int selected = 0;
+    const int item_count = 4;
+
+    reg_pause = 1;      // freeze the HuC6280 - VDC keeps scanning the same
+    overlay(1);         // VRAM out, so the picture just holds still
+
+    for (;;) {
+        clear();
+
         // En-tête
         cursor(2, 1);
         print("=== GAME PAUSED ===");
-        
+
         // Items du menu
         cursor(2, 3);
         print(selected == 0 ? "> 1. Resume Game" : "  1. Resume Game");
-        
+
         cursor(2, 4);
         print(selected == 1 ? "> 2. Video Settings" : "  2. Video Settings");
-        
+
         cursor(2, 5);
         print(selected == 2 ? "> 3. Reset Game" : "  3. Reset Game");
-        
+
         cursor(2, 6);
         print(selected == 3 ? "> 4. Return to Browser" : "  4. Return to Browser");
 
-        // Attente d'un événement touche (joy_edge)
         uint32_t e = joy_edge();
-        
+
         if (e & JOY_UP) {
             selected = (selected - 1 + item_count) % item_count;
         } else if (e & JOY_DOWN) {
             selected = (selected + 1) % item_count;
         } else if ((e & JOY_A) || (e & JOY_START)) {
-            // Action sur l'item sélectionné
             if (selected == 0) {
-                // Resume
-                break;
+                break;                    // Resume
             } else if (selected == 1) {
-                // Sous-menu vidéo (zoom, scanlines, etc.)
                 video_settings_menu();
             } else if (selected == 2) {
-                // Reset du cœur PCE
                 reset_core();
-                break;
-            } else if (selected == 3) {
-                // Quitter le jeu et retourner au navigateur de fichiers
+                break;                    // core is resetting, leave the menu
+            } else {
+                clear();
                 overlay(0);
-                return 1; // Signal pour revenir à la boucle d'exploration SD
+                reg_pause = 0;
+                return 1;                 // signal: back to the SD browser
             }
         } else if (e & JOY_B) {
-            // Bouton B = Annuler / Reprendre le jeu
-            break;
+            break;                        // cancel / resume
         }
-        
+
         delay(20);
     }
-    
+
     // Masquer l'OSD et rendre le contrôle au jeu
     clear();
     overlay(0);
-    return 0; // Continuer l'exécution du jeu
+    reg_pause = 0;
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -655,17 +719,7 @@ int main(void) {
                 select_armed = 1;
         }
 
-        if ((raw & JOY_MENU) == JOY_MENU) {
-            delay(300);                     // let the buttons be released
-            overlay(1);
-            if (mount_card() != 0) {
-                message("No SD card, or it is not",
-                        "FAT16/FAT32/exFAT formatted");
-                overlay(0);
-                continue;
-            }
-            browse();
-        } else if (select_armed &&
+        if (select_armed &&
                    (raw & JOY_SELECT) &&
                    (e & (JOY_UP | JOY_DOWN))) {
             zoom_cycle();
@@ -676,16 +730,17 @@ int main(void) {
         } else if (select_armed &&
                    (raw & JOY_SELECT) &&
                    (e & (JOY_START))) {
-				// Lancement du menu in-game
-				int exit_to_browser = ingame_menu();
-				
-				if (exit_to_browser) {
-					// On sort de la boucle de jeu pour relancer le browser SD
-					break; 
-				}
+            // Select+Start: pause the game and open the pause menu.
+            if (ingame_menu()) {
+                // "Return to Browser" was picked: browse() blocks until a
+                // new game is loaded, then we fall straight back into this
+                // same loop for the newly running game.
+                browse();
+                select_armed = 0;
+                select_count = 0;
+            }
         }
-		
-		ingame_menu
+
         delay(20);
     }
 

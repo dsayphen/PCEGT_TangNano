@@ -171,6 +171,8 @@ wire        image_valid;
 wire [7:0]  rom_sz;
 wire [22:0] rom_offset;
 wire        sgx_mode;
+wire        pause;           // from iosys, freezes pce_core's HuC6280 (WAIT_N)
+wire        soft_reset;      // from iosys, one clk_sys pulse -> stretched core_reset
 wire [1:0]  video_zoom;
 wire [1:0]  scanline;
 
@@ -241,6 +243,8 @@ iosys #(
     .sgx_mode         (rv_sgx_mode),
     .video_zoom       (video_zoom),
     .scanline         (scanline),
+    .pause            (pause),
+    .soft_reset       (soft_reset),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -421,7 +425,8 @@ pce_sdram_ctrl_3ch #(
 // the SDRAM is being written - including when the user reopens the menu and
 // picks a different game.
 // ===========================================================================
-wire rst_trigger = !sdram_init_done || loading || !image_valid || btn_reset;
+wire rst_trigger = !sdram_init_done || loading || !image_valid || btn_reset ||
+                    soft_reset;
 
 reg [16:0] rst_cnt = 17'd0;
 always @(posedge clk_sys) begin
@@ -458,6 +463,7 @@ pce_core #(
     .rom_do     (rom_do),
     .rom_sz     (rom_sz),
     .sgx_mode   (sgx_mode),
+    .pause      (pause),
 
     .vram0_a    (vram0_a),
     .vram0_do   (vram0_do),

@@ -33,6 +33,13 @@
 //   0x0200_0044                  video zoom mode (0=2x, 1=stretch)
 //   0x0200_0048                  scanline strength (0/1/2/3 = 0/25/50/100%)
 //   0x0200_0050                  milliseconds since reset, read only
+//   0x0200_0054                  pause: bit0 = 1 freezes the HuC6280 (WAIT_N)
+//                                 via pce_core's `pause` port; video keeps
+//                                 scanning out, so the picture just freezes
+//   0x0200_0058                  soft reset: any write pulses core_reset for
+//                                 one cycle (used by the in-game pause menu's
+//                                 "Reset Game", equivalent to the reset
+//                                 button - the SDRAM still holds the ROM)
 //   0x0200_0060                  core id, read only
 //
 // ROM description
@@ -99,6 +106,10 @@ module iosys #(
     output reg  [1:0]  video_zoom,
     // 0/1/2/3 = 0/25/50/100% scanline darkening on the duplicated line
     output reg  [1:0]  scanline,
+
+    // ---- in-game pause menu ------------------------------------------------
+    output reg          pause,        // '1' freezes the HuC6280 (see pce_core.pause)
+    output reg          soft_reset,   // one clk pulse per write to 0x0200_0058
 
     // ---- 32 bit SDRAM port for the softcore ------------------------------
     output wire        rv_valid,
@@ -252,6 +263,8 @@ wire joy_sel       = mem_valid && (mem_addr == 32'h0200_0040);
 wire zoom_sel      = mem_valid && (mem_addr == 32'h0200_0044);
 wire scan_sel      = mem_valid && (mem_addr == 32'h0200_0048);
 wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
+wire pause_sel     = mem_valid && (mem_addr == 32'h0200_0054);
+wire reset_sel     = mem_valid && (mem_addr == 32'h0200_0058);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 
 wire [31:0] uart_div_do;
@@ -295,7 +308,7 @@ wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
-                   time_sel || id_sel ||
+                   time_sel || pause_sel || reset_sel || id_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -304,6 +317,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    joy_sel      ? {20'b0, joy1} :
                    zoom_sel     ? {30'b0, video_zoom} :
                    scan_sel     ? {30'b0, scanline} :
+                   pause_sel    ? {31'b0, pause} :
                    uart_div_sel ? uart_div_do :
                    uart_dat_sel ? uart_dat_do :
                    time_sel     ? time_reg :
@@ -501,6 +515,14 @@ always @(posedge clk) begin
     if (scan_sel && (mem_wstrb != 4'b0))
         scanline <= mem_wdata[1:0];
 
+    // Level: the firmware sets it on entering the pause menu, clears it on
+    // Resume. Pulse: any write produces exactly one clk_sys cycle high,
+    // long enough for the top level's existing reset stretcher to pick up.
+    if (pause_sel && (mem_wstrb != 4'b0))
+        pause <= mem_wdata[0];
+
+    soft_reset <= reset_sel && (mem_wstrb != 4'b0);
+
     // ---- end of transfer: wait for the SDRAM to really drain -------------
     if (rl_finishing) begin
         rl_timeout <= rl_timeout + 20'd1;
@@ -524,6 +546,8 @@ always @(posedge clk) begin
         sgx_mode     <= 1'b0;
         video_zoom   <= 2'd1;      // stretch, matches the previous fixed behaviour
         scanline     <= 2'd0;      // off, matches the previous fixed behaviour
+        pause        <= 1'b0;
+        soft_reset   <= 1'b0;
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;
