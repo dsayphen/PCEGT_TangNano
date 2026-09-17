@@ -256,7 +256,6 @@ wire joy_sel       = mem_valid && (mem_addr == 32'h0200_0040);
 wire zoom_sel      = mem_valid && (mem_addr == 32'h0200_0044);
 wire scan_sel      = mem_valid && (mem_addr == 32'h0200_0048);
 wire game_ctrl_sel = mem_valid && (mem_addr == 32'h0200_004c);
-wire game_stop_sel = game_ctrl_sel && (mem_wstrb != 4'b0) && mem_wdata[2];
 wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 
@@ -458,8 +457,6 @@ always @(posedge clk) begin
             loading       <= 1'b1;
             image_valid   <= 1'b0;
             sgx_mode      <= mem_wdata[1];
-            game_pause    <= 1'b0;
-            game_reset    <= 1'b0;
             rl_addr       <= 23'd0;
             rl_cnt        <= 3'd0;
             rl_finishing  <= 1'b0;
@@ -486,15 +483,13 @@ always @(posedge clk) begin
         game_pause <= mem_wdata[0];
         game_reset <= mem_wdata[1];
         if (mem_wdata[2]) begin
-            // Keep the console reset while the browser is open. The following
-            // pce_load_start() owns the complete loader reinitialisation.
-            game_pause    <= 1'b0;
-            image_valid   <= 1'b0;
+            game_pause <= 1'b0;
+            image_valid <= 1'b0;
         end
     end
 
     // ---- end of transfer: wait for the SDRAM to really drain -------------
-    if (rl_finishing && !game_stop_sel) begin
+    if (rl_finishing) begin
         rl_timeout <= rl_timeout + 20'd1;
         if ((rl_cnt == 3'd0 && !rl_clearing && !ld_wr && ld_idle) || (&rl_timeout)) begin
             rl_finishing <= 1'b0;
