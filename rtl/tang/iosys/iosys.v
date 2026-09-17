@@ -74,6 +74,7 @@ module iosys #(
     input  wire        osd_de,
     output wire        osd_on,
     output wire [23:0] osd_rgb,
+    output wire        osd_text,
     output wire        osd_active,        // clk domain copy of the overlay flag
 
     // ---- controller -------------------------------------------------------
@@ -98,6 +99,10 @@ module iosys #(
     output reg  [1:0]  video_zoom,
     // 0/1/2/3 = 0/25/50/100% scanline darkening on the duplicated line
     output reg  [1:0]  scanline,
+
+    // ---- in-game controls -------------------------------------------------
+    output reg         game_pause,
+    output reg         game_reset,
 
     // ---- 32 bit SDRAM port for the softcore ------------------------------
     output wire        rv_valid,
@@ -250,6 +255,8 @@ wire rl_size_sel   = mem_valid && (mem_addr == 32'h0200_0038);
 wire joy_sel       = mem_valid && (mem_addr == 32'h0200_0040);
 wire zoom_sel      = mem_valid && (mem_addr == 32'h0200_0044);
 wire scan_sel      = mem_valid && (mem_addr == 32'h0200_0048);
+wire game_ctrl_sel = mem_valid && (mem_addr == 32'h0200_004c);
+wire game_stop_sel = game_ctrl_sel && (mem_wstrb != 4'b0) && mem_wdata[2];
 wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 
@@ -294,6 +301,7 @@ wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
+                   game_ctrl_sel ||
                    time_sel || id_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
@@ -347,7 +355,8 @@ textdisp u_disp (
     .osd_y       (osd_y),
     .osd_de      (osd_de),
     .osd_on      (osd_on),
-    .osd_rgb     (osd_rgb)
+    .osd_rgb     (osd_rgb),
+    .osd_text    (osd_text)
 );
 
 simpleuart u_uart (
@@ -388,6 +397,7 @@ wire rl_size_ok = (rl_size != 32'd0) && (rl_size <= ROM_MAX_SIZE);
 
 always @(posedge clk) begin
     ld_wr <= 1'b0;
+    game_reset <= 1'b0;
 
     // ---- clear the HuCard area and VDC0 VRAM before a new load ----------
     // Runs before any real data is accepted (rl_data_ready is held low, see
@@ -448,6 +458,8 @@ always @(posedge clk) begin
             loading       <= 1'b1;
             image_valid   <= 1'b0;
             sgx_mode      <= mem_wdata[1];
+            game_pause    <= 1'b0;
+            game_reset    <= 1'b0;
             rl_addr       <= 23'd0;
             rl_cnt        <= 3'd0;
             rl_finishing  <= 1'b0;
@@ -470,8 +482,19 @@ always @(posedge clk) begin
     if (scan_sel && (mem_wstrb != 4'b0))
         scanline <= mem_wdata[1:0];
 
+    if (game_ctrl_sel && (mem_wstrb != 4'b0)) begin
+        game_pause <= mem_wdata[0];
+        game_reset <= mem_wdata[1];
+        if (mem_wdata[2]) begin
+            // Keep the console reset while the browser is open. The following
+            // pce_load_start() owns the complete loader reinitialisation.
+            game_pause    <= 1'b0;
+            image_valid   <= 1'b0;
+        end
+    end
+
     // ---- end of transfer: wait for the SDRAM to really drain -------------
-    if (rl_finishing) begin
+    if (rl_finishing && !game_stop_sel) begin
         rl_timeout <= rl_timeout + 20'd1;
         if ((rl_cnt == 3'd0 && !rl_clearing && !ld_wr && ld_idle) || (&rl_timeout)) begin
             rl_finishing <= 1'b0;
@@ -493,6 +516,8 @@ always @(posedge clk) begin
         sgx_mode     <= 1'b0;
         video_zoom   <= 2'd1;      // stretch, matches the previous fixed behaviour
         scanline     <= 2'd0;      // off, matches the previous fixed behaviour
+        game_pause   <= 1'b0;
+        game_reset   <= 1'b0;
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;

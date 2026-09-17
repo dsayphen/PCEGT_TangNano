@@ -64,7 +64,8 @@ module textdisp #(
     input  wire [9:0]  osd_y,
     input  wire        osd_de,
     output reg         osd_on,           // 1: replace the picture with the OSD
-    output reg  [23:0] osd_rgb
+    output reg  [23:0] osd_rgb,
+    output reg         osd_text          // 1: the current OSD pixel is a glyph
 );
 
 localparam PLANE = COLS * ROWS;
@@ -185,12 +186,16 @@ end
 always @(posedge clk_pix) begin
     osd_on  <= overlay_pix;
     osd_rgb <= COLOR_BACK;
+    osd_text <= 1'b0;
     if (s1_de && s1_box && font_data[s1_xoff])
         osd_rgb <= s1_cursor ? COLOR_CURSOR : COLOR_TEXT;
+    if (s1_de && s1_box && font_data[s1_xoff])
+        osd_text <= 1'b1;
 
     if (!pix_resetn) begin
         osd_on  <= 1'b0;
         osd_rgb <= COLOR_BACK;
+        osd_text <= 1'b0;
     end
 end
 

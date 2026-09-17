@@ -29,6 +29,7 @@ entity pce_core is
 		clk        : in  std_logic;
 		reset      : in  std_logic;
 		cold_reset : in  std_logic;
+		cpu_pause  : in  std_logic;
 
 		-- HuCard ROM (external, SDRAM)
 		rom_rd     : out std_logic;
@@ -189,7 +190,7 @@ begin
 		BG_EN       => '1',
 		SPR_EN      => '1',
 		GRID_EN     => "00",
-		CPU_PAUSE_EN=> '0',
+		CPU_PAUSE_EN=> cpu_pause,
 
 		BORDER_EN   => '0',
 		ReducedVBL  => '1',

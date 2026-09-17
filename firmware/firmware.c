@@ -253,6 +253,49 @@ static void scanline_cycle(int dir) {
     overlay(0);
 }
 
+// Returns non-zero when the player chooses to return to the ROM browser.
+static int pause_menu(void) {
+    static const char *items[3] = {
+        "Resume Game", "Reset Game", "Return to browser"
+    };
+    int active = 0;
+
+    pce_pause(1);
+    clear();
+    print_field(1, 5, "Game paused", OSD_COLS - 2);
+
+    for (;;) {
+        for (int i = 0; i < 3; i++) {
+            cursor(8, 8 + i);
+            putchar(i == active ? '>' : ' ');
+            print_field(10, 8 + i, items[i], 20);
+        }
+        selection_row(8 + active);
+
+        uint32_t e = joy_edge();
+        if (e & JOY_UP) {
+            active = active ? active - 1 : 2;
+        } else if (e & JOY_DOWN) {
+            active = active < 2 ? active + 1 : 0;
+        } else if ((e & JOY_B) || (e & JOY_MENU) ||
+                   ((e & JOY_A) && active == 0)) {
+            pce_pause(0);
+            overlay(0);
+            return 0;
+        } else if ((e & JOY_A) && active == 1) {
+            pce_reset();
+            delay(20);
+            pce_pause(0);
+            overlay(0);
+            return 0;
+        } else if ((e & JOY_A) && active == 2) {
+            pce_stop();
+            return 1;
+        }
+        delay(20);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // PC Engine / SuperGrafx ROM filter
 // ---------------------------------------------------------------------------
@@ -592,13 +635,15 @@ int main(void) {
         if ((raw & JOY_MENU) == JOY_MENU) {
             delay(300);                     // let the buttons be released
             overlay(1);
-            if (mount_card() != 0) {
-                message("No SD card, or it is not",
-                        "FAT16/FAT32/exFAT formatted");
-                overlay(0);
-                continue;
+            if (pause_menu()) {
+                if (mount_card() != 0) {
+                    message("No SD card, or it is not",
+                            "FAT16/FAT32/exFAT formatted");
+                    overlay(0);
+                    continue;
+                }
+                browse();
             }
-            browse();
         } else if (select_armed &&
                    (raw & JOY_SELECT) &&
                    (e & (JOY_UP | JOY_DOWN))) {
