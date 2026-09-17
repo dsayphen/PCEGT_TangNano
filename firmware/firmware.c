@@ -261,6 +261,9 @@ static int pause_menu(void) {
     int active = 0;
 
     pce_pause(1);
+    // CPU_PAUSE_EN stops the CPU, while an already-started VDC SATB DMA
+    // completes independently. Let it settle before exposing the frame.
+    delay(40);
     clear();
     print_field(1, 5, "Game paused", OSD_COLS - 2);
 

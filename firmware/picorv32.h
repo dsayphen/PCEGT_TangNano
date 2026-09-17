@@ -122,7 +122,7 @@ static inline void pce_reset(void) {
 }
 
 static inline void pce_stop(void) {
-    reg_game_ctrl = 4;
+    reg_game_ctrl = 8;
 }
 
 // ---- tiny libc ------------------------------------------------------------

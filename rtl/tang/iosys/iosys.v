@@ -103,6 +103,7 @@ module iosys #(
     // ---- in-game controls -------------------------------------------------
     output reg         game_pause,
     output reg         game_reset,
+    output reg         system_reset,
 
     // ---- 32 bit SDRAM port for the softcore ------------------------------
     output wire        rv_valid,
@@ -282,6 +283,7 @@ reg  [19:0] rl_timeout;
 reg         rl_clearing;
 reg  [22:0] rl_clear_addr;
 reg         rl_clear_phase;
+reg         rl_reboot_pending;
 
 // Physical byte window VDC0 VRAM occupies inside the 8 MiB SDRAM (bank 3),
 // derived from the RAS/CAS mapping in rtl/tang/pce_sdram_ctrl_3ch.v:
@@ -482,9 +484,18 @@ always @(posedge clk) begin
     if (game_ctrl_sel && (mem_wstrb != 4'b0)) begin
         game_pause <= mem_wdata[0];
         game_reset <= mem_wdata[1];
-        if (mem_wdata[2]) begin
-            game_pause <= 1'b0;
-            image_valid <= 1'b0;
+        if (mem_wdata[3]) begin
+            // Return to browser: purge the previous ROM and VDC0 VRAM before
+            // rebooting, so no old SDRAM transaction survives the reset.
+            game_pause       <= 1'b0;
+            loading          <= 1'b1;
+            image_valid      <= 1'b0;
+            rl_cnt           <= 3'd0;
+            rl_finishing     <= 1'b0;
+            rl_clearing      <= 1'b1;
+            rl_clear_addr    <= 23'd0;
+            rl_clear_phase   <= 1'b0;
+            rl_reboot_pending <= 1'b1;
         end
     end
 
@@ -500,6 +511,11 @@ always @(posedge clk) begin
         end
     end
 
+    // The final clear write is still pending when rl_clearing drops. Wait
+    // until the SDRAM controller has drained it before resetting the system.
+    if (rl_reboot_pending && !rl_clearing && !ld_wr && ld_idle)
+        system_reset <= 1'b1;
+
     if (!resetn) begin
         ld_wr        <= 1'b0;
         ld_addr      <= 23'd0;
@@ -513,6 +529,7 @@ always @(posedge clk) begin
         scanline     <= 2'd0;      // off, matches the previous fixed behaviour
         game_pause   <= 1'b0;
         game_reset   <= 1'b0;
+        system_reset <= 1'b0;
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;
@@ -522,6 +539,7 @@ always @(posedge clk) begin
         rl_clearing  <= 1'b0;
         rl_clear_addr<= 23'd0;
         rl_clear_phase <= 1'b0;
+        rl_reboot_pending <= 1'b0;
     end
 end
 
