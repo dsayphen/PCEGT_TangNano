@@ -173,6 +173,8 @@ wire [22:0] rom_offset;
 wire        sgx_mode;
 wire [1:0]  video_zoom;
 wire [1:0]  scanline;
+wire        game_pause;
+wire        game_reset;
 
 // ---- softcore / menu ------------------------------------------------------
 wire        rv_ld_wr;
@@ -194,6 +196,7 @@ wire [31:0] rv_rdata;
 
 wire        osd_on;
 wire [23:0] osd_rgb;
+wire        osd_text;
 wire        osd_active;
 wire [10:0] osd_x;
 wire [9:0]  osd_y;
@@ -224,6 +227,7 @@ iosys #(
     .osd_de           (osd_de),
     .osd_on           (osd_on),
     .osd_rgb          (osd_rgb),
+    .osd_text         (osd_text),
     .osd_active       (osd_active),
 
     .joy1             (menu_btn),
@@ -240,6 +244,8 @@ iosys #(
     .sgx_mode         (rv_sgx_mode),
     .video_zoom       (video_zoom),
     .scanline         (scanline),
+    .game_pause       (game_pause),
+    .game_reset       (game_reset),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -420,7 +426,7 @@ pce_sdram_ctrl_3ch #(
 // the SDRAM is being written - including when the user reopens the menu and
 // picks a different game.
 // ===========================================================================
-wire rst_trigger = !sdram_init_done || loading || !image_valid || btn_reset;
+wire rst_trigger = !sdram_init_done || loading || !image_valid || btn_reset || game_reset;
 
 reg [16:0] rst_cnt = 17'd0;
 always @(posedge clk_sys) begin
@@ -450,6 +456,7 @@ pce_core #(
     .clk        (clk_sys),
     .reset      (core_reset),
     .cold_reset (core_reset),
+    .cpu_pause  (game_pause),
 
     .rom_rd     (rom_rd),
     .rom_rdy    (rom_rdy),
@@ -552,11 +559,14 @@ video_scandoubler u_scandoubler (
     .osd_de     (osd_de)
 );
 
-// The OSD replaces the picture completely while it is up.  osd_rgb is already
-// aligned with vga_* - see the comment on osd_x in video_scandoubler.v.
-wire [7:0] out_r = osd_on ? osd_rgb[23:16] : vga_r;
-wire [7:0] out_g = osd_on ? osd_rgb[15:8]  : vga_g;
-wire [7:0] out_b = osd_on ? osd_rgb[7:0]   : vga_b;
+// Keep the paused frame visible beneath the OSD at 50% opacity, but render
+// menu glyphs fully opaque. osd_rgb is aligned with vga_*.
+wire [7:0] out_r = osd_on ? (osd_text ? osd_rgb[23:16] :
+                             ({1'b0, osd_rgb[23:16]} + {1'b0, vga_r}) >> 1) : vga_r;
+wire [7:0] out_g = osd_on ? (osd_text ? osd_rgb[15:8] :
+                             ({1'b0, osd_rgb[15:8]} + {1'b0, vga_g}) >> 1) : vga_g;
+wire [7:0] out_b = osd_on ? (osd_text ? osd_rgb[7:0] :
+                             ({1'b0, osd_rgb[7:0]} + {1'b0, vga_b}) >> 1) : vga_b;
 
 dvi_tx u_dvi (
     .clk_pix    (clk_pix),

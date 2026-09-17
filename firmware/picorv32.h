@@ -28,6 +28,7 @@
 #define reg_joystick       (*(volatile uint32_t*)0x02000040)
 #define reg_video_zoom     (*(volatile uint32_t*)0x02000044)
 #define reg_scanline       (*(volatile uint32_t*)0x02000048)
+#define reg_game_ctrl      (*(volatile uint32_t*)0x0200004c)
 #define reg_time           (*(volatile uint32_t*)0x02000050)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
 
@@ -110,6 +111,18 @@ static inline void pce_load_word(uint32_t w) {
 }
 static inline void pce_load_end(void) {
     reg_romload_ctrl = 0;
+}
+
+static inline void pce_pause(int pause) {
+    reg_game_ctrl = pause ? 1 : 0;
+}
+
+static inline void pce_reset(void) {
+    reg_game_ctrl = 2;
+}
+
+static inline void pce_stop(void) {
+    reg_game_ctrl = 4;
 }
 
 // ---- tiny libc ------------------------------------------------------------
