@@ -270,14 +270,15 @@ static int pause_menu(void) {
     };
     int active = 0;
 
+    pce_pause(1);
     clear(); 
-    print_field(3, 5, "Game paused", OSD_COLS - 2);
+    print_field(5, 5, "Game paused", OSD_COLS - 2);
 
     for (;;) {
         for (int i = 0; i < 4; i++) {
-            cursor(8, 8 + i);
+            cursor(4, 8 + i);
             putchar(i == active ? '>' : ' ');
-            print_field(10, 8 + i,
+            print_field(6, 8 + i,
                         i == 3 ? (game_pad_mode ? "Gamepad: 6 buttons" :
                                                    "Gamepad: 2 buttons") :
                                  items[i],
@@ -292,11 +293,13 @@ static int pause_menu(void) {
             active = active < 3 ? active + 1 : 0;
         } else if ((e & JOY_B) || (e & JOY_MENU) ||
                    ((e & JOY_A) && active == 0)) {
+            pce_pause(0);
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && active == 1) {
             pce_reset();
             delay(20);
+            pce_pause(0);
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && active == 2) {
@@ -327,6 +330,24 @@ static int is_sgx(const char *name) {
     return n >= 5 && strcasecmp(name + n - 4, ".sgx") == 0;
 }
 
+// Directories to never show in the browser, regardless of their
+// FAT hidden/system attribute.
+static const char *hidden_dirs[] = {
+    "pcecfg",
+    "cheats",
+    "gamecfg",
+    "screenshot",
+    NULL
+};
+
+static int is_hidden_dir(const char *name) {
+    for (int i = 0; hidden_dirs[i]; i++) {
+        if (strcasecmp(name, hidden_dirs[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 // ---------------------------------------------------------------------------
 // Directory listing
 //
@@ -352,6 +373,8 @@ static int load_dir(const char *dir, int start, int len, int *count) {
         if (fno.fname[0] == 0)
             break;
         if (fno.fattrib & (AM_HID | AM_SYS))
+            continue;
+        if ((fno.fattrib & AM_DIR) && is_hidden_dir(fno.fname))
             continue;
         if (!(fno.fattrib & AM_DIR) && !is_rom(fno.fname))
             continue;
@@ -470,14 +493,22 @@ static void draw_page(int page, int total, int active) {
         clear_line(y);
         if (i >= page_len)
             continue;
+
         cursor(0, y);
         putchar(i == active ? '>' : ' ');
+
         cursor(1, y);
+        putchar(' ');
+        print(names[i]);
         if (is_dir[i])
             putchar('/');
-        else
+
+        int n = (int)strlen(names[i]) + (is_dir[i] ? 1 : 0);
+        int w = OSD_COLS - 2;
+        while (n < w) {
             putchar(' ');
-        print_field(2, y, names[i], OSD_COLS - 2);
+            n++;
+        }
     }
     selection_row(page_len ? ROW_FIRST + active : 31);
 

@@ -233,7 +233,6 @@ iosys #(
     .osd_active       (osd_active),
 
     .joy1             (menu_btn),
-    .video_vblank     (vid_vbl),
 
     .ld_wr            (rv_ld_wr),
     .ld_addr          (rv_ld_addr),
