@@ -30,7 +30,9 @@
 #define ROW_TITLE   0
 #define ROW_PATH    1
 #define ROW_FIRST   3
-#define PAGESIZE    16
+#define PAGESIZE       14   // 2 lignes libérées pour Zoom / Scanlines
+#define ROW_SETTING_ZOOM (ROW_FIRST + PAGESIZE)      // ligne 17
+#define ROW_SETTING_SCAN (ROW_FIRST + PAGESIZE + 1)  // ligne 18
 #define ROW_STATUS  19
 
 #define NAME_MAX    64          // characters kept per entry (the OSD is 32 wide)
@@ -166,9 +168,9 @@ static void video_config_load(void) {
         }
 
         if (starts_with(line, "reg_video_zoom=")) {
-            reg_video_zoom = parse_u8(line + 15);
+            video_zoom = reg_video_zoom = parse_u8(line + 15);
         } else if (starts_with(line, "reg_scanline=")) {
-            reg_scanline = parse_u8(line + 13);
+            video_scanline = reg_scanline = parse_u8(line + 13);
         } else if (starts_with(line, "pad_mode=")) {
             game_pad_mode = parse_u8(line + 9) ? 1 : 0;
             reg_pad_mode = game_pad_mode;
@@ -483,6 +485,28 @@ static void go_parent(void) {
         *slash = '\0';
 }
 
+static const char *zoom_names[2] = { "Integer", "Stretch" };
+static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
+
+// Ligne d'écran correspondant à un index "active" combiné
+// (fichiers 0..page_len-1, puis Zoom, puis Scanlines).
+static int active_row(int active) {
+    if (active < page_len)
+        return ROW_FIRST + active;
+    if (active == page_len)
+        return ROW_SETTING_ZOOM;
+    return ROW_SETTING_SCAN;
+}
+
+static void draw_setting_row(int y, const char *label, const char *value,
+                              int is_active) {
+    clear_line(y);
+    cursor(0, y);
+    putchar(is_active ? '>' : ' ');
+    cursor(2, y);
+    printf("%s: %s", label, value);
+}
+
 static void draw_page(int page, int total, int active) {
     clear();
     title();
@@ -493,24 +517,21 @@ static void draw_page(int page, int total, int active) {
         clear_line(y);
         if (i >= page_len)
             continue;
-
         cursor(0, y);
         putchar(i == active ? '>' : ' ');
-
         cursor(1, y);
         putchar(' ');
         print(names[i]);
         if (is_dir[i])
             putchar('/');
-
-        int n = (int)strlen(names[i]) + (is_dir[i] ? 1 : 0);
-        int w = OSD_COLS - 2;
-        while (n < w) {
-            putchar(' ');
-            n++;
-        }
     }
-    selection_row(page_len ? ROW_FIRST + active : 31);
+
+    draw_setting_row(ROW_SETTING_ZOOM, "Zoom", zoom_names[video_zoom],
+                      active == page_len);
+    draw_setting_row(ROW_SETTING_SCAN, "Scanlines", scan_names[video_scanline],
+                      active == page_len + 1);
+
+    selection_row(active_row(active));
 
     int pages = (total + PAGESIZE - 1) / PAGESIZE;
     if (pages < 1)
@@ -524,11 +545,11 @@ static void draw_page(int page, int total, int active) {
 }
 
 static void move_cursor(int old_i, int new_i) {
-    cursor(0, ROW_FIRST + old_i);
+    cursor(0, active_row(old_i));
     putchar(' ');
-    cursor(0, ROW_FIRST + new_i);
+    cursor(0, active_row(new_i));
     putchar('>');
-    selection_row(ROW_FIRST + new_i);
+    selection_row(active_row(new_i));
 }
 
 // Runs the browser until a ROM has been loaded.
@@ -547,8 +568,9 @@ static void browse(void) {
                 active = 0;
                 continue;
             }
-            if (active >= page_len)
-                active = page_len ? page_len - 1 : 0;
+            int max_active = page_len + 1;   // dernier index = Scanlines
+            if (active > max_active)
+                active = max_active;
             draw_page(page, total, active);
             need_redraw = 0;
             delay(150);
@@ -560,13 +582,15 @@ static void browse(void) {
             continue;
         }
 
-        if ((e & JOY_UP) && page_len) {
+        if (e & JOY_UP) {
+            int count = page_len + 2;   // fichiers + Zoom + Scanlines
             int prev = active;
-            active = active ? active - 1 : page_len - 1;
+            active = active ? active - 1 : count - 1;
             move_cursor(prev, active);
-        } else if ((e & JOY_DOWN) && page_len) {
+        } else if (e & JOY_DOWN) {
+            int count = page_len + 2;
             int prev = active;
-            active = (active + 1 < page_len) ? active + 1 : 0;
+            active = (active + 1 < count) ? active + 1 : 0;
             move_cursor(prev, active);
         } else if (e & JOY_LEFT) {
             if (page > 0) {
@@ -588,6 +612,21 @@ static void browse(void) {
                 need_redraw = 1;
             }
         } else if (e & JOY_A) {
+            if (active == page_len) {
+                video_zoom = (video_zoom + 1) % 2;
+                reg_video_zoom = video_zoom;
+                video_config_save();
+                draw_setting_row(ROW_SETTING_ZOOM, "Zoom", zoom_names[video_zoom], 1);
+                continue;
+            }
+            if (active == page_len + 1) {
+                video_scanline = (video_scanline + 1) % 4;
+                reg_scanline = video_scanline;
+                video_config_save();
+                draw_setting_row(ROW_SETTING_SCAN, "Scanlines",
+                                scan_names[video_scanline], 1);
+                continue;
+            }
             if (!page_len)
                 continue;
             if (is_dir[active]) {
