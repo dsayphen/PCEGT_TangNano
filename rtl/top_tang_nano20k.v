@@ -127,9 +127,10 @@ clkdiv5 u_clkdiv (
 // system reset, released a while after both PLLs have locked
 reg [7:0] pwr_cnt = 8'd0;
 reg       sys_resetn = 1'b0;
+wire      system_reset;
 
 always @(posedge clk_sys) begin
-    if (!(lock_main && lock_hdmi)) begin
+    if (!(lock_main && lock_hdmi) || system_reset) begin
         pwr_cnt    <= 8'd0;
         sys_resetn <= 1'b0;
     end else if (pwr_cnt != 8'hFF) begin
@@ -246,6 +247,7 @@ iosys #(
     .scanline         (scanline),
     .game_pause       (game_pause),
     .game_reset       (game_reset),
+    .system_reset     (system_reset),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
