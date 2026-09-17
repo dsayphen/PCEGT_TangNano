@@ -30,6 +30,8 @@
 #define reg_scanline       (*(volatile uint32_t*)0x02000048)
 #define reg_game_ctrl      (*(volatile uint32_t*)0x0200004c)
 #define reg_time           (*(volatile uint32_t*)0x02000050)
+#define reg_video_status   (*(volatile uint32_t*)0x02000054)
+#define reg_pad_mode       (*(volatile uint32_t*)0x02000058)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
 
 // ---------------------------------------------------------------------------
@@ -123,6 +125,10 @@ static inline void pce_reset(void) {
 
 static inline void pce_stop(void) {
     reg_game_ctrl = 8;
+}
+
+static inline int pce_vblank(void) {
+    return reg_video_status & 1;
 }
 
 // ---- tiny libc ------------------------------------------------------------

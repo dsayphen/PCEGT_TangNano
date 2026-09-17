@@ -148,6 +148,7 @@ static void message(const char *l1, const char *l2) {
 
 static int video_zoom = 1;       // hardware reset default: stretch
 static int video_scanline = 0;   // hardware reset default: off
+static int game_pad_mode = 0;    // hardware reset default: 2 buttons
 
 static void video_config_load(void) {
     FIL file;
@@ -168,6 +169,9 @@ static void video_config_load(void) {
             reg_video_zoom = parse_u8(line + 15);
         } else if (starts_with(line, "reg_scanline=")) {
             reg_scanline = parse_u8(line + 13);
+        } else if (starts_with(line, "pad_mode=")) {
+            game_pad_mode = parse_u8(line + 9) ? 1 : 0;
+            reg_pad_mode = game_pad_mode;
         }
     }
 
@@ -197,6 +201,7 @@ static void video_config_save(void) {
         "#   1 = 25% Intensity\n"
         "#   2 = 50% Intensity\n"
         "#   3 = 100% Intensity\n"
+        "# pad_mode : 0 = 2 buttons, 1 = 6 buttons\n"
         "# -----------------------------------\n";
 
     f_write(&file, header, (UINT)strlen(header), &bw); // Écrit la documentation complète
@@ -204,6 +209,11 @@ static void video_config_save(void) {
     // Écriture de reg_video_zoom
     f_write(&file, "reg_video_zoom=", 15, &bw);
     len = u8_to_str(num, reg_video_zoom);
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+
+    f_write(&file, "pad_mode=", 9, &bw);
+    len = u8_to_str(num, game_pad_mode);
     f_write(&file, num, len, &bw);
     f_write(&file, "\n", 1, &bw);
 
@@ -260,26 +270,33 @@ static int pause_menu(void) {
     };
     int active = 0;
 
-    pce_pause(1);
-    // CPU_PAUSE_EN stops the CPU, while an already-started VDC SATB DMA
-    // completes independently. Let it settle before exposing the frame.
-    delay(40);
-    clear();
-    print_field(1, 5, "Game paused", OSD_COLS - 2);
+    // Stop only at vblank, so the VDC never sees the CPU held mid-update.
+    
+    while (!pce_vblank()){
+        pce_pause(1);
+        delay(2);
+    }
+
+    clear(); 
+    print_field(3, 5, "Game paused", OSD_COLS - 2);
 
     for (;;) {
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             cursor(8, 8 + i);
             putchar(i == active ? '>' : ' ');
-            print_field(10, 8 + i, items[i], 20);
+            print_field(10, 8 + i,
+                        i == 3 ? (game_pad_mode ? "Gamepad: 6 buttons" :
+                                                   "Gamepad: 2 buttons") :
+                                 items[i],
+                        20);
         }
         selection_row(8 + active);
 
         uint32_t e = joy_edge();
         if (e & JOY_UP) {
-            active = active ? active - 1 : 2;
+            active = active ? active - 1 : 3;
         } else if (e & JOY_DOWN) {
-            active = active < 2 ? active + 1 : 0;
+            active = active < 3 ? active + 1 : 0;
         } else if ((e & JOY_B) || (e & JOY_MENU) ||
                    ((e & JOY_A) && active == 0)) {
             pce_pause(0);
@@ -294,6 +311,10 @@ static int pause_menu(void) {
         } else if ((e & JOY_A) && active == 2) {
             pce_stop();
             return 1;
+        } else if ((e & JOY_A) && active == 3) {
+            game_pad_mode = !game_pad_mode;
+            reg_pad_mode = game_pad_mode;
+            video_config_save();
         }
         delay(20);
     }
