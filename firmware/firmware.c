@@ -270,13 +270,6 @@ static int pause_menu(void) {
     };
     int active = 0;
 
-    // Stop only at vblank, so the VDC never sees the CPU held mid-update.
-    
-    while (!pce_vblank()){
-        pce_pause(1);
-        delay(2);
-    }
-
     clear(); 
     print_field(3, 5, "Game paused", OSD_COLS - 2);
 
@@ -299,13 +292,11 @@ static int pause_menu(void) {
             active = active < 3 ? active + 1 : 0;
         } else if ((e & JOY_B) || (e & JOY_MENU) ||
                    ((e & JOY_A) && active == 0)) {
-            pce_pause(0);
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && active == 1) {
             pce_reset();
             delay(20);
-            pce_pause(0);
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && active == 2) {
