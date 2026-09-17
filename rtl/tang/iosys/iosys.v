@@ -81,6 +81,7 @@ module iosys #(
     // SNES bit order: 0:B 1:Y 2:Select 3:Start 4:Up 5:Down 6:Left 7:Right
     //                 8:A 9:X 10:L 11:R
     input  wire [11:0] joy1,
+    input  wire        video_vblank,
 
     // ---- HuCard ROM write port (same shape as rom_loader.v) --------------
     output reg         ld_wr,
@@ -104,6 +105,7 @@ module iosys #(
     output reg         game_pause,
     output reg         game_reset,
     output reg         system_reset,
+    output reg         pad_mode,
 
     // ---- 32 bit SDRAM port for the softcore ------------------------------
     output wire        rv_valid,
@@ -258,6 +260,8 @@ wire zoom_sel      = mem_valid && (mem_addr == 32'h0200_0044);
 wire scan_sel      = mem_valid && (mem_addr == 32'h0200_0048);
 wire game_ctrl_sel = mem_valid && (mem_addr == 32'h0200_004c);
 wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
+wire video_status_sel = mem_valid && (mem_addr == 32'h0200_0054);
+wire pad_mode_sel  = mem_valid && (mem_addr == 32'h0200_0058);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 
 wire [31:0] uart_div_do;
@@ -303,7 +307,7 @@ wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
                    game_ctrl_sel ||
-                   time_sel || id_sel ||
+                   time_sel || video_status_sel || pad_mode_sel || id_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -315,6 +319,8 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    uart_div_sel ? uart_div_do :
                    uart_dat_sel ? uart_dat_do :
                    time_sel     ? time_reg :
+                   video_status_sel ? {31'd0, video_vblank} :
+                   pad_mode_sel ? {31'd0, pad_mode} :
                    id_sel       ? {16'b0, CORE_ID} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;
@@ -499,6 +505,9 @@ always @(posedge clk) begin
         end
     end
 
+    if (pad_mode_sel && (mem_wstrb != 4'b0))
+        pad_mode <= mem_wdata[0];
+
     // ---- end of transfer: wait for the SDRAM to really drain -------------
     if (rl_finishing) begin
         rl_timeout <= rl_timeout + 20'd1;
@@ -530,6 +539,7 @@ always @(posedge clk) begin
         game_pause   <= 1'b0;
         game_reset   <= 1'b0;
         system_reset <= 1'b0;
+        pad_mode     <= 1'b0;
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;
