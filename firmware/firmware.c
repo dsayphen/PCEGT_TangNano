@@ -23,6 +23,7 @@
 #include "picorv32.h"
 #include "fatfs/ff.h"
 #include "font8x8.h"
+#include <stdio.h>
 
 // ---------------------------------------------------------------------------
 // OSD layout, 32 x 20 characters
@@ -30,9 +31,7 @@
 #define ROW_TITLE   0
 #define ROW_PATH    1
 #define ROW_FIRST   3
-#define PAGESIZE       14   // 2 lignes libérées pour Zoom / Scanlines
-#define ROW_SETTING_ZOOM (ROW_FIRST + PAGESIZE)      // ligne 17
-#define ROW_SETTING_SCAN (ROW_FIRST + PAGESIZE + 1)  // ligne 18
+#define PAGESIZE    16
 #define ROW_STATUS  19
 
 #define NAME_MAX    64          // characters kept per entry (the OSD is 32 wide)
@@ -265,34 +264,68 @@ static void scanline_cycle(int dir) {
     overlay(0);
 }
 
+static const char *zoom_names[2] = { "Integer", "Stretch" };
+static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
+
+static void make_menu_label(char *buf, int type) {
+    const char *prefix;
+    const char *value;
+    int i = 0;
+
+    if (type == 3) {
+        prefix = "Gamepad: ";
+        value = game_pad_mode ? "6 buttons" : "2 buttons";
+    } else if (type == 4) {
+        prefix = "Zoom: ";
+        value = zoom_names[video_zoom];
+    } else {
+        prefix = "Scanlines: ";
+        value = scan_names[video_scanline];
+    }
+
+    while (*prefix)
+        buf[i++] = *prefix++;
+
+    while (*value)
+        buf[i++] = *value++;
+
+    buf[i] = '\0';
+}
+
 // Returns non-zero when the player chooses to return to the ROM browser.
 static int pause_menu(void) {
     static const char *items[3] = {
         "Resume Game", "Reset Game", "Return to browser"
     };
     int active = 0;
+    const int n_items = 6; // Resume, Reset, Return, Gamepad, Zoom, Scanlines
 
     pce_pause(1);
-    clear(); 
+    clear();
     print_field(5, 5, "Game paused", OSD_COLS - 2);
 
     for (;;) {
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < n_items; i++) {
             cursor(4, 8 + i);
             putchar(i == active ? '>' : ' ');
-            print_field(6, 8 + i,
-                        i == 3 ? (game_pad_mode ? "Gamepad: 6 buttons" :
-                                                   "Gamepad: 2 buttons") :
-                                 items[i],
-                        20);
+
+            char label[24];
+
+            if (i < 3) {
+                print_field(6, 8 + i, items[i], 20);
+                continue;
+            }
+
+            make_menu_label(label, i);
+            print_field(6, 8 + i, label, 20);
         }
         selection_row(8 + active);
 
         uint32_t e = joy_edge();
         if (e & JOY_UP) {
-            active = active ? active - 1 : 3;
+            active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {
-            active = active < 3 ? active + 1 : 0;
+            active = active < n_items - 1 ? active + 1 : 0;
         } else if ((e & JOY_B) || (e & JOY_MENU) ||
                    ((e & JOY_A) && active == 0)) {
             pce_pause(0);
@@ -310,6 +343,14 @@ static int pause_menu(void) {
         } else if ((e & JOY_A) && active == 3) {
             game_pad_mode = !game_pad_mode;
             reg_pad_mode = game_pad_mode;
+            video_config_save();
+        } else if ((e & JOY_A) && active == 4) {
+            video_zoom = (video_zoom + 1) % 2;
+            reg_video_zoom = video_zoom;
+            video_config_save();
+        } else if ((e & JOY_A) && active == 5) {
+            video_scanline = (video_scanline + 1) % 4;
+            reg_scanline = video_scanline;
             video_config_save();
         }
         delay(20);
@@ -485,28 +526,6 @@ static void go_parent(void) {
         *slash = '\0';
 }
 
-static const char *zoom_names[2] = { "Integer", "Stretch" };
-static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
-
-// Ligne d'écran correspondant à un index "active" combiné
-// (fichiers 0..page_len-1, puis Zoom, puis Scanlines).
-static int active_row(int active) {
-    if (active < page_len)
-        return ROW_FIRST + active;
-    if (active == page_len)
-        return ROW_SETTING_ZOOM;
-    return ROW_SETTING_SCAN;
-}
-
-static void draw_setting_row(int y, const char *label, const char *value,
-                              int is_active) {
-    clear_line(y);
-    cursor(0, y);
-    putchar(is_active ? '>' : ' ');
-    cursor(2, y);
-    printf("%s: %s", label, value);
-}
-
 static void draw_page(int page, int total, int active) {
     clear();
     title();
@@ -526,12 +545,7 @@ static void draw_page(int page, int total, int active) {
             putchar('/');
     }
 
-    draw_setting_row(ROW_SETTING_ZOOM, "Zoom", zoom_names[video_zoom],
-                      active == page_len);
-    draw_setting_row(ROW_SETTING_SCAN, "Scanlines", scan_names[video_scanline],
-                      active == page_len + 1);
-
-    selection_row(active_row(active));
+    selection_row(page_len ? ROW_FIRST + active : 31);
 
     int pages = (total + PAGESIZE - 1) / PAGESIZE;
     if (pages < 1)
@@ -545,11 +559,11 @@ static void draw_page(int page, int total, int active) {
 }
 
 static void move_cursor(int old_i, int new_i) {
-    cursor(0, active_row(old_i));
+    cursor(0, ROW_FIRST + old_i);
     putchar(' ');
-    cursor(0, active_row(new_i));
+    cursor(0, ROW_FIRST + new_i);
     putchar('>');
-    selection_row(active_row(new_i));
+    selection_row(ROW_FIRST + new_i);
 }
 
 // Runs the browser until a ROM has been loaded.
@@ -582,15 +596,13 @@ static void browse(void) {
             continue;
         }
 
-        if (e & JOY_UP) {
-            int count = page_len + 2;   // fichiers + Zoom + Scanlines
+        if ((e & JOY_UP) && page_len) {
             int prev = active;
-            active = active ? active - 1 : count - 1;
+            active = active ? active - 1 : page_len - 1;
             move_cursor(prev, active);
-        } else if (e & JOY_DOWN) {
-            int count = page_len + 2;
+        } else if ((e & JOY_DOWN) && page_len) {
             int prev = active;
-            active = (active + 1 < count) ? active + 1 : 0;
+            active = (active + 1 < page_len) ? active + 1 : 0;
             move_cursor(prev, active);
         } else if (e & JOY_LEFT) {
             if (page > 0) {
@@ -612,21 +624,6 @@ static void browse(void) {
                 need_redraw = 1;
             }
         } else if (e & JOY_A) {
-            if (active == page_len) {
-                video_zoom = (video_zoom + 1) % 2;
-                reg_video_zoom = video_zoom;
-                video_config_save();
-                draw_setting_row(ROW_SETTING_ZOOM, "Zoom", zoom_names[video_zoom], 1);
-                continue;
-            }
-            if (active == page_len + 1) {
-                video_scanline = (video_scanline + 1) % 4;
-                reg_scanline = video_scanline;
-                video_config_save();
-                draw_setting_row(ROW_SETTING_SCAN, "Scanlines",
-                                scan_names[video_scanline], 1);
-                continue;
-            }
             if (!page_len)
                 continue;
             if (is_dir[active]) {
