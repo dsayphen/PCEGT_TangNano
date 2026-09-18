@@ -72,6 +72,13 @@ signal RAM_DI	: std_logic_vector(8 downto 0);
 signal RAM_WE	: std_logic := '0';
 signal RAM_DO	: std_logic_vector(8 downto 0);
 
+-- Palette clear sweep, runs once per RESET_N pulse before the CPU
+-- (held in reset for the same duration) can see the previous game's
+-- colors. mem_init_file only seeds the RAM at FPGA configuration, never
+-- on a logic reset, so without this the palette survives every reload.
+signal CLEARING	: std_logic := '1';
+signal CLR_CNT	: std_logic_vector(8 downto 0) := (others => '0');
+
 -- CPU conflict color latching
 signal R_FF	: std_logic_vector(2 downto 0);
 signal G_FF	: std_logic_vector(2 downto 0);
@@ -145,6 +152,23 @@ begin
 			
 			PREV_A <= (others => '0');
 			CTRL <= CTRL_IDLE;
+			CLEARING <= '1';
+			CLR_CNT  <= (others => '0');
+
+		elsif CLEARING = '1' then
+			-- Sweep all 512 entries to zero, ~512 cycles (~12 us @ 43.2 MHz),
+			-- always well inside the >=1.5 ms reset hold enforced at the top
+			-- level, so it finishes long before the CPU is released.
+			RAM_A  <= CLR_CNT;
+			RAM_DI <= (others => '0');
+			RAM_WE <= '1';
+			if CLR_CNT = 511 then
+				CLEARING <= '0';
+				RAM_WE   <= '0';
+			else
+				CLR_CNT <= CLR_CNT + 1;
+			end if;
+
 		else
 			case CTRL is
 			
