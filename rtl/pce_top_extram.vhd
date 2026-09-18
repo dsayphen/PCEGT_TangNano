@@ -494,9 +494,11 @@ CLR_WE <= COLD_RESET when rising_edge(CLK);
 
 generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 
-	VRAM1_RD <= VRAM1_READ and not VRAM1_ADDR(15);
+	-- FIX: Do not cut off VRAM1_RD on VRAM1_ADDR(15). 
+	-- Mask only the upper address bit to stay within the 32K words (64 KB) boundary.
+	VRAM1_RD <= VRAM1_READ;
 	VRAM1_WE <= VRAM1_WRITE and not VRAM1_ADDR(15);
-	VRAM1_A <= VRAM1_ADDR;
+	VRAM1_A  <= '0' & VRAM1_ADDR(14 downto 0); -- Force VRAM1 address range between 0x0000 and 0x7FFF
 
 	VDC1 : entity work.HUC6270
 	generic map(
