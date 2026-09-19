@@ -33,6 +33,7 @@
 //   0x0200_0044                  video zoom mode (0=2x, 1=stretch)
 //   0x0200_0048                  scanline strength (0/1/2/3 = 0/25/50/100%)
 //   0x0200_0050                  milliseconds since reset, read only
+//   0x0200_005C                  color palette (0=raw RGB, 1=composite)
 //   0x0200_0060                  core id, read only
 //
 // ROM description
@@ -99,6 +100,7 @@ module iosys #(
     output reg  [1:0]  video_zoom,
     // 0/1/2/3 = 0/25/50/100% scanline darkening on the duplicated line
     output reg  [1:0]  scanline,
+    output reg         color_mode,
 
     // ---- in-game controls -------------------------------------------------
     output reg         game_pause,
@@ -260,6 +262,7 @@ wire scan_sel      = mem_valid && (mem_addr == 32'h0200_0048);
 wire game_ctrl_sel = mem_valid && (mem_addr == 32'h0200_004c);
 wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
 wire pad_mode_sel  = mem_valid && (mem_addr == 32'h0200_0058);
+wire color_mode_sel= mem_valid && (mem_addr == 32'h0200_005c);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 
 wire [31:0] uart_div_do;
@@ -305,7 +308,7 @@ wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
                    game_ctrl_sel ||
-                   time_sel || pad_mode_sel || id_sel ||
+                   time_sel || pad_mode_sel || color_mode_sel || id_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -318,6 +321,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    uart_dat_sel ? uart_dat_do :
                    time_sel     ? time_reg :
                    pad_mode_sel ? {31'd0, pad_mode} :
+                   color_mode_sel ? {31'd0, color_mode} :
                    id_sel       ? {16'b0, CORE_ID} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;
@@ -505,6 +509,9 @@ always @(posedge clk) begin
     if (pad_mode_sel && (mem_wstrb != 4'b0))
         pad_mode <= mem_wdata[0];
 
+    if (color_mode_sel && (mem_wstrb != 4'b0))
+        color_mode <= mem_wdata[0];
+
     // ---- end of transfer: wait for the SDRAM to really drain -------------
     if (rl_finishing) begin
         rl_timeout <= rl_timeout + 20'd1;
@@ -537,6 +544,7 @@ always @(posedge clk) begin
         game_reset   <= 1'b0;
         system_reset <= 1'b0;
         pad_mode     <= 1'b0;
+        color_mode   <= 1'b0;
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;

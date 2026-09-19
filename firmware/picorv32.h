@@ -31,6 +31,7 @@
 #define reg_game_ctrl      (*(volatile uint32_t*)0x0200004c)
 #define reg_time           (*(volatile uint32_t*)0x02000050)
 #define reg_pad_mode       (*(volatile uint32_t*)0x02000058)
+#define reg_color_mode     (*(volatile uint32_t*)0x0200005c)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
 
 // ---------------------------------------------------------------------------
