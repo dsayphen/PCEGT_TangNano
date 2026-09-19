@@ -381,17 +381,16 @@ pce_sdram_interleaved #(
     .vram_req(vram_req),
     .vram_ack(vram_ack),
     .vram_we(vram_we_r),
-    .vram_active(vram_rd),
+    .vram_active(vram_rd | vram_we),
     .vram1_addr(vram1_addr_r),
     .vram1_din(vram1_din_r),
     .vram1_dout(vram1_dout_mem),
     .vram1_req(vram1_req),
     .vram1_ack(vram1_ack),
     .vram1_we(vram1_we_r),
-    .vram1_active(vram1_rd),
+    .vram1_active(vram1_rd | vram1_we),
     .init_done(init_done_mem)
 );
-
 endmodule
 
 

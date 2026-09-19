@@ -150,6 +150,7 @@ static void message(const char *l1, const char *l2) {
 static int video_zoom = 1;       // hardware reset default: stretch
 static int video_scanline = 0;   // hardware reset default: off
 static int game_pad_mode = 0;    // hardware reset default: 2 buttons
+static int video_color = 0;      // hardware reset default: raw RGB
 
 static void video_config_load(void) {
     FIL file;
@@ -173,6 +174,9 @@ static void video_config_load(void) {
         } else if (starts_with(line, "pad_mode=")) {
             game_pad_mode = parse_u8(line + 9) ? 1 : 0;
             reg_pad_mode = game_pad_mode;
+        } else if (starts_with(line, "color_palette=")) {
+            video_color = parse_u8(line + 14) ? 1 : 0;
+            reg_color_mode = video_color;
         }
     }
 
@@ -203,6 +207,7 @@ static void video_config_save(void) {
         "#   2 = 50% Intensity\n"
         "#   3 = 100% Intensity\n"
         "# pad_mode : 0 = 2 buttons, 1 = 6 buttons\n"
+        "# color_palette : 0 = RAW RGB, 1 = Composite\n"
         "# -----------------------------------\n";
 
     f_write(&file, header, (UINT)strlen(header), &bw); // Écrit la documentation complète
@@ -215,6 +220,11 @@ static void video_config_save(void) {
 
     f_write(&file, "pad_mode=", 9, &bw);
     len = u8_to_str(num, game_pad_mode);
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+
+    f_write(&file, "color_palette=", 14, &bw);
+    len = u8_to_str(num, video_color);
     f_write(&file, num, len, &bw);
     f_write(&file, "\n", 1, &bw);
 
@@ -266,6 +276,7 @@ static void scanline_cycle(int dir) {
 
 static const char *zoom_names[2] = { "Integer", "Stretch" };
 static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
+static const char *color_names[2] = { "RAW RGB", "Composite" };
 
 static void make_menu_label(char *buf, int type) {
     const char *prefix;
@@ -276,6 +287,9 @@ static void make_menu_label(char *buf, int type) {
         prefix = "Gamepad: ";
         value = game_pad_mode ? "6 buttons" : "2 buttons";
     } else if (type == 4) {
+        prefix = "Color: ";
+        value = color_names[video_color];
+    } else if (type == 5) {
         prefix = "Zoom: ";
         value = zoom_names[video_zoom];
     } else {
@@ -298,7 +312,7 @@ static int pause_menu(void) {
         "Resume Game", "Reset Game", "Return to browser"
     };
     int active = 0;
-    const int n_items = 6; // Resume, Reset, Return, Gamepad, Zoom, Scanlines
+    const int n_items = 7;
 
     pce_pause(1);
     clear();
@@ -345,10 +359,14 @@ static int pause_menu(void) {
             reg_pad_mode = game_pad_mode;
             video_config_save();
         } else if ((e & JOY_A) && active == 4) {
+            video_color = !video_color;
+            reg_color_mode = video_color;
+            video_config_save();
+        } else if ((e & JOY_A) && active == 5) {
             video_zoom = (video_zoom + 1) % 2;
             reg_video_zoom = video_zoom;
             video_config_save();
-        } else if ((e & JOY_A) && active == 5) {
+        } else if ((e & JOY_A) && active == 6) {
             video_scanline = (video_scanline + 1) % 4;
             reg_scanline = video_scanline;
             video_config_save();
