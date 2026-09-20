@@ -391,6 +391,7 @@ pce_sdram_interleaved #(
     .vram1_active(vram1_rd | vram1_we),
     .init_done(init_done_mem)
 );
+
 endmodule
 
 
@@ -476,6 +477,7 @@ reg [2:0] cycle;
 reg       clkref_r;
 
 reg        refresh_block;
+reg        slot_first;     // 1 from the clkref edge until cycle 6: first pass of a dot slot
 reg [15:0] refresh_cnt;
 
 // Distributed, on-demand refresh (SNESTang model): instead of concentrating
@@ -513,7 +515,8 @@ wire       need_refresh  = refresh_cnt >= RFRSH_CYCLES[15:0];
 wire       refresh_now   = need_refresh &&
                             !active[0] && !active[1] && !active[2] &&
                             !vram_pending && !vram1_pending &&
-                            !vram_active && !vram1_active;
+                            !vram_active && !vram1_active &&
+                            slot_first;
 
 localparam CHANNEL1_NONE  = 2'd0;
 localparam CHANNEL1_RV    = 2'd1;
@@ -548,6 +551,7 @@ always @(posedge clk) begin
         active        <= 3'b000;
         channel1_port <= CHANNEL1_NONE;
         host_cas_done <= 1'b0;
+        slot_first    <= 1'b0;
     end else begin
         cmd       <= CMD_NOP;
         SDRAM_DQM <= 4'b1111;
@@ -591,10 +595,27 @@ always @(posedge clk) begin
             // it no longer collides systematically with the VDC0 SATB/sprite
             // burst fetch at the start of vblank (confirmed in
             // sim/tb_sprite_stream.v).
+            // Phase: the VDC only changes its memory address right after the
+            // clkref edge (all its RAM_* outputs are stable for the whole dot)
+            // and the bridge registers the request one clk_mem edge later.
+            // Loading 7 makes cycle 0 fall one edge after the slot start (raw
+            // RD/WE of the new slot already valid for the refresh decision)
+            // and cycle 1 two edges after it (registered VDC1 request visible),
+            // so every VDC access is served in the first pass of its own dot
+            // for dot periods of 12 and 16 clk_mem edges (7.16 / 5.37 MHz).
             if (clkref && !clkref_r && !refresh_block)
-                cycle <= 3'd1;
+                cycle <= 3'd7;
             else
                 cycle <= cycle + 3'd1;
+
+            // First pass of a dot slot. An ACT is only issued in this window
+            // (its CAS and data capture always complete before the next
+            // resync); the second, partial pass of a 12-edge slot must never
+            // start an ACT whose CAS would be cut off by the resync.
+            if (cycle == 3'd6)
+                slot_first <= 1'b0;
+            if (clkref && !clkref_r)
+                slot_first <= 1'b1;
 
             // Free-running refresh timer: reset only when a refresh is
             // actually issued below, otherwise keep counting so need_refresh
@@ -625,7 +646,7 @@ always @(posedge clk) begin
 
             // Channel 1: VDC1 has priority over PicoRV32.
             if (cycle == 3'd1 && !refresh_block) begin
-                if (vram1_req != vram1_ack) begin
+                if (vram1_req != vram1_ack && slot_first) begin
                     active[1]       <= 1'b1;
                     channel1_port   <= CHANNEL1_VRAM1;
                     addr_latch[1]   <= {7'b1011111, vram1_addr, 1'b0};
@@ -636,7 +657,7 @@ always @(posedge clk) begin
                     addr_out        <= {5'b11111, vram1_addr[14:9]};
                     SDRAM_BA        <= 2'b10;
                     cmd             <= CMD_ACTIVATE;
-                end else if (rv_req != rv_ack) begin
+                end else if (rv_req != rv_ack && slot_first) begin
                     active[1]     <= 1'b1;
                     channel1_port <= CHANNEL1_RV;
                     addr_latch[1] <= rv_addr;
@@ -657,8 +678,8 @@ always @(posedge clk) begin
 
             // VDC0 RAS at cycle 2.
             if (cycle == 3'd2 && !refresh_block) begin
-                active[2] <= vram_req != vram_ack;
-                if (vram_req != vram_ack) begin
+                active[2] <= (vram_req != vram_ack) && slot_first;
+                if (vram_req != vram_ack && slot_first) begin
                     addr_latch[2] <= {7'b1111111, vram_addr, 1'b0};
                     din_latch[2]  <= vram_din;
                     ds_latch[2]   <= 2'b11;
