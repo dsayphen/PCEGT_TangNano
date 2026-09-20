@@ -683,6 +683,16 @@ static int mount_card(void) {
     return -1;
 }
 
+#define RET_BASE  ((volatile uint32_t *)0x00100000)  /* 64 Ko sous la pile */
+#define RET_WORDS 16384u
+static uint32_t ret_pat(uint32_t i) { return 0xA5A5A5A5u ^ (i << 7) ^ (i >> 3); }
+static void ret_fill(void) { for (uint32_t i = 0; i < RET_WORDS; i++) RET_BASE[i] = ret_pat(i); }
+static uint32_t ret_check(void) {
+    uint32_t bad = 0;
+    for (uint32_t i = 0; i < RET_WORDS; i++) if (RET_BASE[i] != ret_pat(i)) bad++;
+    return bad;
+}
+
 // ---------------------------------------------------------------------------
 int main(void) {
     // 43.2 MHz / 375 = 115200 baud
@@ -714,6 +724,9 @@ uart_printf("sp=%x io_buf=%x fs=%x\n", sp_val, (uint32_t)io_buf, (uint32_t)&fs);
 
     browse();
 
+    ret_fill(); 
+    uint32_t last_ret = time_millis();
+
     // The console is running now.  Stay alive so the user can bring the menu
     // back with Select+Start and pick another game without a power cycle,
     // Select+Up/Down cycles the display zoom mode and Select+Left/Right
@@ -735,6 +748,13 @@ if (time_millis() - last_hb >= 1000) {
     uart_printf("alive loops=%d reg=%x\n", (int)loops, reg_joystick);
     loops = 0;
 }
+
+if (time_millis() - last_ret >= 10000) {
+    last_ret += 10000;
+    uart_printf("retention bad=%d\n", (int)ret_check());
+    ret_fill();
+}
+
         if (raw != last_raw) { uart_printf("joy %x\n", raw); last_raw = raw; }
         if (time_millis() - last_hb >= 1000) { last_hb += 1000; uart_printf("alive\n"); }
 
