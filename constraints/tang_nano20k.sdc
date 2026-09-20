@@ -39,5 +39,5 @@ set_false_path -from [get_ports {pad_data}]
 set_false_path -from [get_ports {sd_cmd}]
 set_false_path -from [get_ports {sd_dat0}]
 
-report_timing -setup -max_paths 25 -max_common_paths 1
+report_timing -setup -max_paths 100 -max_common_paths 1
 report_timing -hold  -max_paths 25 -max_common_paths 1
