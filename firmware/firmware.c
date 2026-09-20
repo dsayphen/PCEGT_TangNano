@@ -687,6 +687,11 @@ static int mount_card(void) {
 int main(void) {
     // 43.2 MHz / 375 = 115200 baud
     uart_init(375);
+
+uint32_t sp_val;
+__asm__ volatile ("mv %0, sp" : "=r"(sp_val));
+uart_printf("sp=%x io_buf=%x fs=%x\n", sp_val, (uint32_t)io_buf, (uint32_t)&fs);
+    
     uart_print("\nPCEtang iosys firmware\n");
 
     overlay(1);
@@ -717,10 +722,25 @@ int main(void) {
     // as a modifier for the zoom/scanline shortcuts.
     int select_armed = 0;
     int select_count = 0;
+uint32_t last_hb = time_millis();
+uint32_t last_raw = 0xffffffff;
 
     for (;;) {
         uint32_t raw = joy_raw();
         uint32_t e = joy_edge();
+        static uint32_t loops = 0;
+loops++;
+if (time_millis() - last_hb >= 1000) {
+    last_hb += 1000;
+    uart_printf("alive loops=%d reg=%x\n", (int)loops, reg_joystick);
+    loops = 0;
+}
+        if (raw != last_raw) { uart_printf("joy %x\n", raw); last_raw = raw; }
+        if (time_millis() - last_hb >= 1000) { last_hb += 1000; uart_printf("alive\n"); }
+
+        static uint32_t last_reg = 0xffffffff;
+        uint32_t r = reg_joystick;
+        if (r != last_reg) { uart_printf("reg %x\n", r); last_reg = r; }
 
         if (!(raw & JOY_SELECT)) {
             // Select released: require another 500 ms hold next time.

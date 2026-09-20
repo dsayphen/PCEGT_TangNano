@@ -281,7 +281,13 @@ reg         vram_we_d;
 
 assign vram_dout = vram_addr[15] ? 16'd0 : vram_dout_mem;
 
-always @(posedge clk_mem) begin
+// The bridges run in the clk_sys domain (same clock as the VDC): the raw VDC
+// outputs (RAM_A/RD/WE go through the BG address adders and slot decode) need
+// a full 23 ns clk_sys period to settle; sampling them with clk_mem gave only
+// 11.57 ns and failed timing by up to 10 ns (see timing report), producing
+// wrong addresses and glitched SDRAM commands. The registered request is then
+// seen by the clk_mem controller on the next clk_mem edge.
+always @(posedge clk) begin
     if (!resetn) begin
         vram_req       <= 1'b0;
         vram_addr_r    <= 15'd0;
@@ -318,7 +324,7 @@ reg         vram1_we_d;
 
 assign vram1_dout = vram1_addr[15] ? 16'd0 : vram1_dout_mem;
 
-always @(posedge clk_mem) begin
+always @(posedge clk) begin
     if (!resetn) begin
         vram1_req       <= 1'b0;
         vram1_addr_r    <= 15'd0;
@@ -340,6 +346,19 @@ always @(posedge clk_mem) begin
             vram1_addr_seen <= vram1_addr;
             vram1_req       <= ~vram1_req;
         end
+    end
+end
+
+// Registered (clk_sys) activity of the current VDC slot, for the refresh guard.
+reg vram_act_r;
+reg vram1_act_r;
+always @(posedge clk) begin
+    if (!resetn) begin
+        vram_act_r  <= 1'b0;
+        vram1_act_r <= 1'b0;
+    end else begin
+        vram_act_r  <= vram_rd  | vram_we;
+        vram1_act_r <= vram1_rd | vram1_we;
     end
 end
 
@@ -381,14 +400,14 @@ pce_sdram_interleaved #(
     .vram_req(vram_req),
     .vram_ack(vram_ack),
     .vram_we(vram_we_r),
-    .vram_active(vram_rd | vram_we),
+    .vram_active(vram_act_r),
     .vram1_addr(vram1_addr_r),
     .vram1_din(vram1_din_r),
     .vram1_dout(vram1_dout_mem),
     .vram1_req(vram1_req),
     .vram1_ack(vram1_ack),
     .vram1_we(vram1_we_r),
-    .vram1_active(vram1_rd | vram1_we),
+    .vram1_active(vram1_act_r),
     .init_done(init_done_mem)
 );
 
@@ -477,7 +496,8 @@ reg [2:0] cycle;
 reg       clkref_r;
 
 reg        refresh_block;
-reg        slot_first;     // 1 from the clkref edge until cycle 6: first pass of a dot slot
+reg [3:0]  refresh_hold;   // clk_mem edges the bus stays blocked after a refresh
+reg        slot_first;     // first pass of a dot slot: only here may an ACT be issued
 reg [15:0] refresh_cnt;
 
 // Distributed, on-demand refresh (SNESTang model): instead of concentrating
@@ -512,11 +532,12 @@ localparam integer RFRSH_CYCLES = FREQ / 128_000;
 wire       vram_pending  = (vram_req  != vram_ack);
 wire       vram1_pending = (vram1_req != vram1_ack);
 wire       need_refresh  = refresh_cnt >= RFRSH_CYCLES[15:0];
-wire       refresh_now   = need_refresh &&
+// Decided at cycle 1 of the first pass, when the registered activity flags of
+// the new VDC slot are valid (vram_active/vram1_active are clk_sys registers).
+wire       refresh_now   = need_refresh && !refresh_block && slot_first &&
                             !active[0] && !active[1] && !active[2] &&
                             !vram_pending && !vram1_pending &&
-                            !vram_active && !vram1_active &&
-                            slot_first;
+                            !vram_active && !vram1_active;
 
 localparam CHANNEL1_NONE  = 2'd0;
 localparam CHANNEL1_RV    = 2'd1;
@@ -537,6 +558,8 @@ always @(posedge clk) begin
         cycle         <= 3'd0;
         clkref_r      <= 1'b0;
         refresh_block <= 1'b0;
+        refresh_hold  <= 4'd0;
+        slot_first    <= 1'b0;
         refresh_cnt   <= 16'd0;
         host_ack      <= 1'b0;
         rv_ack        <= 1'b0;
@@ -551,7 +574,6 @@ always @(posedge clk) begin
         active        <= 3'b000;
         channel1_port <= CHANNEL1_NONE;
         host_cas_done <= 1'b0;
-        slot_first    <= 1'b0;
     end else begin
         cmd       <= CMD_NOP;
         SDRAM_DQM <= 4'b1111;
@@ -595,40 +617,45 @@ always @(posedge clk) begin
             // it no longer collides systematically with the VDC0 SATB/sprite
             // burst fetch at the start of vblank (confirmed in
             // sim/tb_sprite_stream.v).
-            // Phase: the VDC only changes its memory address right after the
-            // clkref edge (all its RAM_* outputs are stable for the whole dot)
-            // and the bridge registers the request one clk_mem edge later.
-            // Loading 7 makes cycle 0 fall one edge after the slot start (raw
-            // RD/WE of the new slot already valid for the refresh decision)
-            // and cycle 1 two edges after it (registered VDC1 request visible),
-            // so every VDC access is served in the first pass of its own dot
-            // for dot periods of 12 and 16 clk_mem edges (7.16 / 5.37 MHz).
-            if (clkref && !clkref_r && !refresh_block)
-                cycle <= 3'd7;
+            // Phase. The VDC drives its memory address right after the clkref
+            // edge U; the clk_sys bridge registers the request at U+2 and the
+            // controller sees it from U+3. Loading 6 puts cycle 1 (VDC1 ACT) at
+            // U+3 and cycle 2 (VDC0 ACT) at U+4, so both reads complete inside
+            // the same dot for dot periods of 12 and 16 clk_mem edges (7.16 and
+            // 5.37 MHz). The HuC6260 only ever lengthens a dot (once per line).
+            // The resync is unconditional: the refresh block is now a counter,
+            // independent of the phase.
+            if (clkref && !clkref_r)
+                cycle <= 3'd6;
             else
                 cycle <= cycle + 3'd1;
 
-            // First pass of a dot slot. An ACT is only issued in this window
-            // (its CAS and data capture always complete before the next
-            // resync); the second, partial pass of a 12-edge slot must never
-            // start an ACT whose CAS would be cut off by the resync.
-            if (cycle == 3'd6)
+            // First pass of a dot slot (until cycle 4): the only window where an
+            // ACT may start, so its CAS and capture always complete before the
+            // next resync. Refresh is also only decided here.
+            if (cycle == 3'd4)
                 slot_first <= 1'b0;
             if (clkref && !clkref_r)
                 slot_first <= 1'b1;
+
+            // Bus blocked for 8 clk_mem edges after a refresh command (tRFC).
+            if (refresh_hold != 4'd0) begin
+                refresh_hold <= refresh_hold - 4'd1;
+                if (refresh_hold == 4'd1)
+                    refresh_block <= 1'b0;
+            end
 
             // Free-running refresh timer: reset only when a refresh is
             // actually issued below, otherwise keep counting so need_refresh
             // stays asserted (and refresh_now keeps trying) until the bus is
             // idle enough to take it.
-            if (cycle == 3'd0 && refresh_now)
+            if (cycle == 3'd1 && refresh_now)
                 refresh_cnt <= 16'd0;
             else
                 refresh_cnt <= refresh_cnt + 16'd1;
 
             // Complete the host read from its cycle-5 CAS.
             if (cycle == 3'd0) begin
-                refresh_block <= 1'b0;
                 if (active[0] && host_cas_done) begin
                     if (oe_latch[0])
                         host_dout <= addr_latch[0][1] ?
@@ -637,15 +664,17 @@ always @(posedge clk) begin
                     active[0] <= 1'b0;
                     host_cas_done <= 1'b0;
                 end
+            end
 
-                if (refresh_now) begin
-                    cmd           <= CMD_REFRESH;
-                    refresh_block <= 1'b1;
-                end
+            // Refresh replaces the channel-1 ACT of an idle first pass.
+            if (cycle == 3'd1 && refresh_now) begin
+                cmd           <= CMD_REFRESH;
+                refresh_block <= 1'b1;
+                refresh_hold  <= 4'd8;
             end
 
             // Channel 1: VDC1 has priority over PicoRV32.
-            if (cycle == 3'd1 && !refresh_block) begin
+            if (cycle == 3'd1 && !refresh_block && !refresh_now) begin
                 if (vram1_req != vram1_ack && slot_first) begin
                     active[1]       <= 1'b1;
                     channel1_port   <= CHANNEL1_VRAM1;
