@@ -370,7 +370,6 @@ pce_sdram_ctrl_3ch #(
     .clk_sdram     (clk_sdram),
     .clkref        (vid_ce),
     .refresh_window(vram_refresh_window),
-    .vblank        (vid_vbl),
     .resetn        (sys_resetn),
 
     .vram0_wait (vram0_wait),
@@ -438,15 +437,27 @@ pce_sdram_ctrl_3ch #(
 // ===========================================================================
 wire rst_trigger = !sdram_init_done || loading || !image_valid || btn_reset || game_reset;
 
+// Cycles to hold reset after `rst_trigger` clears: 64k (65536) clocks for the
+// core's internal COLD_RESET memory clear, plus RST_EXTRA_CYCLES on top if
+// more settle time is needed. Bump RST_EXTRA_CYCLES (and widen rst_cnt if the
+// total exceeds 17 bits) to add more delay. max 131071
+
+// 17'd4320 → +100 µs
+// 17'd21600 → +500 µs
+// 17'd43200 → +1 ms
+
+localparam RST_EXTRA_CYCLES = 17'd43200;
+localparam RST_TOTAL_CYCLES = 17'd65536 + RST_EXTRA_CYCLES;
+
 reg [16:0] rst_cnt = 17'd0;
 always @(posedge clk_sys) begin
     if (!sys_resetn || rst_trigger)
         rst_cnt <= 17'd0;
-    else if (!rst_cnt[16])
+    else if (rst_cnt < RST_TOTAL_CYCLES)
         rst_cnt <= rst_cnt + 17'd1;
 end
 
-wire core_reset = ~rst_cnt[16];
+wire core_reset = (rst_cnt < RST_TOTAL_CYCLES);
 // refresh may ignore the VDCs only while the core (and so both VDCs) is held in reset
 assign vram_refresh_window = core_reset;
 

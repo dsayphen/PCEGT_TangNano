@@ -17,7 +17,6 @@ module pce_sdram_ctrl_3ch #(
     input  wire        clk_sdram,
     input  wire        clkref,
     input  wire        refresh_window,
-    input  wire        vblank,
     input  wire        resetn,
 
     output wire        O_sdram_clk,
@@ -385,7 +384,6 @@ pce_sdram_interleaved #(
     .clk_sdram(clk_sdram),
     .clkref(clkref),
     .refresh_window(refresh_window),
-    .vblank(vblank),
     .resetn(resetn),
     .host_addr(host_addr),
     .host_din(host_din),
@@ -438,7 +436,6 @@ module pce_sdram_interleaved #(
     input  wire        clk_sdram,
     input  wire        clkref,
     input  wire        refresh_window,
-    input  wire        vblank,
     input  wire        resetn,
 
     input  wire [22:0] host_addr,
@@ -553,20 +550,10 @@ always @(posedge clk)
 // would never be refreshed: rows that the softcore does not touch for a few
 // seconds (its own idle code and stack frames, i.e. what it runs right after a
 // long load) then decay. In that window the VDC condition is dropped.
-// Normal refresh is now confined to vblank (~1.33ms/frame at 21 blanking
-// lines, against ~200us of total refresh time needed per frame), so it can
-// never steal an active-area VDC0/VDC1 fetch slot -- the failure mode behind
-// the R-Type sprite corruption (HUC6270 has no wait-state input, so a slot
-// stolen mid-active-line silently shifts/corrupts whatever burst read was in
-// flight, e.g. SATB). The idle checks are kept to still dodge the SATB burst
-// at the very start of vblank. refresh_urgent (50% overdue) and
-// in_reset_window remain unconditional safety nets, in case vblank alone
-// isn't enough to drain the backlog (should not happen in normal operation).
 wire       refresh_now   = need_refresh && !refresh_block && slot_first &&
                             !active[0] && !active[1] && !active[2] &&
-                            (in_reset_window || refresh_urgent ||
-                             (vblank &&
-                              !vram_pending && !vram1_pending &&
+                            (in_reset_window ||
+                             (!vram_pending && !vram1_pending &&
                               !vram_active && !vram1_active));
 
 localparam CHANNEL1_NONE  = 2'd0;
