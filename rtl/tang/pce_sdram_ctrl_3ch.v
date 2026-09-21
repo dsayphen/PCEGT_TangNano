@@ -499,6 +499,10 @@ reg        refresh_block;
 reg [3:0]  refresh_hold;   // clk_mem edges the bus stays blocked after a refresh
 reg        slot_first;     // first pass of a dot slot: only here may an ACT be issued
 reg [15:0] refresh_cnt;
+reg        need_refresh;    // registered: refresh_cnt >= RFRSH_CYCLES
+reg        refresh_urgent;  // registered: refresh 50% overdue
+reg [1:0]  rw_sync = 2'b00; // refresh_window (core in reset) into clk_mem
+wire       in_reset_window = rw_sync[1];
 
 // Distributed, on-demand refresh (SNESTang model): instead of concentrating
 // all refresh commands into the vblank window (refresh_window), where they
@@ -531,13 +535,20 @@ reg        host_cas_done;
 localparam integer RFRSH_CYCLES = FREQ / 128_000;
 wire       vram_pending  = (vram_req  != vram_ack);
 wire       vram1_pending = (vram1_req != vram1_ack);
-wire       need_refresh  = refresh_cnt >= RFRSH_CYCLES[15:0];
+always @(posedge clk)
+    rw_sync <= {rw_sync[0], refresh_window};
 // Decided at cycle 1 of the first pass, when the registered activity flags of
 // the new VDC slot are valid (vram_active/vram1_active are clk_sys registers).
+// While the core is held in reset (menu, ROM load) the VDCs sit in a constant CPU
+// slot with RAM_RD stuck high, so 'both VDCs idle' is never true and the SDRAM
+// would never be refreshed: rows that the softcore does not touch for a few
+// seconds (its own idle code and stack frames, i.e. what it runs right after a
+// long load) then decay. In that window the VDC condition is dropped.
 wire       refresh_now   = need_refresh && !refresh_block && slot_first &&
                             !active[0] && !active[1] && !active[2] &&
-                            !vram_pending && !vram1_pending &&
-                            !vram_active && !vram1_active;
+                            (in_reset_window ||
+                             (!vram_pending && !vram1_pending &&
+                              !vram_active && !vram1_active));
 
 localparam CHANNEL1_NONE  = 2'd0;
 localparam CHANNEL1_RV    = 2'd1;
@@ -561,6 +572,8 @@ always @(posedge clk) begin
         refresh_hold  <= 4'd0;
         slot_first    <= 1'b0;
         refresh_cnt   <= 16'd0;
+        need_refresh   <= 1'b0;
+        refresh_urgent <= 1'b0;
         host_ack      <= 1'b0;
         rv_ack        <= 1'b0;
         vram_ack      <= 1'b0;
@@ -653,6 +666,9 @@ always @(posedge clk) begin
                 refresh_cnt <= 16'd0;
             else
                 refresh_cnt <= refresh_cnt + 16'd1;
+
+            need_refresh   <= (refresh_cnt >= RFRSH_CYCLES[15:0]);
+            refresh_urgent <= (refresh_cnt >= (RFRSH_CYCLES[15:0] + (RFRSH_CYCLES[15:0] >> 1)));
 
             // Complete the host read from its cycle-5 CAS.
             if (cycle == 3'd0) begin
@@ -809,7 +825,8 @@ always @(posedge clk) begin
                     vram_dout <= din_latch[2];
                 active[2] <= 1'b0;
             end
-            if (cycle == 3'd7 && !refresh_block && !active[0] &&
+            if (cycle == 3'd7 && !refresh_block &&
+                !(in_reset_window && refresh_urgent) && !active[0] &&
                 host_req != host_ack) begin
                 active[0]     <= 1'b1;
                 addr_latch[0] <= host_addr;
