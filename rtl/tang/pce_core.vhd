@@ -39,6 +39,9 @@ entity pce_core is
 		rom_sz     : in  std_logic_vector(7 downto 0);
 		sgx_mode   : in  std_logic;
 
+		vram0_wait : in std_logic;
+		vram1_wait : in std_logic;
+
 		-- VDC0 video RAM (external SDRAM)
 		vram0_a    : out std_logic_vector(15 downto 0);
 		vram0_do   : out std_logic_vector(15 downto 0);
@@ -109,6 +112,9 @@ begin
 		RESET       => reset,
 		COLD_RESET  => cold_reset,
 		CLK         => clk,
+
+		VRAM0_WAIT => vram0_wait,
+		VRAM1_WAIT => vram1_wait,
 
 		ROM_RD      => rom_rd,
 		ROM_RDY     => rom_rdy,

@@ -55,6 +55,9 @@ module pce_sdram_ctrl_3ch #(
     input  wire        vram1_rd,
     input  wire        vram1_we,
 
+    output wire        vram0_wait,
+    output wire        vram1_wait,
+
     input  wire        rv_valid,
     output reg         rv_ready,
     input  wire [22:0] rv_addr,
@@ -323,6 +326,8 @@ reg         vram1_rd_d;
 reg         vram1_we_d;
 
 assign vram1_dout = vram1_addr[15] ? 16'd0 : vram1_dout_mem;
+assign vram0_wait = (vram_req  != vram_ack);
+assign vram1_wait = (vram1_req != vram1_ack);
 
 always @(posedge clk) begin
     if (!resetn) begin
@@ -463,6 +468,7 @@ module pce_sdram_interleaved #(
     input  wire        vram1_req,
     output reg         vram1_ack,
     input  wire        vram1_we,
+
     input  wire        vram1_active,
     output reg         init_done
 );

@@ -108,6 +108,9 @@ entity pce_top is
 		GRID_EN     : in  std_logic_vector(1 downto 0);
 		CPU_PAUSE_EN: in  std_logic;
 
+		VRAM0_WAIT : in std_logic := '0';
+		VRAM1_WAIT : in std_logic := '0';
+
 		BORDER_EN   : in  std_logic;
 		ReducedVBL  : in  std_logic;
 		VIDEO_DCC   : out std_logic_vector(1 downto 0);
@@ -425,6 +428,7 @@ port map(
 	VSYNC_R	=> VCE_VSYNC_R,
 	CLKEN_FS => VIDEO_CE_FS,
 	RVBL		=> ReducedVBL,
+	VRAM_WAIT => VRAM0_WAIT or VRAM1_WAIT,
 	DCC      => VIDEO_DCC,
 
 	GRID_EN	=> GRID_EN,

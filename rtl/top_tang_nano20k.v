@@ -360,6 +360,8 @@ wire        vid_ce;
 wire        vid_vbl;
 wire        vram_refresh_window;
 
+wire        vram0_wait, vram1_wait;
+
 pce_sdram_ctrl_3ch #(
     .FREQ (86_400_000)
 ) u_mem (
@@ -369,6 +371,9 @@ pce_sdram_ctrl_3ch #(
     .clkref        (vid_ce),
     .refresh_window(vram_refresh_window),
     .resetn        (sys_resetn),
+
+    .vram0_wait (vram0_wait),
+    .vram1_wait (vram1_wait),
 
     .O_sdram_clk   (O_sdram_clk),
     .O_sdram_cke   (O_sdram_cke),
@@ -464,7 +469,7 @@ pce_core #(
     .cpu_pause  (game_pause),
 
     .rom_rd     (rom_rd),
-    .rom_rdy    (rom_rdy),
+    .rom_rdy    (rom_rdy), 
     .rom_a      (rom_a),
     .rom_do     (rom_do),
     .rom_sz     (rom_sz),
@@ -475,6 +480,9 @@ pce_core #(
     .vram0_di   (vram0_di),
     .vram0_rd   (vram0_rd),
     .vram0_we   (vram0_we),
+
+    .vram0_wait (vram0_wait),
+    .vram1_wait (vram1_wait),
 
     .vram1_a    (vram1_a),
     .vram1_do   (vram1_do),
