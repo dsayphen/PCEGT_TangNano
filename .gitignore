@@ -31,3 +31,4 @@ sim/roms/*.sgx
 *.bak
 *~
 Thumbs.db
+firmware/*.bin

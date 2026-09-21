@@ -53,8 +53,6 @@ static uint8_t io_buf[2048];
 
 static char current_game_name[NAME_MAX] = "";
 
-static uint32_t unpause_at = 0;
-
 // Extrait le nom du fichier sans le chemin
 static void extract_filename(char *dst, const char *path) {
     const char *slash = strrchr(path, '/');
@@ -326,6 +324,91 @@ static void video_config_save(void) {
     f_close(&file);
 }
 
+// ---------------------------------------------------------------------------
+// Audio configuration & Persistence
+// ---------------------------------------------------------------------------
+// Global settings (not per-game), saved next to video.cfg.
+
+#define AUDIO_CFG_FILE    "/config/audio.cfg"
+
+static int audio_volume = 10;   // 0..10, hardware reset default: unity gain
+static int audio_bass = 0;      // -5..5, hardware reset default: flat
+static int audio_treble = 0;    // -5..5, hardware reset default: flat
+
+// Pushes the current settings to reg_audio; bass/treble are biased by +5 to
+// match the unsigned 0..10 range iosys.v stores them in.
+static void audio_apply(void) {
+    reg_audio = (uint32_t)audio_volume |
+                ((uint32_t)(audio_bass + 5) << 4) |
+                ((uint32_t)(audio_treble + 5) << 8);
+}
+
+static void audio_config_load(void) {
+    FIL file;
+    char line[64];
+
+    if (f_open(&file, AUDIO_CFG_FILE, FA_READ) != FR_OK) {
+        audio_apply();
+        return;
+    }
+
+    while (f_gets(line, sizeof(line), &file)) {
+        if (line[0] == '#' || line[0] == '\r' || line[0] == '\n' || line[0] == '\0') {
+            continue;
+        }
+
+        if (starts_with(line, "volume=")) {
+            audio_volume = parse_u8(line + 7);
+        } else if (starts_with(line, "bass=")) {
+            audio_bass = (int)parse_u8(line + 5) - 5;
+        } else if (starts_with(line, "treble=")) {
+            audio_treble = (int)parse_u8(line + 7) - 5;
+        }
+    }
+
+    f_close(&file);
+    audio_apply();
+}
+
+static void audio_config_save(void) {
+    FIL file;
+    UINT bw;
+    char num[4];
+    int len;
+
+    f_mkdir("/config");
+
+    if (f_open(&file, AUDIO_CFG_FILE, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
+        return;
+    }
+
+    const char *header =
+        "# PCEngine / SuperGrafx Audio Settings\n"
+        "# -----------------------------------\n"
+        "# volume : 0 (mute) .. 10 (max)\n"
+        "# bass, treble : 0 (min) .. 10 (max), stored biased by +5 (5 = flat)\n"
+        "# -----------------------------------\n";
+
+    f_write(&file, header, (UINT)strlen(header), &bw);
+
+    f_write(&file, "volume=", 7, &bw);
+    len = u8_to_str(num, (uint8_t)audio_volume);
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+
+    f_write(&file, "bass=", 5, &bw);
+    len = u8_to_str(num, (uint8_t)(audio_bass + 5));
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+
+    f_write(&file, "treble=", 7, &bw);
+    len = u8_to_str(num, (uint8_t)(audio_treble + 5));
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+
+    f_close(&file);
+}
+
 // Cycle the display zoom mode (2x -> stretch -> ...) and flash the new
 // setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
 // (reg_video_zoom) and rtl/tang/video_scandoubler.v.
@@ -395,13 +478,147 @@ static void make_menu_label(char *buf, int type) {
     buf[i] = '\0';
 }
 
+// Color/Zoom/Scanlines sub-menu, reached from "Video Settings >" in
+// pause_menu.  Gamepad mode lives directly in pause_menu, not here.
+static void video_menu(void) {
+    static const char *back_label = "Back";
+    int active = 0;
+    const int n_items = 4;
+
+    clear();
+    print_field(5, 5, "Video Settings", OSD_COLS - 2);
+
+    for (;;) {
+        for (int i = 0; i < n_items; i++) {
+            cursor(4, 8 + i);
+            putchar(i == active ? '>' : ' ');
+
+            char label[24];
+
+            if (i == 3) {
+                print_field(6, 8 + i, back_label, 20);
+                continue;
+            }
+
+            make_menu_label(label, i + 4);
+            print_field(6, 8 + i, label, 20);
+        }
+        selection_row(8 + active);
+
+        uint32_t e = joy_edge();
+        if (e & JOY_UP) {
+            active = active ? active - 1 : n_items - 1;
+        } else if (e & JOY_DOWN) {
+            active = active < n_items - 1 ? active + 1 : 0;
+        } else if ((e & JOY_B) || ((e & JOY_A) && active == 3)) {
+            return;
+        } else if ((e & JOY_A) && active == 0) {
+            video_color = !video_color;
+            reg_color_mode = video_color;
+            video_config_save();
+        } else if ((e & JOY_A) && active == 1) {
+            video_zoom = (video_zoom + 1) % 2;
+            reg_video_zoom = video_zoom;
+            video_config_save();
+        } else if ((e & JOY_A) && active == 2) {
+            video_scanline = (video_scanline + 1) % 4;
+            reg_scanline = video_scanline;
+            video_config_save();
+        }
+        delay(20);
+    }
+}
+
+// Volume/Bass/Treble sub-menu, reached from "Audio Settings >" in pause_menu.
+static void audio_menu(void) {
+    static const char *labels[4] = { "Volume", "Bass", "Treble", "Back" };
+    int active = 0;
+    const int n_items = 4;
+
+    clear();
+    print_field(5, 5, "Audio Settings", OSD_COLS - 2);
+
+    for (;;) {
+        for (int i = 0; i < n_items; i++) {
+            cursor(4, 8 + i);
+            putchar(i == active ? '>' : ' ');
+
+            char label[24];
+            int j = 0;
+            const char *prefix = labels[i];
+            while (*prefix)
+                label[j++] = *prefix++;
+
+            if (i < 3) {
+                int val = (i == 0) ? audio_volume : (i == 1) ? audio_bass : audio_treble;
+                char num[4];
+                int len;
+
+                label[j++] = ':';
+                label[j++] = ' ';
+                if (i > 0 && val > 0) {
+                    label[j++] = '+';
+                } else if (i > 0 && val < 0) {
+                    label[j++] = '-';
+                    val = -val;
+                }
+                len = u8_to_str(num, (uint8_t)val);
+                for (int k = 0; k < len; k++)
+                    label[j++] = num[k];
+            }
+            label[j] = '\0';
+
+            print_field(6, 8 + i, label, 20);
+        }
+        selection_row(8 + active);
+
+        uint32_t e = joy_edge();
+        if (e & JOY_UP) {
+            active = active ? active - 1 : n_items - 1;
+        } else if (e & JOY_DOWN) {
+            active = active < n_items - 1 ? active + 1 : 0;
+        } else if (e & JOY_LEFT) {
+            if (active == 0 && audio_volume > 0) {
+                audio_volume--;
+                audio_apply();
+                audio_config_save();
+            } else if (active == 1 && audio_bass > -5) {
+                audio_bass--;
+                audio_apply();
+                audio_config_save();
+            } else if (active == 2 && audio_treble > -5) {
+                audio_treble--;
+                audio_apply();
+                audio_config_save();
+            }
+        } else if (e & JOY_RIGHT) {
+            if (active == 0 && audio_volume < 10) {
+                audio_volume++;
+                audio_apply();
+                audio_config_save();
+            } else if (active == 1 && audio_bass < 5) {
+                audio_bass++;
+                audio_apply();
+                audio_config_save();
+            } else if (active == 2 && audio_treble < 5) {
+                audio_treble++;
+                audio_apply();
+                audio_config_save();
+            }
+        } else if ((e & JOY_B) || ((e & JOY_A) && active == 3)) {
+            return;
+        }
+        delay(20);
+    }
+}
+
 // Returns non-zero when the player chooses to return to the ROM browser.
 static int pause_menu(void) {
     static const char *items[3] = {
         "Resume Game", "Reset Game", "Return to browser"
     };
     int active = 0;
-    const int n_items = 7;
+    const int n_items = 6;
 
     pce_pause(1);
     clear();
@@ -419,7 +636,17 @@ static int pause_menu(void) {
                 continue;
             }
 
-            make_menu_label(label, i);
+            if (i == 4) {
+                print_field(6, 8 + i, "Video Settings >", 20);
+                continue;
+            }
+
+            if (i == 5) {
+                print_field(6, 8 + i, "Audio Settings >", 20);
+                continue;
+            }
+
+            make_menu_label(label, 3);
             print_field(6, 8 + i, label, 20);
         }
         selection_row(8 + active);
@@ -448,17 +675,13 @@ static int pause_menu(void) {
             reg_pad_mode = game_pad_mode;
             game_pad_mode_save(current_game_name); // <--- Sauvegarde dans /config/[nomdujeu].cfg
         } else if ((e & JOY_A) && active == 4) {
-            video_color = !video_color;
-            reg_color_mode = video_color;
-            video_config_save();
+            video_menu();
+            clear();
+            print_field(5, 5, "Game paused", OSD_COLS - 2);
         } else if ((e & JOY_A) && active == 5) {
-            video_zoom = (video_zoom + 1) % 2;
-            reg_video_zoom = video_zoom;
-            video_config_save();
-        } else if ((e & JOY_A) && active == 6) {
-            video_scanline = (video_scanline + 1) % 4;
-            reg_scanline = video_scanline;
-            video_config_save();
+            audio_menu();
+            clear();
+            print_field(5, 5, "Game paused", OSD_COLS - 2);
         }
         delay(20);
     }
@@ -486,6 +709,7 @@ static const char *hidden_dirs[] = {
     "pcecfg",
     "cheats",
     "gamecfg",
+    "config",
     "screenshot",
     NULL
 };
@@ -814,8 +1038,9 @@ int main(void) {
         break;
     }
 
-    // Restore the last video settings saved on the SD card.
+    // Restore the last video and audio settings saved on the SD card.
     video_config_load();
+    audio_config_load();
 
     browse();
 

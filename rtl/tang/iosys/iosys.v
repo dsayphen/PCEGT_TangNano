@@ -102,6 +102,11 @@ module iosys #(
     output reg  [1:0]  scanline,
     output reg         color_mode,
 
+    // ---- audio tone controls, all 0..10, biased by +5 for bass/treble -----
+    output reg  [3:0]  audio_volume,
+    output reg  [3:0]  audio_bass,
+    output reg  [3:0]  audio_treble,
+
     // ---- in-game controls -------------------------------------------------
     output reg         game_pause,
     output reg         game_reset,
@@ -264,6 +269,7 @@ wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
 wire pad_mode_sel  = mem_valid && (mem_addr == 32'h0200_0058);
 wire color_mode_sel= mem_valid && (mem_addr == 32'h0200_005c);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
+wire audio_sel     = mem_valid && (mem_addr == 32'h0200_0064);
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -308,7 +314,7 @@ wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
                    game_ctrl_sel ||
-                   time_sel || pad_mode_sel || color_mode_sel || id_sel ||
+                   time_sel || pad_mode_sel || color_mode_sel || id_sel || audio_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -323,6 +329,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    pad_mode_sel ? {31'd0, pad_mode} :
                    color_mode_sel ? {31'd0, color_mode} :
                    id_sel       ? {16'b0, CORE_ID} :
+                   audio_sel    ? {20'b0, audio_treble, audio_bass, audio_volume} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;
 
@@ -512,6 +519,12 @@ always @(posedge clk) begin
     if (color_mode_sel && (mem_wstrb != 4'b0))
         color_mode <= mem_wdata[0];
 
+    if (audio_sel && (mem_wstrb != 4'b0)) begin
+        audio_volume <= mem_wdata[3:0];
+        audio_bass   <= mem_wdata[7:4];
+        audio_treble <= mem_wdata[11:8];
+    end
+
     // ---- end of transfer: wait for the SDRAM to really drain -------------
     if (rl_finishing) begin
         rl_timeout <= rl_timeout + 20'd1;
@@ -545,6 +558,9 @@ always @(posedge clk) begin
         system_reset <= 1'b0;
         pad_mode     <= 1'b0;
         color_mode   <= 1'b0;
+        audio_volume <= 4'd10;     // unity gain
+        audio_bass   <= 4'd5;      // flat (offset by +5)
+        audio_treble <= 4'd5;      // flat (offset by +5)
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;
