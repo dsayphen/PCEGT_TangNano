@@ -239,54 +239,45 @@ end process;
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if VRAM_WAIT = '1' then
-			-- Frozen: hold H_CNT/V_CNT/DOTCLOCK exactly as they are, and force
-			-- CLKEN_FF low rather than leaving it at whatever value it had on
-			-- the cycle the wait started (it would otherwise stay stuck at 
-			-- '1' for the whole freeze if the wait begins right on the cycle
-			-- after a pulse, letting the VDC race ahead instead of pausing).
-			CLKEN_FF <= '0';
-		else
-			H_CNT <= H_CNT + 1;
+		H_CNT <= H_CNT + 1;
 
-			CLKEN_FF <= '0';
-			CLKEN_CNT <= CLKEN_CNT + 1;
-			if DOTCLOCK = "00" and CLKEN_CNT = "111" and H_CNT < LINE_CLOCKS-2-1 then
-				CLKEN_CNT <= (others => '0');
-				CLKEN_FF <= '1';
-			elsif DOTCLOCK = "01" and CLKEN_CNT = "101" then
-				CLKEN_CNT <= (others => '0');
-				CLKEN_FF <= '1';				
-			elsif DOTCLOCK(1) = '1' and CLKEN_CNT = "011" and H_CNT < LINE_CLOCKS-2-1 then
-				CLKEN_CNT <= (others => '0');
-				CLKEN_FF <= '1';
+		CLKEN_FF <= '0';
+		CLKEN_CNT <= CLKEN_CNT + 1;
+		if DOTCLOCK = "00" and CLKEN_CNT = "111" and H_CNT < LINE_CLOCKS-2-1 then
+			CLKEN_CNT <= (others => '0');
+			CLKEN_FF <= '1';
+		elsif DOTCLOCK = "01" and CLKEN_CNT = "101" then
+			CLKEN_CNT <= (others => '0');
+			CLKEN_FF <= '1';				
+		elsif DOTCLOCK(1) = '1' and CLKEN_CNT = "011" and H_CNT < LINE_CLOCKS-2-1 then
+			CLKEN_CNT <= (others => '0');
+			CLKEN_FF <= '1';
+		end if;
+
+		if H_CNT = LINE_CLOCKS-1 then
+			CLKEN_CNT <= (others => '0');
+			CLKEN_FF <= '1';				
+			H_CNT <= (others => '0');
+			V_CNT <= V_CNT + 1;
+			if V_CNT >= END_LINE-1 then
+				V_CNT <= (others => '0');
+				if CR(2) = '1' then			-- artifact bit affects number of lines per field; check at start of field
+				END_LINE <= TOTAL_LINES;
+				else
+				END_LINE <= TOTAL_LINES - 1;
+				end if;
 			end if;
+			-- Reload registers
+			BW <= CR(7);
+			DOTCLOCK <= CR(1 downto 0);
 
-			if H_CNT = LINE_CLOCKS-1 then
-				CLKEN_CNT <= (others => '0');
-				CLKEN_FF <= '1';				
-				H_CNT <= (others => '0');
-				V_CNT <= V_CNT + 1;
-				if V_CNT >= END_LINE-1 then
-					V_CNT <= (others => '0');
-					if CR(2) = '1' then			-- artifact bit affects number of lines per field; check at start of field
-					END_LINE <= TOTAL_LINES;
-					else
-					END_LINE <= TOTAL_LINES - 1;
-					end if;
-				end if;
-				-- Reload registers
-				BW <= CR(7);
-				DOTCLOCK <= CR(1 downto 0);
-
-				if V_CNT >= TOP_BL_LINES and V_CNT < TOP_BL_LINES + DISP_LINES and DOTCLOCK /= CR(1 downto 0) then 
-					MULTIRES_FF <= '1';
-				end if;
-					
-				if V_CNT = TOP_BL_LINES + DISP_LINES then
-					MULTIRES <= MULTIRES_FF;
-					MULTIRES_FF <= '0';
-				end if;
+			if V_CNT >= TOP_BL_LINES and V_CNT < TOP_BL_LINES + DISP_LINES and DOTCLOCK /= CR(1 downto 0) then 
+				MULTIRES_FF <= '1';
+			end if;
+				
+			if V_CNT = TOP_BL_LINES + DISP_LINES then
+				MULTIRES <= MULTIRES_FF;
+				MULTIRES_FF <= '0';
 			end if;
 		end if;
 	end if;
@@ -301,43 +292,37 @@ HSYNC_END_POS   <= 32+464-1 when DOTCLOCK = "00" else
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if VRAM_WAIT = '0' then
-			HSYNC_F <= '0';
-			HSYNC_R <= '0';
-			VSYNC_F <= '0';
-			VSYNC_R <= '0';
-			if H_CNT = HSYNC_START_POS then HSYNC_F <= '1'; end if;
-			if H_CNT = HSYNC_START_POS + 1 and DOTCLOCK = "01" then HSYNC_F <= '1'; end if;
-			if H_CNT = HSYNC_END_POS   then HSYNC_R <= '1'; end if;
-			if V_CNT = END_LINE-1    and H_CNT = LINE_CLOCKS-1 then VSYNC_F <= '1'; end if;
-			if V_CNT = VS_LINES-1    and H_CNT = LINE_CLOCKS-1 then VSYNC_R <= '1'; end if;
-		end if;
+		HSYNC_F <= '0';
+		HSYNC_R <= '0';
+		VSYNC_F <= '0';
+		VSYNC_R <= '0';
+		if H_CNT = HSYNC_START_POS then HSYNC_F <= '1'; end if;
+		if H_CNT = HSYNC_START_POS + 1 and DOTCLOCK = "01" then HSYNC_F <= '1'; end if;
+		if H_CNT = HSYNC_END_POS   then HSYNC_R <= '1'; end if;
+		if V_CNT = END_LINE-1    and H_CNT = LINE_CLOCKS-1 then VSYNC_F <= '1'; end if;
+		if V_CNT = VS_LINES-1    and H_CNT = LINE_CLOCKS-1 then VSYNC_R <= '1'; end if;
 	end if;
 end process;
 
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if VRAM_WAIT = '1' then
-			CLKEN_FS <= '0';
-		else
-			CLKEN_FS <= '0';
-			CLKEN_FS_CNT <= CLKEN_FS_CNT + 1;
-			if (MULTIRES = '1' or DOTCLOCK(1) = '1') and CLKEN_FS_CNT = "011" and H_CNT < LINE_CLOCKS-2-1 then
-				CLKEN_FS_CNT <= (others => '0');
-				CLKEN_FS <= '1';				
-			elsif DOTCLOCK = "00" and CLKEN_FS_CNT = "111" and H_CNT < LINE_CLOCKS-2-1 then
-				CLKEN_FS_CNT <= (others => '0');
-				CLKEN_FS <= '1';
-			elsif DOTCLOCK = "01" and CLKEN_FS_CNT = "101" then
-				CLKEN_FS_CNT <= (others => '0');
-				CLKEN_FS <= '1';				
-			end if;
+		CLKEN_FS <= '0';
+		CLKEN_FS_CNT <= CLKEN_FS_CNT + 1;
+		if (MULTIRES = '1' or DOTCLOCK(1) = '1') and CLKEN_FS_CNT = "011" and H_CNT < LINE_CLOCKS-2-1 then
+			CLKEN_FS_CNT <= (others => '0');
+			CLKEN_FS <= '1';				
+		elsif DOTCLOCK = "00" and CLKEN_FS_CNT = "111" and H_CNT < LINE_CLOCKS-2-1 then
+			CLKEN_FS_CNT <= (others => '0');
+			CLKEN_FS <= '1';
+		elsif DOTCLOCK = "01" and CLKEN_FS_CNT = "101" then
+			CLKEN_FS_CNT <= (others => '0');
+			CLKEN_FS <= '1';				
+		end if;
 
-			if H_CNT = LINE_CLOCKS-1 then
-				 CLKEN_FS_CNT <= (others => '0');
-				 CLKEN_FS <= '1';
-			end if;
+		if H_CNT = LINE_CLOCKS-1 then
+			 CLKEN_FS_CNT <= (others => '0');
+			 CLKEN_FS <= '1';
 		end if;
 	end if;
 end process;
@@ -346,12 +331,10 @@ end process;
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if VRAM_WAIT = '0' then
-			if H_CNT = HS_OFF             then HS_N <= '0'; end if;
-			if H_CNT = HS_OFF + HS_CLOCKS then HS_N <= '1'; end if;
-			if V_CNT = 0                  then VS_N <= '0'; end if;
-			if V_CNT = VS_LINES           then VS_N <= '1'; end if;
-		end if;
+		if H_CNT = HS_OFF             then HS_N <= '0'; end if;
+		if H_CNT = HS_OFF + HS_CLOCKS then HS_N <= '1'; end if;
+		if V_CNT = 0                  then VS_N <= '0'; end if;
+		if V_CNT = VS_LINES           then VS_N <= '1'; end if;
 	end if;
 end process;
 
@@ -392,12 +375,10 @@ end process;
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if VRAM_WAIT = '0' then
-			if H_CNT = LEFT_BL_CLOCKS               then HBL_FF <= '0'; end if;
-			if H_CNT = LEFT_BL_CLOCKS + DISP_CLOCKS then HBL_FF <= '1'; end if;
-			if V_CNT = TOP_BL_LINES                 then VBL_FF <= '0'; end if;
-			if V_CNT = TOP_BL_LINES + DISP_LINES    then VBL_FF <= '1'; end if;
-		end if;
+		if H_CNT = LEFT_BL_CLOCKS               then HBL_FF <= '0'; end if;
+		if H_CNT = LEFT_BL_CLOCKS + DISP_CLOCKS then HBL_FF <= '1'; end if;
+		if V_CNT = TOP_BL_LINES                 then VBL_FF <= '0'; end if;
+		if V_CNT = TOP_BL_LINES + DISP_LINES    then VBL_FF <= '1'; end if;
 	end if;
 end process;
 

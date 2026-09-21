@@ -370,6 +370,7 @@ pce_sdram_ctrl_3ch #(
     .clk_sdram     (clk_sdram),
     .clkref        (vid_ce),
     .refresh_window(vram_refresh_window),
+    .vblank        (vid_vbl),
     .resetn        (sys_resetn),
 
     .vram0_wait (vram0_wait),
