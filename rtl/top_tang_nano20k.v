@@ -174,7 +174,6 @@ wire [22:0] rom_offset;
 wire        sgx_mode;
 wire [1:0]  video_zoom;
 wire [1:0]  scanline;
-wire        color_mode;
 wire        game_pause;
 wire        game_reset;
 wire        pad_mode;
@@ -247,7 +246,6 @@ iosys #(
     .sgx_mode         (rv_sgx_mode),
     .video_zoom       (video_zoom),
     .scanline         (scanline),
-    .color_mode       (color_mode),
     .game_pause       (game_pause),
     .game_reset       (game_reset),
     .system_reset     (system_reset),
@@ -443,7 +441,8 @@ always @(posedge clk_sys) begin
 end
 
 wire core_reset = ~rst_cnt[16];
-assign vram_refresh_window = core_reset || vid_vbl;
+// refresh may ignore the VDCs only while the core (and so both VDCs) is held in reset
+assign vram_refresh_window = core_reset;
 
 // ===========================================================================
 // The console
@@ -570,66 +569,14 @@ video_scandoubler u_scandoubler (
     .osd_de     (osd_de)
 );
 
-wire [7:0] mix_r, mix_g, mix_b;
-wire       mix_hs, mix_vs, mix_hblank, mix_vblank;
-reg  [1:0] color_mode_sync;
-
-always @(posedge clk_pix) begin
-    if (!pix_resetn)
-        color_mode_sync <= 2'b00;
-    else
-        color_mode_sync <= {color_mode_sync[0], color_mode};
-end
-
-color_mix u_color_mix (
-    .clk_vid    (clk_pix),
-    .ce_pix     (1'b1),
-    .mix        ({2'b00, color_mode_sync[1]}),
-    .R_in       (vga_r),
-    .G_in       (vga_g),
-    .B_in       (vga_b),
-    .HSync_in   (vga_hs),
-    .VSync_in   (vga_vs),
-    .HBlank_in  (~vga_de),
-    .VBlank_in  (1'b0),
-    .R_out      (mix_r),
-    .G_out      (mix_g),
-    .B_out      (mix_b),
-    .HSync_out  (mix_hs),
-    .VSync_out  (mix_vs),
-    .HBlank_out (mix_hblank),
-    .VBlank_out (mix_vblank)
-);
-
-reg        osd_on_d1, osd_text_d1;
-reg        osd_on_d2, osd_text_d2;
-reg [23:0] osd_rgb_d1, osd_rgb_d2;
-always @(posedge clk_pix) begin
-    if (!pix_resetn) begin
-        osd_on_d1   <= 1'b0;
-        osd_text_d1 <= 1'b0;
-        osd_rgb_d1  <= 24'd0;
-        osd_on_d2   <= 1'b0;
-        osd_text_d2 <= 1'b0;
-        osd_rgb_d2  <= 24'd0;
-    end else begin
-        osd_on_d1   <= osd_on;
-        osd_text_d1 <= osd_text;
-        osd_rgb_d1  <= osd_rgb;
-        osd_on_d2   <= osd_on_d1;
-        osd_text_d2 <= osd_text_d1;
-        osd_rgb_d2  <= osd_rgb_d1;
-    end
-end
-
 // Keep the paused frame visible beneath the OSD at 50% opacity, but render
-// menu glyphs fully opaque. The OSD delay matches color_mix's pipeline.
-wire [7:0] out_r = osd_on_d2 ? (osd_text_d2 ? osd_rgb_d2[23:16] :
-                                ({1'b0, osd_rgb_d2[23:16]} + {1'b0, mix_r}) >> 1) : mix_r;
-wire [7:0] out_g = osd_on_d2 ? (osd_text_d2 ? osd_rgb_d2[15:8] :
-                                ({1'b0, osd_rgb_d2[15:8]} + {1'b0, mix_g}) >> 1) : mix_g;
-wire [7:0] out_b = osd_on_d2 ? (osd_text_d2 ? osd_rgb_d2[7:0] :
-                                ({1'b0, osd_rgb_d2[7:0]} + {1'b0, mix_b}) >> 1) : mix_b;
+// menu glyphs fully opaque. osd_rgb is aligned with vga_*.
+wire [7:0] out_r = osd_on ? (osd_text ? osd_rgb[23:16] :
+                             ({1'b0, osd_rgb[23:16]} + {1'b0, vga_r}) >> 1) : vga_r;
+wire [7:0] out_g = osd_on ? (osd_text ? osd_rgb[15:8] :
+                             ({1'b0, osd_rgb[15:8]} + {1'b0, vga_g}) >> 1) : vga_g;
+wire [7:0] out_b = osd_on ? (osd_text ? osd_rgb[7:0] :
+                             ({1'b0, osd_rgb[7:0]} + {1'b0, vga_b}) >> 1) : vga_b;
 
 dvi_tx u_dvi (
     .clk_pix    (clk_pix),
@@ -638,9 +585,9 @@ dvi_tx u_dvi (
     .r          (out_r),
     .g          (out_g),
     .b          (out_b),
-    .de         (~mix_hblank),
-    .hsync      (mix_hs),
-    .vsync      (mix_vs),
+    .de         (vga_de),
+    .hsync      (vga_hs),
+    .vsync      (vga_vs),
     .tmds_clk_p (tmds_clk_p),
     .tmds_clk_n (tmds_clk_n),
     .tmds_d_p   (tmds_d_p),
