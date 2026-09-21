@@ -177,6 +177,10 @@ wire [1:0]  scanline;
 wire        game_pause;
 wire        game_reset;
 wire        pad_mode;
+wire        color_mode;
+wire [3:0]  audio_volume;
+wire [3:0]  audio_bass;
+wire [3:0]  audio_treble;
 
 // ---- softcore / menu ------------------------------------------------------
 wire        rv_ld_wr;
@@ -250,6 +254,10 @@ iosys #(
     .game_reset       (game_reset),
     .system_reset     (system_reset),
     .pad_mode         (pad_mode),
+    .color_mode       (color_mode),
+    .audio_volume     (audio_volume),
+    .audio_bass       (audio_bass),
+    .audio_treble     (audio_treble),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -449,6 +457,8 @@ assign vram_refresh_window = core_reset;
 // ===========================================================================
 wire [1:0]  joy_out;
 wire [3:0]  joy_in;
+wire [19:0] aud_l_raw;
+wire [19:0] aud_r_raw;
 wire [19:0] aud_l;
 wire [19:0] aud_r;
 wire [2:0]  vid_r, vid_g, vid_b;
@@ -485,8 +495,8 @@ pce_core #(
     .joy_out    (joy_out),
     .joy_in     (joy_in),
 
-    .aud_l      (aud_l),
-    .aud_r      (aud_r),
+    .aud_l      (aud_l_raw),
+    .aud_r      (aud_r_raw),
 
     .vid_ce     (vid_ce),
     .vid_r      (vid_r),
@@ -538,8 +548,10 @@ pce_pad u_joy (
 );
 
 // ===========================================================================
-// Video: genlocked line doubler + OSD overlay + HDMI transmitter
+// Video: genlocked line doubler + composite color matrix + OSD overlay + HDMI
 // ===========================================================================
+wire [7:0] vga_r_raw, vga_g_raw, vga_b_raw;
+wire       vga_hs_raw, vga_vs_raw, vga_de_raw;
 wire [7:0] vga_r, vga_g, vga_b;
 wire       vga_hs, vga_vs, vga_de;
 
@@ -558,16 +570,39 @@ video_scandoubler u_scandoubler (
 
     .clk_pix    (clk_pix),
     .pix_resetn (pix_resetn),
-    .vga_r      (vga_r),
-    .vga_g      (vga_g),
-    .vga_b      (vga_b),
-    .vga_hs     (vga_hs),
-    .vga_vs     (vga_vs),
-    .vga_de     (vga_de),
+    .vga_r      (vga_r_raw),
+    .vga_g      (vga_g_raw),
+    .vga_b      (vga_b_raw),
+    .vga_hs     (vga_hs_raw),
+    .vga_vs     (vga_vs_raw),
+    .vga_de     (vga_de_raw),
     .osd_x      (osd_x),
     .osd_y      (osd_y),
     .osd_de     (osd_de)
 );
+
+// Composite/monochrome color matrix (mix = 0..5, see rtl/color_mix.sv);
+// sync/de pass straight through, unaffected by the horizontal blur filter.
+color_mix u_color_mix (
+    .clk_vid    (clk_pix),
+    .ce_pix     (1'b1),
+    .mix        ({2'b00, color_mode}),
+    .R_in       (vga_r_raw),
+    .G_in       (vga_g_raw),
+    .B_in       (vga_b_raw),
+    .HSync_in   (vga_hs_raw),
+    .VSync_in   (vga_vs_raw),
+    .HBlank_in  (~vga_de_raw),
+    .VBlank_in  (1'b0),
+    .R_out      (vga_r),
+    .G_out      (vga_g),
+    .B_out      (vga_b),
+    .HSync_out  (vga_hs),
+    .VSync_out  (vga_vs),
+    .HBlank_out (),
+    .VBlank_out ()
+);
+assign vga_de = vga_de_raw;
 
 // Keep the paused frame visible beneath the OSD at 50% opacity, but render
 // menu glyphs fully opaque. osd_rgb is aligned with vga_*.
@@ -597,6 +632,18 @@ dvi_tx u_dvi (
 // ===========================================================================
 // Audio
 // ===========================================================================
+audio_tone u_audio_tone (
+    .clk     (clk_sys),
+    .resetn  (sys_resetn),
+    .volume  (audio_volume),
+    .bass    (audio_bass),
+    .treble  (audio_treble),
+    .in_l    (aud_l_raw),
+    .in_r    (aud_r_raw),
+    .out_l   (aud_l),
+    .out_r   (aud_r)
+);
+
 i2s_tx #(.BCK_DIV(14)) u_i2s (
     .clk    (clk_sys),
     .resetn (sys_resetn),

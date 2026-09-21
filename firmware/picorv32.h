@@ -33,6 +33,7 @@
 #define reg_pad_mode       (*(volatile uint32_t*)0x02000058)
 #define reg_color_mode     (*(volatile uint32_t*)0x0200005c)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
+#define reg_audio          (*(volatile uint32_t*)0x02000064)
 
 // ---------------------------------------------------------------------------
 // OSD geometry, must match textdisp.v
