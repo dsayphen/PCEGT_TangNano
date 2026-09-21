@@ -34,7 +34,7 @@
 //   0x0200_0048                  scanline strength (0/1/2/3 = 0/25/50/100%)
 //   0x0200_0050                  milliseconds since reset, read only
 //   0x0200_005C                  color palette (0=raw RGB, 1=composite)
-//   0x0200_0060                  core id, read only
+//   0x0200_0060                  core id (bits 15:0), VCE dot clock debug (bits 17:16), VDC0 width debug (bits 24:18), read only
 //
 // ROM description
 // ---------------
@@ -106,6 +106,13 @@ module iosys #(
     output reg  [3:0]  audio_volume,
     output reg  [3:0]  audio_bass,
     output reg  [3:0]  audio_treble,
+
+    // ---- read-only debug: VCE dot clock select (VIDEO_DCC), see huc6260;
+    // piggybacked onto reg_core_id's unused bits 17:16, no new address decode
+    input  wire [1:0]  vid_dcc_dbg,
+    // ---- read-only debug: VDC0 active display width in 8px chars, see
+    // huc6270's HDW register; piggybacked onto reg_core_id bits 24:18
+    input  wire [6:0]  vid_hdw_dbg,
 
     // ---- in-game controls -------------------------------------------------
     output reg         game_pause,
@@ -328,7 +335,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    time_sel     ? time_reg :
                    pad_mode_sel ? {31'd0, pad_mode} :
                    color_mode_sel ? {31'd0, color_mode} :
-                   id_sel       ? {16'b0, CORE_ID} :
+                   id_sel       ? {7'b0, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
                    audio_sel    ? {20'b0, audio_treble, audio_bass, audio_volume} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;

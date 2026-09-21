@@ -847,6 +847,7 @@ static int load_rom(const char *fname, uint32_t size) {
     pce_load_end();
 
     uart_print("load done\n");
+    uart_printf("dcc=%d hdw_px=%d\n", reg_vid_dcc_dbg(), reg_vid_hdw_dbg() * 8);
     return 0;
 }
 
@@ -1067,7 +1068,7 @@ int main(void) {
         loops++;
         if (time_millis() - last_hb >= 1000) {
             last_hb += 1000;
-            uart_printf("alive loops=%d reg=%x\n", (int)loops, reg_joystick);
+            uart_printf("alive loops=%d reg=%x dcc=%d hdw_px=%d\n", (int)loops, reg_joystick, reg_vid_dcc_dbg(), reg_vid_hdw_dbg() * 8);
             loops = 0;
         }
 
@@ -1077,7 +1078,7 @@ int main(void) {
             ret_fill();
         }
 
-        if (raw != last_raw) { uart_printf("joy %x\n", raw); last_raw = raw; }
+        if (raw != last_raw) { uart_printf("joy %x dcc=%d hdw_px=%d\n", raw, reg_vid_dcc_dbg(), reg_vid_hdw_dbg() * 8); last_raw = raw; }
 
         static uint32_t last_reg = 0xffffffff;
         uint32_t r = reg_joystick;
