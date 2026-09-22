@@ -334,11 +334,14 @@ static void video_config_save(void) {
 static int audio_volume = 10;   // 0..10, hardware reset default: unity gain
 static int audio_bass = 0;      // -5..5, hardware reset default: flat
 static int audio_treble = 0;    // -5..5, hardware reset default: flat
+static int audio_paused = 0;
 
 // Pushes the current settings to reg_audio; bass/treble are biased by +5 to
 // match the unsigned 0..10 range iosys.v stores them in.
 static void audio_apply(void) {
-    reg_audio = (uint32_t)audio_volume |
+    uint32_t volume = audio_paused ? 0 : (uint32_t)audio_volume;
+
+    reg_audio = volume |
                 ((uint32_t)(audio_bass + 5) << 4) |
                 ((uint32_t)(audio_treble + 5) << 8);
 }
@@ -620,6 +623,8 @@ static int pause_menu(void) {
     int active = 0;
     const int n_items = 6;
 
+    audio_paused = 1;
+    audio_apply();
     pce_pause(1);
     clear();
     print_field(5, 5, "Game paused", OSD_COLS - 2);
@@ -659,16 +664,22 @@ static int pause_menu(void) {
         } else if ((e & JOY_B) || (e & JOY_MENU) ||
                    ((e & JOY_A) && active == 0)) {
             pce_pause(0);
+            audio_paused = 0;
+            audio_apply();
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && active == 1) {
             pce_reset();
             delay(20);
             pce_pause(0);
+            audio_paused = 0;
+            audio_apply();
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && active == 2) {
             pce_stop();
+            audio_paused = 0;
+            audio_apply();
             return 1;
         } else if ((e & JOY_A) && active == 3) {
             game_pad_mode = !game_pad_mode;
