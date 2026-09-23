@@ -96,7 +96,7 @@ module iosys #(
     output reg         sgx_mode,
 
     // ---- video scaler control ---------------------------------------------
-    // 0 = 2x, 1 = stretch to fill the screen
+    // 0 = 2x integer, 1 = stretch, 2 = bilinear stretch
     output reg  [1:0]  video_zoom,
     // 0/1/2/3 = 0/25/50/100% scanline darkening on the duplicated line
     output reg  [1:0]  scanline,
@@ -113,6 +113,9 @@ module iosys #(
     // ---- read-only debug: VDC0 active display width in 8px chars, see
     // huc6270's HDW register; piggybacked onto reg_core_id bits 24:18
     input  wire [6:0]  vid_hdw_dbg,
+    // ---- read-only debug: VDC0 horizontal display start in 8px chars,
+    // piggybacked onto reg_core_id bits 31:25
+    input  wire [6:0]  vid_hds_dbg,
 
     // ---- in-game controls -------------------------------------------------
     output reg         game_pause,
@@ -335,7 +338,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    time_sel     ? time_reg :
                    pad_mode_sel ? {31'd0, pad_mode} :
                    color_mode_sel ? {31'd0, color_mode} :
-                   id_sel       ? {7'b0, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
+                   id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
                    audio_sel    ? {20'b0, audio_treble, audio_bass, audio_volume} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;

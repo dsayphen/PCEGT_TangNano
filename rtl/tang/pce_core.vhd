@@ -72,7 +72,8 @@ entity pce_core is
 		vid_vbl    : out std_logic;
 		vid_dcc    : out std_logic_vector(1 downto 0);
 		-- VDC0 active display width in 8-pixel characters, debug/diagnosis only
-		vid_hdw_dbg : out std_logic_vector(6 downto 0)
+		vid_hdw_dbg : out std_logic_vector(6 downto 0);
+		vid_hds_dbg : out std_logic_vector(6 downto 0)
 	);
 end pce_core;
 
@@ -207,7 +208,8 @@ begin
 		VIDEO_HS    => vid_hs,
 		VIDEO_HBL   => vid_hbl,
 		VIDEO_VBL   => vid_vbl,
-		VIDEO_HDW_DBG => vid_hdw_dbg
+		VIDEO_HDW_DBG => vid_hdw_dbg,
+		VIDEO_HDS_DBG => vid_hds_dbg
 	);
 
 	aud_l <= std_logic_vector(psg_l);

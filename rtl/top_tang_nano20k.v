@@ -260,6 +260,7 @@ iosys #(
     .audio_treble     (audio_treble),
     .vid_dcc_dbg      (vid_dcc),
     .vid_hdw_dbg      (vid_hdw_dbg),
+    .vid_hds_dbg      (vid_hds_dbg),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -479,6 +480,7 @@ wire [2:0]  vid_r, vid_g, vid_b;
 wire        vid_hs, vid_vs, vid_hbl;
 wire [1:0]  vid_dcc;
 wire [6:0]  vid_hdw_dbg;
+wire [6:0]  vid_hds_dbg;
 
 pce_core #(
     .SGX_SUPPORT (1)
@@ -522,7 +524,8 @@ pce_core #(
     .vid_hbl    (vid_hbl),
     .vid_vbl    (vid_vbl),
     .vid_dcc    (vid_dcc),
-    .vid_hdw_dbg (vid_hdw_dbg)
+    .vid_hdw_dbg (vid_hdw_dbg),
+    .vid_hds_dbg (vid_hds_dbg)
 );
 
 // ===========================================================================
@@ -581,6 +584,8 @@ video_scandoubler u_scandoubler (
     .vs_in      (vid_vs),
     .hbl_in     (vid_hbl),
     .dcc_in     (vid_dcc),
+    .hdw_in     (vid_hdw_dbg),
+    .hds_in     (vid_hds_dbg),
     .zoom_in    (video_zoom),
     .scan_in    (scanline),
 

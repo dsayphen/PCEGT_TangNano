@@ -32,6 +32,7 @@
 //   1 = stretch  upscaled to fill all 640 pixels (step=108/144/216), the
 //                previous fixed behaviour and the reset default, giving the
 //                correct 4:3 aspect ratio as on a real TV.
+//   2 = bilinear, same geometry as stretch with horizontal interpolation.
 //
 // A 2x picture narrower than 640 pixels is centered with black pillarbox
 // borders; wider than 640 (e.g. the 540 dot mode) it is centered and cropped.
@@ -61,7 +62,9 @@ module video_scandoubler (
     input  wire        vs_in,         // VIDEO_VS, active high
     input  wire        hbl_in,        // VIDEO_HBL, high during blanking
     input  wire [1:0]  dcc_in,        // VIDEO_DCC, VCE dot clock select
-    input  wire [1:0]  zoom_in,       // 0 = 2x, 1 = stretch to fill
+    input  wire [6:0]  hdw_in,        // VDC HDW, active width in 8-pixel units
+    input  wire [6:0]  hds_in,        // VDC HDS, horizontal display start
+    input  wire [1:0]  zoom_in,       // 0 = integer, 1 = stretch, 2 = bilinear
     input  wire [1:0]  scan_in,       // 0/1/2/3 = 0/25/50/100% scanlines
 
     // ---- HDMI side (clk_pix, 25.92 MHz) --------------------------------
@@ -107,6 +110,8 @@ reg        wr_bank;
 reg        line_tgl;      // toggles at the end of every core scan line
 reg        frame_tgl;     // toggles at the start of every core frame
 reg [1:0]  dcc_lat;
+reg [6:0]  hdw_lat;
+reg [6:0]  hds_lat;
 reg [1:0]  zoom_lat;
 reg [1:0]  scan_lat;
 
@@ -122,6 +127,8 @@ initial begin
     line_tgl  = 1'b0;
     frame_tgl = 1'b0;
     dcc_lat   = 2'b10;
+    hdw_lat   = 7'd0;
+    hds_lat   = 7'd0;
     zoom_lat  = 2'b10;
     scan_lat  = 2'b00;
     lb_we     = 1'b0;
@@ -149,6 +156,8 @@ always @(posedge clk_sys) begin
         wr_addr  <= 10'd0;
         wr_bank  <= ~wr_bank;
         dcc_lat  <= dcc_in;
+        hdw_lat  <= hdw_in;
+        hds_lat  <= hds_in;
         zoom_lat <= zoom_in;
         scan_lat <= scan_in;
         line_tgl <= ~line_tgl;
@@ -163,6 +172,8 @@ end
 // ===========================================================================
 reg  [10:0] lb_raddr;
 wire [8:0]  lb_rdata;
+reg  [10:0] lb_raddr_next;
+wire [8:0]  lb_rdata_next;
 
 dpram_dc #(.AW(11), .DW(9)) linebuf (
     .wrclk  (clk_sys),
@@ -174,6 +185,16 @@ dpram_dc #(.AW(11), .DW(9)) linebuf (
     .rdata  (lb_rdata)
 );
 
+dpram_dc #(.AW(11), .DW(9)) linebuf_next (
+    .wrclk  (clk_sys),
+    .we     (lb_we),
+    .waddr  (lb_waddr),
+    .wdata  (lb_wdata),
+    .rdclk  (clk_pix),
+    .raddr  (lb_raddr_next),
+    .rdata  (lb_rdata_next)
+);
+
 // ===========================================================================
 // Read side - pixel clock domain
 // ===========================================================================
@@ -182,6 +203,10 @@ reg [2:0] frame_sync;
 reg [2:0] bank_sync;
 reg [1:0] dcc_sync0;
 reg [1:0] dcc_sync;
+reg [6:0] hdw_sync0;
+reg [6:0] hdw_sync;
+reg [6:0] hds_sync0;
+reg [6:0] hds_sync;
 reg [1:0] zoom_sync0;
 reg [1:0] zoom_sync;
 reg [1:0] scan_sync0;
@@ -203,15 +228,26 @@ reg [1:0]  hs_p;
 reg [1:0]  vs_p;
 reg [1:0]  half_p;      // pipeline for "half" (0 = first copy, 1 = duplicate)
 
-// Source (core) active width in dots, one of 270 / 360 / 540 depending on
-// the VCE dot clock.
+reg [7:0]  frac_p1;
+reg [7:0]  frac_p2;
+reg        bilinear_p1;
+reg        bilinear_p2;
+// The line buffer contains only active pixels because its write enable is
+// gated by hbl_in. Use the VDC active width for all modes so the visible game
+// area, including Integer, is centered from the actual image width.
+reg [10:0] dcc_src_w;
 reg [10:0] src_w;
 always @(*) begin
     case (dcc_sync)
-        2'b00:   src_w = 11'd270;
-        2'b01:   src_w = 11'd360;
-        default: src_w = 11'd540;
+        2'b00:   dcc_src_w = 11'd270;
+        2'b01:   dcc_src_w = 11'd360;
+        default: dcc_src_w = 11'd540;
     endcase
+
+    if (hdw_sync == 7'd0)
+        src_w = dcc_src_w;
+    else
+        src_w = {hdw_sync, 3'b000};
 end
 
 // Requested on-screen width for the current zoom mode: doubled (2x) or
@@ -220,9 +256,9 @@ end
 // into the sync/porch area (see left_skip below).
 reg [10:0] want_w;
 always @(*) begin
-    case (zoom_sync[0])
-        1'b0:    want_w = src_w << 1;     // 2x - integer double
-        default: want_w = H_ACTIVE;       // stretch - fill the screen
+    case (zoom_sync)
+        2'b00:   want_w = src_w << 1;     // 2x - integer double
+        default: want_w = H_ACTIVE;       // stretch, including bilinear
     endcase
 end
 
@@ -234,22 +270,36 @@ wire [10:0] h_off = (H_ACTIVE - vis_w) >> 1;   // centers the picture
 // start instead of just cutting off the right edge.
 wire [10:0] overflow  = (want_w > H_ACTIVE) ? (want_w - H_ACTIVE) : 11'd0;
 wire [10:0] left_skip = overflow >> 1;
+wire [10:0] hds_skip = (hds_sync > ({5'd0, dcc_sync} + 7'd1)) ?
+                       ({hds_sync - {5'd0, dcc_sync} - 7'd1, 3'b000}) : 11'd0;
 
 reg  [8:0]  step;
+wire [18:0] stretch_step_full = ({8'd0, src_w} << 8) / H_ACTIVE;
 always @(*) begin
-    case (zoom_sync[0])
-        1'b0:    step = 9'd128;   // 2x: one source dot per two output pixels
-        default: begin
-            case (dcc_sync)
-                2'b00:   step = 9'd108;   // 270 source dots -> 640
-                2'b01:   step = 9'd144;   // 360 source dots -> 640
-                default: step = 9'd216;   // 540 source dots -> 640
-            endcase
-        end
+    case (zoom_sync)
+        2'b00:   step = 9'd128;   // 2x: one source dot per two output pixels
+        default: step = stretch_step_full[8:0];
     endcase
 end
 
 wire [9:0] hdmi_line = {vline[8:0], half};
+
+wire [17:0] acc_next = acc + {9'd0, step};
+
+function [2:0] bilinear3;
+    input [2:0] a;
+    input [2:0] b;
+    input [7:0] frac;
+    reg [10:0] weighted;
+    begin
+        weighted = (a * (9'd256 - frac)) + (b * frac);
+        bilinear3 = weighted >> 8;
+    end
+endfunction
+
+wire [2:0] bilinear_r = bilinear3(lb_rdata[5:3], lb_rdata_next[5:3], frac_p2);
+wire [2:0] bilinear_g = bilinear3(lb_rdata[8:6], lb_rdata_next[8:6], frac_p2);
+wire [2:0] bilinear_b = bilinear3(lb_rdata[2:0], lb_rdata_next[2:0], frac_p2);
 
 // Scanline attenuation: darkens the duplicated copy of a line (half == 1)
 // according to scan_sync (0/25/50/100%).  The first copy (half == 0) is
@@ -270,9 +320,8 @@ function [7:0] scanline_atten;
     end
 endfunction
 
-// Fixed-point starting offset into the source line for the accumulator,
-// used only when left_skip is non-zero (2x overflow case above).
-wire [19:0] acc_start_full = left_skip * step;
+// Fixed-point starting offset into the source line for the accumulator.
+wire [19:0] acc_start_full = (left_skip * step) + {hds_skip, 8'd0};
 wire [17:0] acc_start = acc_start_full[17:0];
 
 wire v_active = (vline >= (V_START >> 1)) &&
@@ -306,6 +355,10 @@ always @(posedge clk_pix) begin
     bank_sync  <= {bank_sync[1:0],  wr_bank};
     dcc_sync0  <= dcc_lat;
     dcc_sync   <= dcc_sync0;
+    hdw_sync0  <= hdw_lat;
+    hdw_sync   <= hdw_sync0;
+    hds_sync0  <= hds_lat;
+    hds_sync   <= hds_sync0;
     zoom_sync0 <= zoom_lat;
     zoom_sync  <= zoom_sync0;
     scan_sync0 <= scan_lat;
@@ -340,6 +393,11 @@ always @(posedge clk_pix) begin
         acc <= acc + {9'd0, step};
 
     lb_raddr <= {~bank_sync[2], acc[17:8]};
+    lb_raddr_next <= {~bank_sync[2], acc_next[17:8]};
+    frac_p1 <= acc[7:0];
+    frac_p2 <= frac_p1;
+    bilinear_p1 <= (zoom_sync == 2'b10);
+    bilinear_p2 <= bilinear_p1;
 
     // ---- output pipeline (matches the line buffer read latency) ----------
     de_p  <= {de_p[0],  de_full};
@@ -353,9 +411,15 @@ always @(posedge clk_pix) begin
     vga_vs <= vs_p[1];
 
     if (deg_p[1]) begin
-        vga_r <= scanline_atten({lb_rdata[5:3], lb_rdata[5:3], lb_rdata[5:4]}, scan_sync, half_p[1]);
-        vga_g <= scanline_atten({lb_rdata[8:6], lb_rdata[8:6], lb_rdata[8:7]}, scan_sync, half_p[1]);
-        vga_b <= scanline_atten({lb_rdata[2:0], lb_rdata[2:0], lb_rdata[2:1]}, scan_sync, half_p[1]);
+        if (bilinear_p2) begin
+            vga_r <= scanline_atten({bilinear_r, bilinear_r, bilinear_r[2:1]}, scan_sync, half_p[1]);
+            vga_g <= scanline_atten({bilinear_g, bilinear_g, bilinear_g[2:1]}, scan_sync, half_p[1]);
+            vga_b <= scanline_atten({bilinear_b, bilinear_b, bilinear_b[2:1]}, scan_sync, half_p[1]);
+        end else begin
+            vga_r <= scanline_atten({lb_rdata[5:3], lb_rdata[5:3], lb_rdata[5:4]}, scan_sync, half_p[1]);
+            vga_g <= scanline_atten({lb_rdata[8:6], lb_rdata[8:6], lb_rdata[8:7]}, scan_sync, half_p[1]);
+            vga_b <= scanline_atten({lb_rdata[2:0], lb_rdata[2:0], lb_rdata[2:1]}, scan_sync, half_p[1]);
+        end
     end else begin
         vga_r <= 8'd0;
         vga_g <= 8'd0;
@@ -373,6 +437,10 @@ always @(posedge clk_pix) begin
         hs_p       <= 2'b00;
         vs_p       <= 2'b00;
         half_p     <= 2'b00;
+        frac_p1    <= 8'd0;
+        frac_p2    <= 8'd0;
+        bilinear_p1 <= 1'b0;
+        bilinear_p2 <= 1'b0;
         vga_de     <= 1'b0;
     end
 end
