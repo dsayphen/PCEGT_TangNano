@@ -62,6 +62,10 @@ module pce_sdram_ctrl_3ch #(
     input  wire [3:0]  rv_wstrb,
     output reg  [31:0] rv_rdata,
 
+    // Diagnostic only: longest run of clk cycles rv_valid was asserted
+    // without rv_ready since reset. Does not affect scheduling.
+    output wire [15:0] dbg_rv_stall_max,
+
     output reg         init_done
 );
 
@@ -203,6 +207,28 @@ always @(posedge clk) begin
                 host_req  <= ~host_req;
             end
         end
+    end
+end
+
+// -------------------------------------------------------------------------
+// Diagnostic only: tracks the longest stretch rv_valid stayed high without
+// rv_ready, to check whether the softcore is ever starved of SDRAM access.
+// -------------------------------------------------------------------------
+reg [15:0] rv_stall_run;
+reg [15:0] rv_stall_max;
+assign dbg_rv_stall_max = rv_stall_max;
+
+always @(posedge clk) begin
+    if (!resetn) begin
+        rv_stall_run <= 16'd0;
+        rv_stall_max <= 16'd0;
+    end else if (rv_valid && !rv_ready) begin
+        if (rv_stall_run != 16'hffff)
+            rv_stall_run <= rv_stall_run + 16'd1;
+    end else begin
+        if (rv_stall_run > rv_stall_max)
+            rv_stall_max <= rv_stall_run;
+        rv_stall_run <= 16'd0;
     end
 end
 

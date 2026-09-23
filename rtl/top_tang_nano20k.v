@@ -124,13 +124,22 @@ clkdiv5 u_clkdiv (
 // ===========================================================================
 // Resets
 // ===========================================================================
-// system reset, released a while after both PLLs have locked
+// system reset, released a while after the main PLL has locked.
+//
+// Confirmed by dbg_reset_pll_lost/rv_stall_max on real hardware: lock_hdmi
+// (the separate video/TMDS PLL) intermittently drops during gameplay while
+// clk_sys-domain logic (game, SDRAM, PicoRV32/iosys) keeps running fine -
+// rv_stall_max stayed negligible (SDRAM was never starved). Gating
+// sys_resetn on lock_hdmi turned every such glitch into a full reboot of
+// iosys (losing UART/menu access) and the PCE core. The pixel domain
+// already has its own independent reset below (pix_resetn, from
+// pix_rst_sync), so clk_sys-domain logic never needed lock_hdmi to be up.
 reg [7:0] pwr_cnt = 8'd0;
 reg       sys_resetn = 1'b0;
 wire      system_reset;
 
 always @(posedge clk_sys) begin
-    if (!(lock_main && lock_hdmi) || system_reset) begin
+    if (!lock_main || system_reset) begin
         pwr_cnt    <= 8'd0;
         sys_resetn <= 1'b0;
     end else if (pwr_cnt != 8'hFF) begin
@@ -138,6 +147,19 @@ always @(posedge clk_sys) begin
     end else begin
         sys_resetn <= 1'b1;
     end
+end
+
+// Diagnostic only: sticky, latched since power-on (NOT cleared by sys_resetn,
+// on purpose - iosys itself is one of the things sys_resetn restarts) record
+// of which condition last dropped sys_resetn, to tell a PLL lock glitch
+// apart from an explicit system_reset request.
+reg dbg_reset_pll_lost = 1'b0;
+reg dbg_reset_sysreq   = 1'b0;
+always @(posedge clk_sys) begin
+    if (!(lock_main && lock_hdmi))
+        dbg_reset_pll_lost <= 1'b1;
+    else if (system_reset)
+        dbg_reset_sysreq <= 1'b1;
 end
 
 // pixel domain reset
@@ -199,6 +221,7 @@ wire [22:0] rv_addr;
 wire [31:0] rv_wdata;
 wire [3:0]  rv_wstrb;
 wire [31:0] rv_rdata;
+wire [15:0] dbg_rv_stall_max;
 
 wire        osd_on;
 wire [23:0] osd_rgb;
@@ -268,6 +291,9 @@ iosys #(
     .rv_wdata         (rv_wdata),
     .rv_wstrb         (rv_wstrb),
     .rv_rdata         (rv_rdata),
+    .dbg_rv_stall_max (dbg_rv_stall_sticky),
+    .dbg_reset_pll_lost (dbg_reset_pll_lost),
+    .dbg_reset_sysreq   (dbg_reset_sysreq),
     .ram_busy         (~sdram_init_done),
 
     .flash_spi_cs_n   (flash_spi_cs_n),
@@ -423,9 +449,18 @@ pce_sdram_ctrl_3ch #(
     .rv_wdata      (rv_wdata),
     .rv_wstrb      (rv_wstrb),
     .rv_rdata      (rv_rdata),
+    .dbg_rv_stall_max (dbg_rv_stall_max),
 
     .init_done     (sdram_init_done)
 );
+
+// Diagnostic only: sticky copy of dbg_rv_stall_max, latched outside
+// pce_sdram_ctrl_3ch's own reset so it survives a manual reset used to
+// regain UART access after a freeze - see rtl/tang/pce_sdram_ctrl_3ch.v.
+reg [15:0] dbg_rv_stall_sticky = 16'd0;
+always @(posedge clk_sys)
+    if (dbg_rv_stall_max > dbg_rv_stall_sticky)
+        dbg_rv_stall_sticky <= dbg_rv_stall_max;
 
 // ===========================================================================
 // Core reset

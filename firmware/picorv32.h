@@ -34,6 +34,14 @@
 #define reg_color_mode     (*(volatile uint32_t*)0x0200005c)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
 #define reg_audio          (*(volatile uint32_t*)0x02000064)
+// Diagnostic only: longest run of clk cycles the softcore waited for the
+// SDRAM (rv_valid without rv_ready) since reset. See
+// rtl/tang/pce_sdram_ctrl_3ch.v.
+#define reg_dbg_rv_stall   (*(volatile uint32_t*)0x02000068)
+// Diagnostic only: bit0 = the video/HDMI PLL lost lock at least once since
+// power-on, bit1 = an explicit system_reset request fired. Sticky, survives
+// this reboot - see rtl/top_tang_nano20k.v.
+#define reg_dbg_reset      (*(volatile uint32_t*)0x0200006c)
 
 // VCE dot clock select (VIDEO_DCC), debug only: piggybacked onto reg_core_id
 // bits 17:16 (see iosys.v) instead of its own address decode.

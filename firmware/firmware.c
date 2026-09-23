@@ -1040,7 +1040,10 @@ int main(void) {
     uint32_t sp_val;
     __asm__ volatile ("mv %0, sp" : "=r"(sp_val));
     uart_printf("sp=%x io_buf=%x fs=%x\n", sp_val, (uint32_t)io_buf, (uint32_t)&fs);
-    
+    uart_printf("reset_cause pll_lost=%d sysreq=%d rv_stall_max=%d\n",
+                (int)(reg_dbg_reset & 1), (int)((reg_dbg_reset >> 1) & 1),
+                (int)reg_dbg_rv_stall);
+
     uart_print("\nPCEtang iosys firmware\n");
 
     overlay(1);
@@ -1087,10 +1090,11 @@ int main(void) {
         loops++;
         if (time_millis() - last_hb >= 1000) {
             last_hb += 1000;
-            uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
+            uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d rv_stall_max=%d\n",
                         (int)loops, reg_joystick, reg_vid_dcc_dbg(),
                         reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
-                        reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8);
+                        reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8,
+                        (int)reg_dbg_rv_stall);
             loops = 0;
         }
 

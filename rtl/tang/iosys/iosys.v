@@ -131,6 +131,14 @@ module iosys #(
     output wire [3:0]  rv_wstrb,
     input  wire [31:0] rv_rdata,
     input  wire        ram_busy,          // high until the SDRAM is initialised
+    // Diagnostic only: longest run of clk cycles rv_valid was asserted
+    // without rv_ready since reset, see rtl/tang/pce_sdram_ctrl_3ch.v.
+    input  wire [15:0] dbg_rv_stall_max,
+    // Diagnostic only: sticky since power-on, latched outside this module's
+    // own reset (see rtl/top_tang_nano20k.v) so a reboot doesn't erase why
+    // it happened.
+    input  wire        dbg_reset_pll_lost,
+    input  wire        dbg_reset_sysreq,
 
     // ---- SPI flash holding the firmware ----------------------------------
     output wire        flash_spi_cs_n,
@@ -280,6 +288,8 @@ wire pad_mode_sel  = mem_valid && (mem_addr == 32'h0200_0058);
 wire color_mode_sel= mem_valid && (mem_addr == 32'h0200_005c);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 wire audio_sel     = mem_valid && (mem_addr == 32'h0200_0064);
+wire dbg_rv_sel    = mem_valid && (mem_addr == 32'h0200_0068);
+wire dbg_reset_sel = mem_valid && (mem_addr == 32'h0200_006c);
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -325,6 +335,7 @@ assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
                    game_ctrl_sel ||
                    time_sel || pad_mode_sel || color_mode_sel || id_sel || audio_sel ||
+                   dbg_rv_sel || dbg_reset_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -340,6 +351,8 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    color_mode_sel ? {31'd0, color_mode} :
                    id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
                    audio_sel    ? {20'b0, audio_treble, audio_bass, audio_volume} :
+                   dbg_rv_sel   ? {16'b0, dbg_rv_stall_max} :
+                   dbg_reset_sel ? {30'b0, dbg_reset_sysreq, dbg_reset_pll_lost} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;
 

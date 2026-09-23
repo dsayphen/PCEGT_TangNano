@@ -295,7 +295,11 @@ task stream_both_vdcs;
             @(posedge clk);
             @(negedge clk);
             clkref <= 1'b0;
-            repeat (4) @(posedge clk);
+            // Concurrent VDC0+VDC1 access needs the full 8-cycle arbitration
+            // schedule (VDC1 completes at cycle 6, VDC0 at cycle 7) to elapse
+            // before the result is valid - a whole dot period more than the
+            // single-VDC repeat(4) window used by stream_all_tiles.
+            repeat (8) @(posedge clk);
             if (vram_dout !== expect_word[p]) begin
                 $display("FAIL %0s: VDC0 tile word %0d (vram_addr=%h) = %h, expected %h",
                           label, p, p*64, vram_dout, expect_word[p]);
