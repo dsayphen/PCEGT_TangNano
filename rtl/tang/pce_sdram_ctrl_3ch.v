@@ -278,6 +278,15 @@ wire [15:0] vram_dout_mem;
 reg  [15:0] vram_addr_seen;
 reg         vram_rd_d;
 reg         vram_we_d;
+reg         vram_inflight;
+reg         vram_pending;
+reg  [14:0] vram_pending_addr;
+reg  [15:0] vram_pending_din;
+reg         vram_pending_we;
+
+wire vram_new_req = !vram_addr[15] &&
+                    ((vram_we && (!vram_we_d || vram_addr != vram_addr_seen)) ||
+                     (vram_rd && (!vram_rd_d || vram_addr != vram_addr_seen)));
 
 assign vram_dout = vram_addr[15] ? 16'd0 : vram_dout_mem;
 
@@ -296,18 +305,52 @@ always @(posedge clk) begin
         vram_addr_seen <= 16'hffff;
         vram_rd_d      <= 1'b0;
         vram_we_d      <= 1'b0;
+        vram_inflight  <= 1'b0;
+        vram_pending   <= 1'b0;
+        vram_pending_addr <= 15'd0;
+        vram_pending_din  <= 16'd0;
+        vram_pending_we   <= 1'b0;
     end else begin
         vram_rd_d <= vram_rd;
         vram_we_d <= vram_we;
 
-        if (!vram_addr[15] &&
-            ((vram_we && (!vram_we_d || vram_addr != vram_addr_seen)) ||
-             (vram_rd && (!vram_rd_d || vram_addr != vram_addr_seen)))) begin
-            vram_addr_r    <= vram_addr[14:0];
-            vram_din_r     <= vram_din;
-            vram_we_r      <= vram_we;
+        if (vram_new_req)
             vram_addr_seen <= vram_addr;
-            vram_req       <= ~vram_req;
+
+        if (vram_inflight && vram_req == vram_ack) begin
+            if (vram_pending) begin
+                vram_addr_r <= vram_pending_addr;
+                vram_din_r  <= vram_pending_din;
+                vram_we_r   <= vram_pending_we;
+                vram_req    <= ~vram_req;
+                if (vram_new_req) begin
+                    vram_pending_addr <= vram_addr[14:0];
+                    vram_pending_din  <= vram_din;
+                    vram_pending_we   <= vram_we;
+                end else begin
+                    vram_pending <= 1'b0;
+                end
+            end else if (vram_new_req) begin
+                vram_addr_r   <= vram_addr[14:0];
+                vram_din_r    <= vram_din;
+                vram_we_r     <= vram_we;
+                vram_req      <= ~vram_req;
+            end else begin
+                vram_inflight <= 1'b0;
+            end
+        end else if (!vram_inflight) begin
+            if (vram_new_req) begin
+                vram_addr_r   <= vram_addr[14:0];
+                vram_din_r    <= vram_din;
+                vram_we_r     <= vram_we;
+                vram_req      <= ~vram_req;
+                vram_inflight <= 1'b1;
+            end
+        end else if (vram_new_req && !vram_pending) begin
+            vram_pending_addr <= vram_addr[14:0];
+            vram_pending_din  <= vram_din;
+            vram_pending_we   <= vram_we;
+            vram_pending      <= 1'b1;
         end
     end
 end
@@ -321,6 +364,15 @@ wire [15:0] vram1_dout_mem;
 reg  [15:0] vram1_addr_seen;
 reg         vram1_rd_d;
 reg         vram1_we_d;
+reg         vram1_inflight;
+reg         vram1_pending;
+reg  [14:0] vram1_pending_addr;
+reg  [15:0] vram1_pending_din;
+reg         vram1_pending_we;
+
+wire vram1_new_req = !vram1_addr[15] &&
+                     ((vram1_we && (!vram1_we_d || vram1_addr != vram1_addr_seen)) ||
+                      (vram1_rd && (!vram1_rd_d || vram1_addr != vram1_addr_seen)));
 
 assign vram1_dout = vram1_addr[15] ? 16'd0 : vram1_dout_mem;
 
@@ -333,18 +385,52 @@ always @(posedge clk) begin
         vram1_addr_seen <= 16'hffff;
         vram1_rd_d      <= 1'b0;
         vram1_we_d      <= 1'b0;
+        vram1_inflight  <= 1'b0;
+        vram1_pending   <= 1'b0;
+        vram1_pending_addr <= 15'd0;
+        vram1_pending_din  <= 16'd0;
+        vram1_pending_we   <= 1'b0;
     end else begin
         vram1_rd_d <= vram1_rd;
         vram1_we_d <= vram1_we;
 
-        if (!vram1_addr[15] &&
-            ((vram1_we && (!vram1_we_d || vram1_addr != vram1_addr_seen)) ||
-             (vram1_rd && (!vram1_rd_d || vram1_addr != vram1_addr_seen)))) begin
-            vram1_addr_r    <= vram1_addr[14:0];
-            vram1_din_r     <= vram1_din;
-            vram1_we_r      <= vram1_we;
+        if (vram1_new_req)
             vram1_addr_seen <= vram1_addr;
-            vram1_req       <= ~vram1_req;
+
+        if (vram1_inflight && vram1_req == vram1_ack) begin
+            if (vram1_pending) begin
+                vram1_addr_r <= vram1_pending_addr;
+                vram1_din_r  <= vram1_pending_din;
+                vram1_we_r   <= vram1_pending_we;
+                vram1_req    <= ~vram1_req;
+                if (vram1_new_req) begin
+                    vram1_pending_addr <= vram1_addr[14:0];
+                    vram1_pending_din  <= vram1_din;
+                    vram1_pending_we   <= vram1_we;
+                end else begin
+                    vram1_pending <= 1'b0;
+                end
+            end else if (vram1_new_req) begin
+                vram1_addr_r   <= vram1_addr[14:0];
+                vram1_din_r    <= vram1_din;
+                vram1_we_r     <= vram1_we;
+                vram1_req      <= ~vram1_req;
+            end else begin
+                vram1_inflight <= 1'b0;
+            end
+        end else if (!vram1_inflight) begin
+            if (vram1_new_req) begin
+                vram1_addr_r   <= vram1_addr[14:0];
+                vram1_din_r    <= vram1_din;
+                vram1_we_r     <= vram1_we;
+                vram1_req      <= ~vram1_req;
+                vram1_inflight <= 1'b1;
+            end
+        end else if (vram1_new_req && !vram1_pending) begin
+            vram1_pending_addr <= vram1_addr[14:0];
+            vram1_pending_din  <= vram1_din;
+            vram1_pending_we   <= vram1_we;
+            vram1_pending      <= 1'b1;
         end
     end
 end
