@@ -153,14 +153,24 @@ end
 // on purpose - iosys itself is one of the things sys_resetn restarts) record
 // of which condition last dropped sys_resetn, to tell a PLL lock glitch
 // apart from an explicit system_reset request.
-reg dbg_reset_pll_lost = 1'b0;
-reg dbg_reset_sysreq   = 1'b0;
-always @(posedge clk_sys) begin
+//
+// Sampled on sys_clk (the raw 27 MHz crystal), NOT clk_sys: clk_sys is
+// derived from lock_main's own PLL, so logic clocked by clk_sys can be blind
+// to a lock_main glitch short enough to disturb clk_sys itself at the same
+// instant it would need to be sampled. The crystal has no such dependency.
+reg        dbg_reset_pll_lost_x = 1'b0;
+always @(posedge sys_clk)
     if (!(lock_main && lock_hdmi))
-        dbg_reset_pll_lost <= 1'b1;
-    else if (system_reset)
+        dbg_reset_pll_lost_x <= 1'b1;
+reg [1:0]  dbg_reset_pll_lost_sync = 2'b00;
+always @(posedge clk_sys)
+    dbg_reset_pll_lost_sync <= {dbg_reset_pll_lost_sync[0], dbg_reset_pll_lost_x};
+wire dbg_reset_pll_lost = dbg_reset_pll_lost_sync[1];
+
+reg        dbg_reset_sysreq = 1'b0;
+always @(posedge clk_sys)
+    if (system_reset)
         dbg_reset_sysreq <= 1'b1;
-end
 
 // pixel domain reset
 reg [2:0] pix_rst_sync = 3'b000;
