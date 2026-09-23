@@ -1,4 +1,4 @@
-<?xml version="1" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE gowin-fpga-project>
 <Project>
     <Template>FPGA</Template>
@@ -7,7 +7,6 @@
     <FileList>
         <File path="rtl/cheatcodes.sv" type="file.verilog" enable="1"/>
         <File path="rtl/color_mix.sv" type="file.verilog" enable="1"/>
-        <File path="rtl/tang/audio_tone.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/dvi_tx.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/i2s_tx.v" type="file.verilog" enable="1"/>
         <File path="rtl/tang/iosys/font_rom.v" type="file.verilog" enable="1"/>

@@ -174,13 +174,10 @@ wire [22:0] rom_offset;
 wire        sgx_mode;
 wire [1:0]  video_zoom;
 wire [1:0]  scanline;
+wire        color_mode;
 wire        game_pause;
 wire        game_reset;
 wire        pad_mode;
-wire        color_mode;
-wire [3:0]  audio_volume;
-wire [3:0]  audio_bass;
-wire [3:0]  audio_treble;
 
 // ---- softcore / menu ------------------------------------------------------
 wire        rv_ld_wr;
@@ -250,17 +247,11 @@ iosys #(
     .sgx_mode         (rv_sgx_mode),
     .video_zoom       (video_zoom),
     .scanline         (scanline),
+    .color_mode       (color_mode),
     .game_pause       (game_pause),
     .game_reset       (game_reset),
     .system_reset     (system_reset),
     .pad_mode         (pad_mode),
-    .color_mode       (color_mode),
-    .audio_volume     (audio_volume),
-    .audio_bass       (audio_bass),
-    .audio_treble     (audio_treble),
-    .vid_dcc_dbg      (vid_dcc),
-    .vid_hdw_dbg      (vid_hdw_dbg),
-    .vid_hds_dbg      (vid_hds_dbg),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -443,44 +434,27 @@ pce_sdram_ctrl_3ch #(
 // ===========================================================================
 wire rst_trigger = !sdram_init_done || loading || !image_valid || btn_reset || game_reset;
 
-// Cycles to hold reset after `rst_trigger` clears: 64k (65536) clocks for the
-// core's internal COLD_RESET memory clear, plus RST_EXTRA_CYCLES on top if
-// more settle time is needed. Bump RST_EXTRA_CYCLES (and widen rst_cnt if the
-// total exceeds 17 bits) to add more delay. max 131071 (1,5 ms) - 65536 = 65535
-
-// 17'd4320 → +100 µs
-// 17'd21600 → +500 µs
-// 17'd43200 → +1 ms
-
-localparam RST_EXTRA_CYCLES = 17'd65535;
-localparam RST_TOTAL_CYCLES = 17'd65536 + RST_EXTRA_CYCLES;
-
 reg [16:0] rst_cnt = 17'd0;
 always @(posedge clk_sys) begin
     if (!sys_resetn || rst_trigger)
         rst_cnt <= 17'd0;
-    else if (rst_cnt < RST_TOTAL_CYCLES)
+    else if (!rst_cnt[16])
         rst_cnt <= rst_cnt + 17'd1;
 end
 
 wire core_reset = ~rst_cnt[16];
-// refresh may ignore the VDCs only while the core (and so both VDCs) is held in reset
-assign vram_refresh_window = core_reset;
+assign vram_refresh_window = core_reset || vid_vbl;
 
 // ===========================================================================
 // The console
 // ===========================================================================
 wire [1:0]  joy_out;
 wire [3:0]  joy_in;
-wire [19:0] aud_l_raw;
-wire [19:0] aud_r_raw;
 wire [19:0] aud_l;
 wire [19:0] aud_r;
 wire [2:0]  vid_r, vid_g, vid_b;
 wire        vid_hs, vid_vs, vid_hbl;
 wire [1:0]  vid_dcc;
-wire [6:0]  vid_hdw_dbg;
-wire [6:0]  vid_hds_dbg;
 
 pce_core #(
     .SGX_SUPPORT (1)
@@ -512,8 +486,8 @@ pce_core #(
     .joy_out    (joy_out),
     .joy_in     (joy_in),
 
-    .aud_l      (aud_l_raw),
-    .aud_r      (aud_r_raw),
+    .aud_l      (aud_l),
+    .aud_r      (aud_r),
 
     .vid_ce     (vid_ce),
     .vid_r      (vid_r),
@@ -523,9 +497,7 @@ pce_core #(
     .vid_vs     (vid_vs),
     .vid_hbl    (vid_hbl),
     .vid_vbl    (vid_vbl),
-    .vid_dcc    (vid_dcc),
-    .vid_hdw_dbg (vid_hdw_dbg),
-    .vid_hds_dbg (vid_hds_dbg)
+    .vid_dcc    (vid_dcc)
 );
 
 // ===========================================================================
@@ -567,10 +539,8 @@ pce_pad u_joy (
 );
 
 // ===========================================================================
-// Video: genlocked line doubler + composite color matrix + OSD overlay + HDMI
+// Video: genlocked line doubler + OSD overlay + HDMI transmitter
 // ===========================================================================
-wire [7:0] vga_r_raw, vga_g_raw, vga_b_raw;
-wire       vga_hs_raw, vga_vs_raw, vga_de_raw;
 wire [7:0] vga_r, vga_g, vga_b;
 wire       vga_hs, vga_vs, vga_de;
 
@@ -584,55 +554,82 @@ video_scandoubler u_scandoubler (
     .vs_in      (vid_vs),
     .hbl_in     (vid_hbl),
     .dcc_in     (vid_dcc),
-    .hdw_in     (vid_hdw_dbg),
-    .hds_in     (vid_hds_dbg),
     .zoom_in    (video_zoom),
     .scan_in    (scanline),
 
     .clk_pix    (clk_pix),
     .pix_resetn (pix_resetn),
-    .vga_r      (vga_r_raw),
-    .vga_g      (vga_g_raw),
-    .vga_b      (vga_b_raw),
-    .vga_hs     (vga_hs_raw),
-    .vga_vs     (vga_vs_raw),
-    .vga_de     (vga_de_raw),
+    .vga_r      (vga_r),
+    .vga_g      (vga_g),
+    .vga_b      (vga_b),
+    .vga_hs     (vga_hs),
+    .vga_vs     (vga_vs),
+    .vga_de     (vga_de),
     .osd_x      (osd_x),
     .osd_y      (osd_y),
     .osd_de     (osd_de)
 );
 
-// Composite/monochrome color matrix (mix = 0..5, see rtl/color_mix.sv);
-// sync/de pass straight through, unaffected by the horizontal blur filter.
+wire [7:0] mix_r, mix_g, mix_b;
+wire       mix_hs, mix_vs, mix_hblank, mix_vblank;
+reg  [1:0] color_mode_sync;
+
+always @(posedge clk_pix) begin
+    if (!pix_resetn)
+        color_mode_sync <= 2'b00;
+    else
+        color_mode_sync <= {color_mode_sync[0], color_mode};
+end
+
 color_mix u_color_mix (
     .clk_vid    (clk_pix),
     .ce_pix     (1'b1),
-    .mix        ({2'b00, color_mode}),
-    .R_in       (vga_r_raw),
-    .G_in       (vga_g_raw),
-    .B_in       (vga_b_raw),
-    .HSync_in   (vga_hs_raw),
-    .VSync_in   (vga_vs_raw),
-    .HBlank_in  (~vga_de_raw),
+    .mix        ({2'b00, color_mode_sync[1]}),
+    .R_in       (vga_r),
+    .G_in       (vga_g),
+    .B_in       (vga_b),
+    .HSync_in   (vga_hs),
+    .VSync_in   (vga_vs),
+    .HBlank_in  (~vga_de),
     .VBlank_in  (1'b0),
-    .R_out      (vga_r),
-    .G_out      (vga_g),
-    .B_out      (vga_b),
-    .HSync_out  (vga_hs),
-    .VSync_out  (vga_vs),
-    .HBlank_out (),
-    .VBlank_out ()
+    .R_out      (mix_r),
+    .G_out      (mix_g),
+    .B_out      (mix_b),
+    .HSync_out  (mix_hs),
+    .VSync_out  (mix_vs),
+    .HBlank_out (mix_hblank),
+    .VBlank_out (mix_vblank)
 );
-assign vga_de = vga_de_raw;
+
+reg        osd_on_d1, osd_text_d1;
+reg        osd_on_d2, osd_text_d2;
+reg [23:0] osd_rgb_d1, osd_rgb_d2;
+always @(posedge clk_pix) begin
+    if (!pix_resetn) begin
+        osd_on_d1   <= 1'b0;
+        osd_text_d1 <= 1'b0;
+        osd_rgb_d1  <= 24'd0;
+        osd_on_d2   <= 1'b0;
+        osd_text_d2 <= 1'b0;
+        osd_rgb_d2  <= 24'd0;
+    end else begin
+        osd_on_d1   <= osd_on;
+        osd_text_d1 <= osd_text;
+        osd_rgb_d1  <= osd_rgb;
+        osd_on_d2   <= osd_on_d1;
+        osd_text_d2 <= osd_text_d1;
+        osd_rgb_d2  <= osd_rgb_d1;
+    end
+end
 
 // Keep the paused frame visible beneath the OSD at 50% opacity, but render
-// menu glyphs fully opaque. osd_rgb is aligned with vga_*.
-wire [7:0] out_r = osd_on ? (osd_text ? osd_rgb[23:16] :
-                             ({1'b0, osd_rgb[23:16]} + {1'b0, vga_r}) >> 1) : vga_r;
-wire [7:0] out_g = osd_on ? (osd_text ? osd_rgb[15:8] :
-                             ({1'b0, osd_rgb[15:8]} + {1'b0, vga_g}) >> 1) : vga_g;
-wire [7:0] out_b = osd_on ? (osd_text ? osd_rgb[7:0] :
-                             ({1'b0, osd_rgb[7:0]} + {1'b0, vga_b}) >> 1) : vga_b;
+// menu glyphs fully opaque. The OSD delay matches color_mix's pipeline.
+wire [7:0] out_r = osd_on_d2 ? (osd_text_d2 ? osd_rgb_d2[23:16] :
+                                ({1'b0, osd_rgb_d2[23:16]} + {1'b0, mix_r}) >> 1) : mix_r;
+wire [7:0] out_g = osd_on_d2 ? (osd_text_d2 ? osd_rgb_d2[15:8] :
+                                ({1'b0, osd_rgb_d2[15:8]} + {1'b0, mix_g}) >> 1) : mix_g;
+wire [7:0] out_b = osd_on_d2 ? (osd_text_d2 ? osd_rgb_d2[7:0] :
+                                ({1'b0, osd_rgb_d2[7:0]} + {1'b0, mix_b}) >> 1) : mix_b;
 
 dvi_tx u_dvi (
     .clk_pix    (clk_pix),
@@ -641,9 +638,9 @@ dvi_tx u_dvi (
     .r          (out_r),
     .g          (out_g),
     .b          (out_b),
-    .de         (vga_de),
-    .hsync      (vga_hs),
-    .vsync      (vga_vs),
+    .de         (~mix_hblank),
+    .hsync      (mix_hs),
+    .vsync      (mix_vs),
     .tmds_clk_p (tmds_clk_p),
     .tmds_clk_n (tmds_clk_n),
     .tmds_d_p   (tmds_d_p),
@@ -653,18 +650,6 @@ dvi_tx u_dvi (
 // ===========================================================================
 // Audio
 // ===========================================================================
-audio_tone u_audio_tone (
-    .clk     (clk_sys),
-    .resetn  (sys_resetn),
-    .volume  (audio_volume),
-    .bass    (audio_bass),
-    .treble  (audio_treble),
-    .in_l    (aud_l_raw),
-    .in_r    (aud_r_raw),
-    .out_l   (aud_l),
-    .out_r   (aud_r)
-);
-
 i2s_tx #(.BCK_DIV(14)) u_i2s (
     .clk    (clk_sys),
     .resetn (sys_resetn),

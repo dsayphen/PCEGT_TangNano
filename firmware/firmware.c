@@ -51,37 +51,6 @@ static int page_len;            // entries actually on this page
 static char path_buf[PWD_SIZE + NAME_MAX + 2];
 static uint8_t io_buf[2048];
 
-static char current_game_name[NAME_MAX] = "";
-
-// Extrait le nom du fichier sans le chemin
-static void extract_filename(char *dst, const char *path) {
-    const char *slash = strrchr(path, '/');
-    const char *src = slash ? (slash + 1) : path;
-    strncpy(dst, src, NAME_MAX - 1);
-    dst[NAME_MAX - 1] = '\0';
-}
-
-// Construit le chemin /config/[game_name].cfg sans snprintf
-static void build_cfg_path(char *dst, size_t max_len, const char *game_name) {
-    const char *dir = "/config/";
-    const char *ext = ".cfg";
-    size_t i = 0;
-
-    // Copie "/config/"
-    while (*dir && i < max_len - 1) {
-        dst[i++] = *dir++;
-    }
-    // Copie le nom du jeu
-    while (*game_name && i < max_len - 1) {
-        dst[i++] = *game_name++;
-    }
-    // Copie ".cfg"
-    while (*ext && i < max_len - 1) {
-        dst[i++] = *ext++;
-    }
-    dst[i] = '\0';
-}
-
 // Conversion d'un entier 8-bit en chaîne de caractères texte
 static int u8_to_str(char *buf, uint8_t val) {
     if (val >= 100) {
@@ -176,100 +145,35 @@ static void message(const char *l1, const char *l2) {
 // Saved at the root of the SD card so the last zoom/scanline settings survive
 // a power cycle. 
 
-#define VIDEO_CFG_FILE    "/config/video.cfg"
+#define VIDEO_CFG_FILE    "/video.cfg"
 
 static int video_zoom = 1;       // hardware reset default: stretch
 static int video_scanline = 0;   // hardware reset default: off
 static int game_pad_mode = 0;    // hardware reset default: 2 buttons
 static int video_color = 0;      // hardware reset default: raw RGB
 
-static void game_pad_mode_load(const char *game_name) {
-    FIL file;
-    char cfg_path[PWD_SIZE + NAME_MAX + 16];
-    char line[64];
-
-    // Valeur par défaut : 2 boutons
-    game_pad_mode = 0;
-    reg_pad_mode = 0;
-
-    if (!game_name || game_name[0] == '\0') return;
-
-    // Construction du chemin : /config/[nomdujeu].cfg
-    build_cfg_path(cfg_path, sizeof(cfg_path), game_name);
-
-    if (f_open(&file, cfg_path, FA_READ) != FR_OK) {
-        return; // Conserve la valeur par défaut si le fichier n'existe pas
-    }
-
-    while (f_gets(line, sizeof(line), &file)) {
-        if (line[0] == '#' || line[0] == '\r' || line[0] == '\n' || line[0] == '\0') {
-            continue;
-        }
-
-        if (starts_with(line, "pad_mode=")) {
-            game_pad_mode = parse_u8(line + 9) ? 1 : 0;
-            reg_pad_mode = game_pad_mode;
-        }
-    }
-
-    f_close(&file);
-}
-
-static void game_pad_mode_save(const char *game_name) {
-    FIL file;
-    UINT bw;
-    char num[4];
-    int len;
-    char cfg_path[PWD_SIZE + NAME_MAX + 16];
-
-    if (!game_name || game_name[0] == '\0') return;
-
-    // S'assurer que le dossier /config existe
-    f_mkdir("/config");
-
-    // Construction du chemin : /config/[nomdujeu].cfg
-    build_cfg_path(cfg_path, sizeof(cfg_path), game_name);
-
-    if (f_open(&file, cfg_path, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
-        return;
-    }
-
-    const char *header = 
-        "# PCEngine / SuperGrafx Game Pad Settings\n"
-        "# -----------------------------------\n"
-        "# pad_mode : 0 = 2 buttons, 1 = 6 buttons\n"
-        "# -----------------------------------\n";
-
-    f_write(&file, header, (UINT)strlen(header), &bw);
-
-    f_write(&file, "pad_mode=", 9, &bw);
-    len = u8_to_str(num, game_pad_mode);
-    f_write(&file, num, len, &bw);
-    f_write(&file, "\n", 1, &bw);
-
-    f_close(&file);
-}
-
 static void video_config_load(void) {
     FIL file;
     char line[64];
 
-    if (f_open(&file, VIDEO_CFG_FILE, FA_READ) != FR_OK) {
-        return;
+    if (f_open(&file, "/video.cfg", FA_READ) != FR_OK) {
+        return; // Conserve les valeurs par défaut si le fichier n'existe pas encore
     }
 
+    // f_gets fonctionne parfaitement maintenant grâce à FF_USE_STRFUNC = 1
     while (f_gets(line, sizeof(line), &file)) {
+        // Ignore les commentaires (#), les lignes vides et les saut de ligne
         if (line[0] == '#' || line[0] == '\r' || line[0] == '\n' || line[0] == '\0') {
             continue;
         }
 
         if (starts_with(line, "reg_video_zoom=")) {
-            video_zoom = parse_u8(line + 15);
-            if (video_zoom > 2)
-                video_zoom = 1;
-            reg_video_zoom = video_zoom;
+            video_zoom = reg_video_zoom = parse_u8(line + 15);
         } else if (starts_with(line, "reg_scanline=")) {
             video_scanline = reg_scanline = parse_u8(line + 13);
+        } else if (starts_with(line, "pad_mode=")) {
+            game_pad_mode = parse_u8(line + 9) ? 1 : 0;
+            reg_pad_mode = game_pad_mode;
         } else if (starts_with(line, "color_palette=")) {
             video_color = parse_u8(line + 14) ? 1 : 0;
             reg_color_mode = video_color;
@@ -285,33 +189,37 @@ static void video_config_save(void) {
     char num[4];
     int len;
 
-    if (f_open(&file, VIDEO_CFG_FILE, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
+    if (f_open(&file, "/video.cfg", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
         return;
     }
 
-    // S'assurer que le dossier /config existe
-    f_mkdir("/config");
-
+    // Commentaires explicatifs rédigés directement dans le fichier CFG
     const char *header = 
         "# PCEngine / SuperGrafx Video Settings\n"
         "# -----------------------------------\n"
         "# reg_video_zoom :\n"
         "#   0 = Original / Integer Scale (1x)\n"
         "#   1 = Stretched / Fit Screen (Full)\n"
-        "#   2 = Bilinear / Fit Screen (Smooth)\n"
         "#\n"
         "# reg_scanline :\n"
         "#   0 = Off (No Scanlines)\n"
         "#   1 = 25% Intensity\n"
         "#   2 = 50% Intensity\n"
         "#   3 = 100% Intensity\n"
+        "# pad_mode : 0 = 2 buttons, 1 = 6 buttons\n"
         "# color_palette : 0 = RAW RGB, 1 = Composite\n"
         "# -----------------------------------\n";
 
-    f_write(&file, header, (UINT)strlen(header), &bw);
+    f_write(&file, header, (UINT)strlen(header), &bw); // Écrit la documentation complète
 
+    // Écriture de reg_video_zoom
     f_write(&file, "reg_video_zoom=", 15, &bw);
     len = u8_to_str(num, reg_video_zoom);
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+
+    f_write(&file, "pad_mode=", 9, &bw);
+    len = u8_to_str(num, game_pad_mode);
     f_write(&file, num, len, &bw);
     f_write(&file, "\n", 1, &bw);
 
@@ -320,96 +228,9 @@ static void video_config_save(void) {
     f_write(&file, num, len, &bw);
     f_write(&file, "\n", 1, &bw);
 
+    // Écriture de reg_scanline
     f_write(&file, "reg_scanline=", 13, &bw);
     len = u8_to_str(num, reg_scanline);
-    f_write(&file, num, len, &bw);
-    f_write(&file, "\n", 1, &bw);
-
-    f_close(&file);
-}
-
-// ---------------------------------------------------------------------------
-// Audio configuration & Persistence
-// ---------------------------------------------------------------------------
-// Global settings (not per-game), saved next to video.cfg.
-
-#define AUDIO_CFG_FILE    "/config/audio.cfg"
-
-static int audio_volume = 10;   // 0..10, hardware reset default: unity gain
-static int audio_bass = 0;      // -5..5, hardware reset default: flat
-static int audio_treble = 0;    // -5..5, hardware reset default: flat
-static int audio_paused = 0;
-
-// Pushes the current settings to reg_audio; bass/treble are biased by +5 to
-// match the unsigned 0..10 range iosys.v stores them in.
-static void audio_apply(void) {
-    uint32_t volume = audio_paused ? 0 : (uint32_t)audio_volume;
-
-    reg_audio = volume |
-                ((uint32_t)(audio_bass + 5) << 4) |
-                ((uint32_t)(audio_treble + 5) << 8);
-}
-
-static void audio_config_load(void) {
-    FIL file;
-    char line[64];
-
-    if (f_open(&file, AUDIO_CFG_FILE, FA_READ) != FR_OK) {
-        audio_apply();
-        return;
-    }
-
-    while (f_gets(line, sizeof(line), &file)) {
-        if (line[0] == '#' || line[0] == '\r' || line[0] == '\n' || line[0] == '\0') {
-            continue;
-        }
-
-        if (starts_with(line, "volume=")) {
-            audio_volume = parse_u8(line + 7);
-        } else if (starts_with(line, "bass=")) {
-            audio_bass = (int)parse_u8(line + 5) - 5;
-        } else if (starts_with(line, "treble=")) {
-            audio_treble = (int)parse_u8(line + 7) - 5;
-        }
-    }
-
-    f_close(&file);
-    audio_apply();
-}
-
-static void audio_config_save(void) {
-    FIL file;
-    UINT bw;
-    char num[4];
-    int len;
-
-    f_mkdir("/config");
-
-    if (f_open(&file, AUDIO_CFG_FILE, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
-        return;
-    }
-
-    const char *header =
-        "# PCEngine / SuperGrafx Audio Settings\n"
-        "# -----------------------------------\n"
-        "# volume : 0 (mute) .. 10 (max)\n"
-        "# bass, treble : 0 (min) .. 10 (max), stored biased by +5 (5 = flat)\n"
-        "# -----------------------------------\n";
-
-    f_write(&file, header, (UINT)strlen(header), &bw);
-
-    f_write(&file, "volume=", 7, &bw);
-    len = u8_to_str(num, (uint8_t)audio_volume);
-    f_write(&file, num, len, &bw);
-    f_write(&file, "\n", 1, &bw);
-
-    f_write(&file, "bass=", 5, &bw);
-    len = u8_to_str(num, (uint8_t)(audio_bass + 5));
-    f_write(&file, num, len, &bw);
-    f_write(&file, "\n", 1, &bw);
-
-    f_write(&file, "treble=", 7, &bw);
-    len = u8_to_str(num, (uint8_t)(audio_treble + 5));
     f_write(&file, num, len, &bw);
     f_write(&file, "\n", 1, &bw);
 
@@ -420,11 +241,9 @@ static void audio_config_save(void) {
 // setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
 // (reg_video_zoom) and rtl/tang/video_scandoubler.v.
 static void zoom_cycle(void) {
-    static const char *names[3] = {
-        "Zoom: Integer", "Zoom: Stretch", "Zoom: Bilinear"
-    };
+    static const char *names[2] = { "Zoom: Integer", "Zoom: Stretch" };
 
-    video_zoom = (video_zoom + 1) % 3;
+    video_zoom = (video_zoom + 1) % 2;
     reg_video_zoom = video_zoom;
     video_config_save();
 
@@ -455,7 +274,7 @@ static void scanline_cycle(int dir) {
     overlay(0);
 }
 
-static const char *zoom_names[3] = { "Integer", "Stretch", "Bilinear" };
+static const char *zoom_names[2] = { "Integer", "Stretch" };
 static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
 static const char *color_names[2] = { "RAW RGB", "Composite" };
 
@@ -487,150 +306,14 @@ static void make_menu_label(char *buf, int type) {
     buf[i] = '\0';
 }
 
-// Color/Zoom/Scanlines sub-menu, reached from "Video Settings >" in
-// pause_menu.  Gamepad mode lives directly in pause_menu, not here.
-static void video_menu(void) {
-    static const char *back_label = "Back";
-    int active = 0;
-    const int n_items = 4;
-
-    clear();
-    print_field(5, 5, "Video Settings", OSD_COLS - 2);
-
-    for (;;) {
-        for (int i = 0; i < n_items; i++) {
-            cursor(4, 8 + i);
-            putchar(i == active ? '>' : ' ');
-
-            char label[24];
-
-            if (i == 3) {
-                print_field(6, 8 + i, back_label, 20);
-                continue;
-            }
-
-            make_menu_label(label, i + 4);
-            print_field(6, 8 + i, label, 20);
-        }
-        selection_row(8 + active);
-
-        uint32_t e = joy_edge();
-        if (e & JOY_UP) {
-            active = active ? active - 1 : n_items - 1;
-        } else if (e & JOY_DOWN) {
-            active = active < n_items - 1 ? active + 1 : 0;
-        } else if ((e & JOY_B) || ((e & JOY_A) && active == 3)) {
-            return;
-        } else if ((e & JOY_A) && active == 0) {
-            video_color = !video_color;
-            reg_color_mode = video_color;
-            video_config_save();
-        } else if ((e & JOY_A) && active == 1) {
-            video_zoom = (video_zoom + 1) % 3;
-            reg_video_zoom = video_zoom;
-            video_config_save();
-        } else if ((e & JOY_A) && active == 2) {
-            video_scanline = (video_scanline + 1) % 4;
-            reg_scanline = video_scanline;
-            video_config_save();
-        }
-        delay(20);
-    }
-}
-
-// Volume/Bass/Treble sub-menu, reached from "Audio Settings >" in pause_menu.
-static void audio_menu(void) {
-    static const char *labels[4] = { "Volume", "Bass", "Treble", "Back" };
-    int active = 0;
-    const int n_items = 4;
-
-    clear();
-    print_field(5, 5, "Audio Settings", OSD_COLS - 2);
-
-    for (;;) {
-        for (int i = 0; i < n_items; i++) {
-            cursor(4, 8 + i);
-            putchar(i == active ? '>' : ' ');
-
-            char label[24];
-            int j = 0;
-            const char *prefix = labels[i];
-            while (*prefix)
-                label[j++] = *prefix++;
-
-            if (i < 3) {
-                int val = (i == 0) ? audio_volume : (i == 1) ? audio_bass : audio_treble;
-                char num[4];
-                int len;
-
-                label[j++] = ':';
-                label[j++] = ' ';
-                if (i > 0 && val > 0) {
-                    label[j++] = '+';
-                } else if (i > 0 && val < 0) {
-                    label[j++] = '-';
-                    val = -val;
-                }
-                len = u8_to_str(num, (uint8_t)val);
-                for (int k = 0; k < len; k++)
-                    label[j++] = num[k];
-            }
-            label[j] = '\0';
-
-            print_field(6, 8 + i, label, 20);
-        }
-        selection_row(8 + active);
-
-        uint32_t e = joy_edge();
-        if (e & JOY_UP) {
-            active = active ? active - 1 : n_items - 1;
-        } else if (e & JOY_DOWN) {
-            active = active < n_items - 1 ? active + 1 : 0;
-        } else if (e & JOY_LEFT) {
-            if (active == 0 && audio_volume > 0) {
-                audio_volume--;
-                audio_apply();
-                audio_config_save();
-            } else if (active == 1 && audio_bass > -5) {
-                audio_bass--;
-                audio_apply();
-                audio_config_save();
-            } else if (active == 2 && audio_treble > -5) {
-                audio_treble--;
-                audio_apply();
-                audio_config_save();
-            }
-        } else if (e & JOY_RIGHT) {
-            if (active == 0 && audio_volume < 10) {
-                audio_volume++;
-                audio_apply();
-                audio_config_save();
-            } else if (active == 1 && audio_bass < 5) {
-                audio_bass++;
-                audio_apply();
-                audio_config_save();
-            } else if (active == 2 && audio_treble < 5) {
-                audio_treble++;
-                audio_apply();
-                audio_config_save();
-            }
-        } else if ((e & JOY_B) || ((e & JOY_A) && active == 3)) {
-            return;
-        }
-        delay(20);
-    }
-}
-
 // Returns non-zero when the player chooses to return to the ROM browser.
 static int pause_menu(void) {
     static const char *items[3] = {
         "Resume Game", "Reset Game", "Return to browser"
     };
     int active = 0;
-    const int n_items = 6;
+    const int n_items = 7;
 
-    audio_paused = 1;
-    audio_apply();
     pce_pause(1);
     clear();
     print_field(5, 5, "Game paused", OSD_COLS - 2);
@@ -647,17 +330,7 @@ static int pause_menu(void) {
                 continue;
             }
 
-            if (i == 4) {
-                print_field(6, 8 + i, "Video Settings >", 20);
-                continue;
-            }
-
-            if (i == 5) {
-                print_field(6, 8 + i, "Audio Settings >", 20);
-                continue;
-            }
-
-            make_menu_label(label, 3);
+            make_menu_label(label, i);
             print_field(6, 8 + i, label, 20);
         }
         selection_row(8 + active);
@@ -670,35 +343,33 @@ static int pause_menu(void) {
         } else if ((e & JOY_B) || (e & JOY_MENU) ||
                    ((e & JOY_A) && active == 0)) {
             pce_pause(0);
-            audio_paused = 0;
-            audio_apply();
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && active == 1) {
             pce_reset();
             delay(20);
             pce_pause(0);
-            audio_paused = 0;
-            audio_apply();
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && active == 2) {
             pce_stop();
-            audio_paused = 0;
-            audio_apply();
             return 1;
         } else if ((e & JOY_A) && active == 3) {
             game_pad_mode = !game_pad_mode;
             reg_pad_mode = game_pad_mode;
-            game_pad_mode_save(current_game_name); // <--- Sauvegarde dans /config/[nomdujeu].cfg
+            video_config_save();
         } else if ((e & JOY_A) && active == 4) {
-            video_menu();
-            clear();
-            print_field(5, 5, "Game paused", OSD_COLS - 2);
+            video_color = !video_color;
+            reg_color_mode = video_color;
+            video_config_save();
         } else if ((e & JOY_A) && active == 5) {
-            audio_menu();
-            clear();
-            print_field(5, 5, "Game paused", OSD_COLS - 2);
+            video_zoom = (video_zoom + 1) % 2;
+            reg_video_zoom = video_zoom;
+            video_config_save();
+        } else if ((e & JOY_A) && active == 6) {
+            video_scanline = (video_scanline + 1) % 4;
+            reg_scanline = video_scanline;
+            video_config_save();
         }
         delay(20);
     }
@@ -726,7 +397,6 @@ static const char *hidden_dirs[] = {
     "pcecfg",
     "cheats",
     "gamecfg",
-    "config",
     "screenshot",
     NULL
 };
@@ -840,7 +510,7 @@ static int load_rom(const char *fname, uint32_t size) {
         for (UINT i = 0; i < br; i += 4)
             pce_load_word(*w++);
 
-        total += br; 
+        total += br;
 
         int pct = (int)((total >> 8) * 100 / (size >> 8));
         if (pct != last_pct) {
@@ -854,19 +524,10 @@ static int load_rom(const char *fname, uint32_t size) {
 
     f_close(&f);
 
-    // Enregistre le nom du jeu actuel
-    extract_filename(current_game_name, fname);
-
-    // Charge le mode de manette spécifique au jeu
-    game_pad_mode_load(current_game_name);
-
     // releases the PC Engine once the last byte has reached the SDRAM
     pce_load_end();
 
     uart_print("load done\n");
-    uart_printf("dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
-                reg_vid_dcc_dbg(), reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
-                reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8);
     return 0;
 }
 
@@ -1022,25 +683,10 @@ static int mount_card(void) {
     return -1;
 }
 
-#define RET_BASE  ((volatile uint32_t *)0x00100000)  /* 64 Ko sous la pile */
-#define RET_WORDS 16384u
-static uint32_t ret_pat(uint32_t i) { return 0xA5A5A5A5u ^ (i << 7) ^ (i >> 3); }
-static void ret_fill(void) { for (uint32_t i = 0; i < RET_WORDS; i++) RET_BASE[i] = ret_pat(i); }
-static uint32_t ret_check(void) {
-    uint32_t bad = 0;
-    for (uint32_t i = 0; i < RET_WORDS; i++) if (RET_BASE[i] != ret_pat(i)) bad++;
-    return bad;
-}
-
 // ---------------------------------------------------------------------------
 int main(void) {
     // 43.2 MHz / 375 = 115200 baud
     uart_init(375);
-
-    uint32_t sp_val;
-    __asm__ volatile ("mv %0, sp" : "=r"(sp_val));
-    uart_printf("sp=%x io_buf=%x fs=%x\n", sp_val, (uint32_t)io_buf, (uint32_t)&fs);
-    
     uart_print("\nPCEtang iosys firmware\n");
 
     overlay(1);
@@ -1058,14 +704,10 @@ int main(void) {
         break;
     }
 
-    // Restore the last video and audio settings saved on the SD card.
+    // Restore the last video settings saved on the SD card.
     video_config_load();
-    audio_config_load();
 
     browse();
-
-    ret_fill(); 
-    uint32_t last_ret = time_millis();
 
     // The console is running now.  Stay alive so the user can bring the menu
     // back with Select+Start and pick another game without a power cycle,
@@ -1076,41 +718,9 @@ int main(void) {
     int select_armed = 0;
     int select_count = 0;
 
-    uint32_t last_hb = time_millis();
-    uint32_t last_raw = 0xffffffff;
-
     for (;;) {
         uint32_t raw = joy_raw();
         uint32_t e = joy_edge();
-        static uint32_t loops = 0;
-
-        loops++;
-        if (time_millis() - last_hb >= 1000) {
-            last_hb += 1000;
-            uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
-                        (int)loops, reg_joystick, reg_vid_dcc_dbg(),
-                        reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
-                        reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8);
-            loops = 0;
-        }
-
-        if (time_millis() - last_ret >= 10000) {
-            last_ret += 10000;
-            uart_printf("retention bad=%d\n", (int)ret_check());
-            ret_fill();
-        }
-
-        if (raw != last_raw) {
-            uart_printf("joy %x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
-                        raw, reg_vid_dcc_dbg(), reg_vid_hds_dbg(),
-                        reg_vid_hds_dbg() * 8, reg_vid_hdw_dbg(),
-                        reg_vid_hdw_dbg() * 8);
-            last_raw = raw;
-        }
-
-        static uint32_t last_reg = 0xffffffff;
-        uint32_t r = reg_joystick;
-        if (r != last_reg) { uart_printf("reg %x\n", r); last_reg = r; }
 
         if (!(raw & JOY_SELECT)) {
             // Select released: require another 500 ms hold next time.

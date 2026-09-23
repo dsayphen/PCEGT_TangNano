@@ -33,16 +33,6 @@
 #define reg_pad_mode       (*(volatile uint32_t*)0x02000058)
 #define reg_color_mode     (*(volatile uint32_t*)0x0200005c)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
-#define reg_audio          (*(volatile uint32_t*)0x02000064)
-
-// VCE dot clock select (VIDEO_DCC), debug only: piggybacked onto reg_core_id
-// bits 17:16 (see iosys.v) instead of its own address decode.
-#define reg_vid_dcc_dbg()  ((reg_core_id >> 16) & 0x3)
-
-// VDC0 active display width in 8-pixel characters (HuC6270 HDW), debug only:
-// piggybacked onto reg_core_id bits 24:18. Multiply by 8 for pixels.
-#define reg_vid_hdw_dbg()  ((reg_core_id >> 18) & 0x7f)
-#define reg_vid_hds_dbg()  ((reg_core_id >> 25) & 0x7f)
 
 // ---------------------------------------------------------------------------
 // OSD geometry, must match textdisp.v

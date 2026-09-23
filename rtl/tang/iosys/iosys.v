@@ -34,7 +34,7 @@
 //   0x0200_0048                  scanline strength (0/1/2/3 = 0/25/50/100%)
 //   0x0200_0050                  milliseconds since reset, read only
 //   0x0200_005C                  color palette (0=raw RGB, 1=composite)
-//   0x0200_0060                  core id (bits 15:0), VCE dot clock debug (bits 17:16), VDC0 width debug (bits 24:18), read only
+//   0x0200_0060                  core id, read only
 //
 // ROM description
 // ---------------
@@ -96,26 +96,11 @@ module iosys #(
     output reg         sgx_mode,
 
     // ---- video scaler control ---------------------------------------------
-    // 0 = 2x integer, 1 = stretch, 2 = bilinear stretch
+    // 0 = 2x, 1 = stretch to fill the screen
     output reg  [1:0]  video_zoom,
     // 0/1/2/3 = 0/25/50/100% scanline darkening on the duplicated line
     output reg  [1:0]  scanline,
     output reg         color_mode,
-
-    // ---- audio tone controls, all 0..10, biased by +5 for bass/treble -----
-    output reg  [3:0]  audio_volume,
-    output reg  [3:0]  audio_bass,
-    output reg  [3:0]  audio_treble,
-
-    // ---- read-only debug: VCE dot clock select (VIDEO_DCC), see huc6260;
-    // piggybacked onto reg_core_id's unused bits 17:16, no new address decode
-    input  wire [1:0]  vid_dcc_dbg,
-    // ---- read-only debug: VDC0 active display width in 8px chars, see
-    // huc6270's HDW register; piggybacked onto reg_core_id bits 24:18
-    input  wire [6:0]  vid_hdw_dbg,
-    // ---- read-only debug: VDC0 horizontal display start in 8px chars,
-    // piggybacked onto reg_core_id bits 31:25
-    input  wire [6:0]  vid_hds_dbg,
 
     // ---- in-game controls -------------------------------------------------
     output reg         game_pause,
@@ -279,7 +264,6 @@ wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
 wire pad_mode_sel  = mem_valid && (mem_addr == 32'h0200_0058);
 wire color_mode_sel= mem_valid && (mem_addr == 32'h0200_005c);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
-wire audio_sel     = mem_valid && (mem_addr == 32'h0200_0064);
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -324,7 +308,7 @@ wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
                    game_ctrl_sel ||
-                   time_sel || pad_mode_sel || color_mode_sel || id_sel || audio_sel ||
+                   time_sel || pad_mode_sel || color_mode_sel || id_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -338,8 +322,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    time_sel     ? time_reg :
                    pad_mode_sel ? {31'd0, pad_mode} :
                    color_mode_sel ? {31'd0, color_mode} :
-                   id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
-                   audio_sel    ? {20'b0, audio_treble, audio_bass, audio_volume} :
+                   id_sel       ? {16'b0, CORE_ID} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;
 
@@ -529,12 +512,6 @@ always @(posedge clk) begin
     if (color_mode_sel && (mem_wstrb != 4'b0))
         color_mode <= mem_wdata[0];
 
-    if (audio_sel && (mem_wstrb != 4'b0)) begin
-        audio_volume <= mem_wdata[3:0];
-        audio_bass   <= mem_wdata[7:4];
-        audio_treble <= mem_wdata[11:8];
-    end
-
     // ---- end of transfer: wait for the SDRAM to really drain -------------
     if (rl_finishing) begin
         rl_timeout <= rl_timeout + 20'd1;
@@ -568,9 +545,6 @@ always @(posedge clk) begin
         system_reset <= 1'b0;
         pad_mode     <= 1'b0;
         color_mode   <= 1'b0;
-        audio_volume <= 4'd10;     // unity gain
-        audio_bass   <= 4'd5;      // flat (offset by +5)
-        audio_treble <= 4'd5;      // flat (offset by +5)
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;
