@@ -122,7 +122,8 @@ entity pce_top is
 		VIDEO_HBL   : out std_logic;
 		VIDEO_VBL   : out std_logic;
 		-- VDC0 active display width in 8-pixel characters, for debug/diagnosis only
-		VIDEO_HDW_DBG : out std_logic_vector(6 downto 0)
+		VIDEO_HDW_DBG : out std_logic_vector(6 downto 0);
+		VIDEO_HDS_DBG : out std_logic_vector(6 downto 0)
 	);
 end pce_top;
 
@@ -182,6 +183,7 @@ signal VDC_CLKEN		: std_logic;
 signal VPC_DO			: std_logic_vector(7 downto 0);
 signal VDC0_HDS_END_POS_DBG   : unsigned(6 downto 0);
 signal VDC0_HDISP_END_POS_DBG : unsigned(6 downto 0);
+signal VDC0_HDS_DBG           : std_logic_vector(6 downto 0);
 signal VDCNUM    		: std_logic;
 signal VDC_COLNO		: std_logic_vector(8 downto 0);
 
@@ -493,10 +495,12 @@ port map(
 	SPR_EN	=> SPR_EN,
 
 	HDS_END_POS_DBG   => VDC0_HDS_END_POS_DBG,
-	HDISP_END_POS_DBG => VDC0_HDISP_END_POS_DBG
+	HDISP_END_POS_DBG => VDC0_HDISP_END_POS_DBG,
+	HDS_DBG           => VDC0_HDS_DBG
 );
 
 VIDEO_HDW_DBG <= std_logic_vector(VDC0_HDISP_END_POS_DBG - VDC0_HDS_END_POS_DBG);
+VIDEO_HDS_DBG <= VDC0_HDS_DBG;
 
 CLR_A  <= CLR_A + 1  when rising_edge(CLK);
 CLR_WE <= COLD_RESET when rising_edge(CLK);

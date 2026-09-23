@@ -264,7 +264,10 @@ static void video_config_load(void) {
         }
 
         if (starts_with(line, "reg_video_zoom=")) {
-            video_zoom = reg_video_zoom = parse_u8(line + 15);
+            video_zoom = parse_u8(line + 15);
+            if (video_zoom > 2)
+                video_zoom = 1;
+            reg_video_zoom = video_zoom;
         } else if (starts_with(line, "reg_scanline=")) {
             video_scanline = reg_scanline = parse_u8(line + 13);
         } else if (starts_with(line, "color_palette=")) {
@@ -295,6 +298,7 @@ static void video_config_save(void) {
         "# reg_video_zoom :\n"
         "#   0 = Original / Integer Scale (1x)\n"
         "#   1 = Stretched / Fit Screen (Full)\n"
+        "#   2 = Bilinear / Fit Screen (Smooth)\n"
         "#\n"
         "# reg_scanline :\n"
         "#   0 = Off (No Scanlines)\n"
@@ -416,9 +420,11 @@ static void audio_config_save(void) {
 // setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
 // (reg_video_zoom) and rtl/tang/video_scandoubler.v.
 static void zoom_cycle(void) {
-    static const char *names[2] = { "Zoom: Integer", "Zoom: Stretch" };
+    static const char *names[3] = {
+        "Zoom: Integer", "Zoom: Stretch", "Zoom: Bilinear"
+    };
 
-    video_zoom = (video_zoom + 1) % 2;
+    video_zoom = (video_zoom + 1) % 3;
     reg_video_zoom = video_zoom;
     video_config_save();
 
@@ -449,7 +455,7 @@ static void scanline_cycle(int dir) {
     overlay(0);
 }
 
-static const char *zoom_names[2] = { "Integer", "Stretch" };
+static const char *zoom_names[3] = { "Integer", "Stretch", "Bilinear" };
 static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
 static const char *color_names[2] = { "RAW RGB", "Composite" };
 
@@ -520,7 +526,7 @@ static void video_menu(void) {
             reg_color_mode = video_color;
             video_config_save();
         } else if ((e & JOY_A) && active == 1) {
-            video_zoom = (video_zoom + 1) % 2;
+            video_zoom = (video_zoom + 1) % 3;
             reg_video_zoom = video_zoom;
             video_config_save();
         } else if ((e & JOY_A) && active == 2) {
@@ -858,7 +864,9 @@ static int load_rom(const char *fname, uint32_t size) {
     pce_load_end();
 
     uart_print("load done\n");
-    uart_printf("dcc=%d hdw_px=%d\n", reg_vid_dcc_dbg(), reg_vid_hdw_dbg() * 8);
+    uart_printf("dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
+                reg_vid_dcc_dbg(), reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
+                reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8);
     return 0;
 }
 
@@ -1079,7 +1087,10 @@ int main(void) {
         loops++;
         if (time_millis() - last_hb >= 1000) {
             last_hb += 1000;
-            uart_printf("alive loops=%d reg=%x dcc=%d hdw_px=%d\n", (int)loops, reg_joystick, reg_vid_dcc_dbg(), reg_vid_hdw_dbg() * 8);
+            uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
+                        (int)loops, reg_joystick, reg_vid_dcc_dbg(),
+                        reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
+                        reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8);
             loops = 0;
         }
 
@@ -1089,7 +1100,13 @@ int main(void) {
             ret_fill();
         }
 
-        if (raw != last_raw) { uart_printf("joy %x dcc=%d hdw_px=%d\n", raw, reg_vid_dcc_dbg(), reg_vid_hdw_dbg() * 8); last_raw = raw; }
+        if (raw != last_raw) {
+            uart_printf("joy %x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
+                        raw, reg_vid_dcc_dbg(), reg_vid_hds_dbg(),
+                        reg_vid_hds_dbg() * 8, reg_vid_hdw_dbg(),
+                        reg_vid_hdw_dbg() * 8);
+            last_raw = raw;
+        }
 
         static uint32_t last_reg = 0xffffffff;
         uint32_t r = reg_joystick;
