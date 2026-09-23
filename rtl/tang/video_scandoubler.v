@@ -107,11 +107,12 @@ reg        hs_d;
 reg        vs_d;
 reg [9:0]  wr_addr;
 reg        wr_bank;
+reg [9:0]  wr_addr_max;
+reg [9:0]  wr_addr_max_lat;
 reg        line_tgl;      // toggles at the end of every core scan line
 reg        frame_tgl;     // toggles at the start of every core frame
 reg [1:0]  dcc_lat;
 reg [6:0]  hdw_lat;
-reg [6:0]  hds_lat;
 reg [1:0]  zoom_lat;
 reg [1:0]  scan_lat;
 
@@ -128,10 +129,11 @@ initial begin
     frame_tgl = 1'b0;
     dcc_lat   = 2'b10;
     hdw_lat   = 7'd0;
-    hds_lat   = 7'd0;
     zoom_lat  = 2'b10;
     scan_lat  = 2'b00;
     lb_we     = 1'b0;
+    wr_addr_max     = 10'd0;
+    wr_addr_max_lat = 10'd0;
 end
 
 always @(posedge clk_sys) begin
@@ -148,6 +150,9 @@ always @(posedge clk_sys) begin
         lb_wdata <= pix_in;
         if (wr_addr != 10'd1023)
             wr_addr <= wr_addr + 10'd1;
+        if (wr_addr > wr_addr_max)          // <-- ajout
+            wr_addr_max <= wr_addr;         // <-- ajout
+
     end
 
     // End of line: swap buffers.  VIDEO_HS rises well after the end of the
@@ -157,10 +162,11 @@ always @(posedge clk_sys) begin
         wr_bank  <= ~wr_bank;
         dcc_lat  <= dcc_in;
         hdw_lat  <= hdw_in;
-        hds_lat  <= hds_in;
         zoom_lat <= zoom_in;
         scan_lat <= scan_in;
         line_tgl <= ~line_tgl;
+        wr_addr_max_lat <= wr_addr_max;     // <-- ajout
+        wr_addr_max     <= 10'd0;           // <-- ajout
     end
 
     if (vs_in && !vs_d)
@@ -205,12 +211,12 @@ reg [1:0] dcc_sync0;
 reg [1:0] dcc_sync;
 reg [6:0] hdw_sync0;
 reg [6:0] hdw_sync;
-reg [6:0] hds_sync0;
-reg [6:0] hds_sync;
 reg [1:0] zoom_sync0;
 reg [1:0] zoom_sync;
 reg [1:0] scan_sync0;
 reg [1:0] scan_sync;
+reg [9:0] wr_addr_max_sync0;
+reg [9:0] wr_addr_max_sync;
 
 wire line_ev  = line_sync[2]  ^ line_sync[1];
 wire frame_ev = frame_sync[2] ^ frame_sync[1];
@@ -257,8 +263,8 @@ end
 reg [10:0] want_w;
 always @(*) begin
     case (zoom_sync)
-        2'b00:   want_w = src_w << 1;     // 2x - integer double
-        default: want_w = H_ACTIVE;       // stretch, including bilinear
+        2'b00:   want_w = src_w << 1;                     // 2x - integer double
+        default: want_w = (src_w == 11'd540) ? 11'd540 : H_ACTIVE;
     endcase
 end
 
@@ -270,8 +276,6 @@ wire [10:0] h_off = (H_ACTIVE - vis_w) >> 1;   // centers the picture
 // start instead of just cutting off the right edge.
 wire [10:0] overflow  = (want_w > H_ACTIVE) ? (want_w - H_ACTIVE) : 11'd0;
 wire [10:0] left_skip = overflow >> 1;
-wire [10:0] hds_skip = (hds_sync > ({5'd0, dcc_sync} + 7'd1)) ?
-                       ({hds_sync - {5'd0, dcc_sync} - 7'd1, 3'b000}) : 11'd0;
 
 reg  [8:0]  step;
 wire [18:0] stretch_step_full = ({8'd0, src_w} << 8) / H_ACTIVE;
@@ -320,6 +324,21 @@ function [7:0] scanline_atten;
     end
 endfunction
 
+// Décalage horizontal de centrage par résolution, déterminé empiriquement
+// (remplace l'ancien calcul dérivé de hds_in/dcc_in). Indexé sur hdw_sync
+// (largeur active en unités de 8 pixels). À compléter/ajuster pour 512px
+// une fois l'image visible.
+reg [10:0] hds_skip;
+always @(*) begin
+    case (hdw_sync)
+        7'd32:   hds_skip = 11'd11;    // 256 px OK
+        7'd40:   hds_skip = 11'd23;   // 320 px OK
+        7'd44:   hds_skip = 11'd8;    // 352 px OK
+        7'd64:   hds_skip = 11'd0;    // 512 px - à ajuster
+        default: hds_skip = 11'd0;
+    endcase
+end
+
 // Fixed-point starting offset into the source line for the accumulator.
 wire [19:0] acc_start_full = (left_skip * step) + {hds_skip, 8'd0};
 wire [17:0] acc_start = acc_start_full[17:0];
@@ -357,12 +376,12 @@ always @(posedge clk_pix) begin
     dcc_sync   <= dcc_sync0;
     hdw_sync0  <= hdw_lat;
     hdw_sync   <= hdw_sync0;
-    hds_sync0  <= hds_lat;
-    hds_sync   <= hds_sync0;
     zoom_sync0 <= zoom_lat;
     zoom_sync  <= zoom_sync0;
     scan_sync0 <= scan_lat;
     scan_sync  <= scan_sync0;
+    wr_addr_max_sync0 <= wr_addr_max_lat;
+    wr_addr_max_sync  <= wr_addr_max_sync0;
 
     // ---- free running counters ------------------------------------------
     if (hcnt == H_TOTAL - 11'd1) begin
@@ -410,21 +429,26 @@ always @(posedge clk_pix) begin
     vga_hs <= hs_p[1];
     vga_vs <= vs_p[1];
 
-    if (deg_p[1]) begin
-        if (bilinear_p2) begin
-            vga_r <= scanline_atten({bilinear_r, bilinear_r, bilinear_r[2:1]}, scan_sync, half_p[1]);
-            vga_g <= scanline_atten({bilinear_g, bilinear_g, bilinear_g[2:1]}, scan_sync, half_p[1]);
-            vga_b <= scanline_atten({bilinear_b, bilinear_b, bilinear_b[2:1]}, scan_sync, half_p[1]);
-        end else begin
-            vga_r <= scanline_atten({lb_rdata[5:3], lb_rdata[5:3], lb_rdata[5:4]}, scan_sync, half_p[1]);
-            vga_g <= scanline_atten({lb_rdata[8:6], lb_rdata[8:6], lb_rdata[8:7]}, scan_sync, half_p[1]);
-            vga_b <= scanline_atten({lb_rdata[2:0], lb_rdata[2:0], lb_rdata[2:1]}, scan_sync, half_p[1]);
-        end
+    if (de_p[1]) begin
+        vga_r <= {lb_rdata[5:3], lb_rdata[5:3], lb_rdata[5:4]};
+        vga_g <= {lb_rdata[8:6], lb_rdata[8:6], lb_rdata[8:7]};
+        vga_b <= {lb_rdata[2:0], lb_rdata[2:0], lb_rdata[2:1]};
     end else begin
         vga_r <= 8'd0;
         vga_g <= 8'd0;
         vga_b <= 8'd0;
     end
+
+// ---- DEBUG: barre horizontale = nb de pixels réellement écrits/ligne ----
+// Longueur proportionnelle à wr_addr_max_sync (nb de pixels source écrits
+// dans le buffer pour la dernière ligne). Affichée sur vline==25 (dans la
+// zone active), en surimpression, indépendamment de deg_p/de_full.
+if (vline == 10'd25 && hcnt >= H_PRE &&
+    hcnt < H_PRE + {1'b0, wr_addr_max_sync}) begin
+    vga_r <= 8'hFF;
+    vga_g <= 8'hFF;
+    vga_b <= 8'hFF;
+end
 
     if (!pix_resetn) begin
         hcnt       <= 11'd0;
@@ -442,6 +466,8 @@ always @(posedge clk_pix) begin
         bilinear_p1 <= 1'b0;
         bilinear_p2 <= 1'b0;
         vga_de     <= 1'b0;
+        wr_addr_max_sync0 <= 10'd0;
+        wr_addr_max_sync  <= 10'd0;
     end
 end
 
