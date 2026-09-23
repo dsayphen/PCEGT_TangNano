@@ -5,7 +5,8 @@ library work;
 
 entity HUC6270 is
 	generic(
-		MAX_SPRITES : integer := 42
+		MAX_SPRITES : integer := 42;
+		SIM_FORCE_SPR_FETCH : boolean := false
 	);
 	port( 
 		CLK		: in std_logic;
@@ -498,7 +499,7 @@ begin
 		end if;
 	end process;
 	
-	process(DOT_CNT, FDOT_CNT, DOTS_REMAIN, TILE_ZERO, TILE_CNT, BURST, DMAS_EXEC, DMA_EXEC, BG_FETCH, SPR_FETCH, SPR_FETCH_EN, VM, CM, SM, SPR, BB, SP64)
+	process(DOT_CNT, FDOT_CNT, DOTS_REMAIN, TILE_ZERO, TILE_CNT, BURST, DMAS_EXEC, DMA_EXEC, BG_FETCH, SPR_FETCH, SPR_FETCH_EN, CPUWR_EXEC, CPURD_EXEC, VM, CM, SM, SPR, BB, SP64)
 	begin
 		if TILE_ZERO = '1' and DOT_CNT <= DOTS_REMAIN and SP64 = '0' then
 			--first several cycles in HSYNC are empty, i.e. without access the memory, N=dots%8
@@ -570,7 +571,9 @@ begin
 			end case;
 			end if; 
 		elsif SPR_FETCH = '1' then
-			if SPR_FETCH_EN = '0' then
+			if CPUWR_EXEC = '1' or CPURD_EXEC = '1' then
+				SLOT <= CPU;
+			elsif SPR_FETCH_EN = '0' then
 				--if there are no partially or fully sprites in the row for fetching, 
 				--then the cycles are replaced by CPU slots
 				--| 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
@@ -863,9 +866,13 @@ port map(
 					SPR_EVAL <= '0';
 				end if;
 				
-				if ((DOT_CNT = 7 and TILE_CNT = HDISP_END_POS) or (DOT_CNT = 7 and TILE_CNT = 0 and DISP_BREAK_LATCH = '1')) and DISP_CNT >= VDS_END_POS and DISP_CNT < VDISP_END_POS and SPR_FETCH = '0' then
+				if ((DOT_CNT = 7 and TILE_CNT = HDISP_END_POS) or (DOT_CNT = 7 and TILE_CNT = 0 and DISP_BREAK_LATCH = '1')) and (SIM_FORCE_SPR_FETCH or (DISP_CNT >= VDS_END_POS and DISP_CNT < VDISP_END_POS)) and SPR_FETCH = '0' then
 					SPR_FETCH <= '1';
-					SPR_FETCH_EN <= CR_SB and SPR_FIND;
+					if SIM_FORCE_SPR_FETCH then
+						SPR_FETCH_EN <= '1';
+					else
+						SPR_FETCH_EN <= CR_SB and SPR_FIND;
+					end if;
 					SPR_FETCH_CNT <= (others=>'0');
 					SPR_FETCH_W <= '0';
 					SPR_FETCH_DONE <= '0';
@@ -1056,8 +1063,8 @@ port map(
 							end if; 
 						end if;
 
-						if (SPR_TILE_PIX = 0 and SPR_TILE_LEFT = '1') or (SPR_TILE_PIX = 15 and SPR_TILE_RIGTH = '1') or 
-							SPR_TILE_TOP = '1' or SPR_TILE_BOTTOM = '1' then
+						if ((SPR_TILE_PIX = 0 and SPR_TILE_LEFT = '1') or (SPR_TILE_PIX = 15 and SPR_TILE_RIGTH = '1') or
+							SPR_TILE_TOP = '1' or SPR_TILE_BOTTOM = '1') and SPR_LINE_X <= SPR_TILE_FRAME'high then
 							SPR_TILE_FRAME(to_integer(SPR_LINE_X)) <= '1'; -- lot of registers, but will optimized out if not debugging
 						end if;
 
@@ -1077,8 +1084,10 @@ port map(
 					SPR_LINE_CLR <= '0';
 				end if;
 
-				if SPR_LINE_CLR = '1' then
+				if SPR_LINE_CLR = '1' and SPR_OUT_X <= SPR_TILE_FRAME'high then
 					SPR_TILE_FRAME(to_integer(SPR_OUT_X)) <= '0';
+					SPR_OUT_X <= SPR_OUT_X + 1;
+				elsif SPR_LINE_CLR = '1' then
 					SPR_OUT_X <= SPR_OUT_X + 1;
 				end if;
 			end if;
@@ -1179,7 +1188,7 @@ port map(
 						GRID_BG(7) <= '1';
 					end if; 
 					
-					if SPR_TILE_FRAME(to_integer(unsigned(BG_OUT_X))) = '1' then
+					if BG_OUT_X <= SPR_TILE_FRAME'high and SPR_TILE_FRAME(to_integer(BG_OUT_X)) = '1' then
 						GRID_SP(7) <= '1';
 					end if; 
 					
