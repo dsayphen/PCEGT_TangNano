@@ -220,6 +220,7 @@ reg [9:0] wr_addr_max_sync;
 
 wire line_ev  = line_sync[2]  ^ line_sync[1];
 wire frame_ev = frame_sync[2] ^ frame_sync[1];
+wire [6:0] hdw_norm = (hdw_sync == 7'd42) ? 7'd44 : hdw_sync; // 42 sera considéré comme 44 
 
 reg [10:0] hcnt;
 reg [9:0]  vline;      // core line counter, 0 at vsync
@@ -243,6 +244,8 @@ reg        bilinear_p2;
 // area, including Integer, is centered from the actual image width.
 reg [10:0] dcc_src_w;
 reg [10:0] src_w;
+wire [6:0] hdw_norm = (hdw_sync == 7'd42) ? 7'd44 : hdw_sync;   // 346px treated as 352px from the start
+
 always @(*) begin
     case (dcc_sync)
         2'b00:   dcc_src_w = 11'd270;
@@ -250,10 +253,10 @@ always @(*) begin
         default: dcc_src_w = 11'd540;
     endcase
 
-    if (hdw_sync == 7'd0)
+    if (hdw_norm == 7'd0)
         src_w = dcc_src_w;
     else
-        src_w = {hdw_sync, 3'b000};
+        src_w = {hdw_norm, 3'b000};
 end
 
 // Requested on-screen width for the current zoom mode: doubled (2x) or
@@ -333,12 +336,12 @@ endfunction
 // une fois l'image visible.
 reg [10:0] hds_skip;
 always @(*) begin
-    case (hdw_sync)
+    case (hdw_norm)
         7'd32:   hds_skip = 11'd11;    // 256 px OK
         7'd40:   hds_skip = 11'd23;   // 320 px OK
-        7'd44:   hds_skip = 11'd8;    // 352 px OK
-        7'd64:   hds_skip = 11'd23;    // 512 px - à ajuster
-        default: hds_skip = 11'd0;
+        7'd44:   hds_skip = 11'd8;    // 352 px OK (346px remappé ici)
+        7'd64:   hds_skip = 11'd22;   // 512 px - à ajuster
+        default: hds_skip = 11'd8;
     endcase
 end
 
