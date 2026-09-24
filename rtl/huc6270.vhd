@@ -191,6 +191,10 @@ architecture rtl of HUC6270 is
 	--rendering
 	type slot_t is ( CPU, BAT, CG0, CG1, SG0, SG1, SG2, SG3, NOP );
 	signal SLOT				: slot_t;
+	signal DCK_CE_D1 : std_logic := '0';
+	signal CAP_CE    : std_logic := '0';
+	signal SLOT_Q    : slot_t;
+	signal BG_X_SKIP : std_logic := '0';
 	signal DISP 			: std_logic_vector(7 downto 0);
 	signal BORD 			: std_logic_vector(7 downto 0);
 	signal GRID_BG 		: std_logic_vector(7 downto 0);
@@ -655,6 +659,17 @@ begin
 		end if; 
 	end process;
 	
+process(CLK)
+begin
+	if rising_edge(CLK) then
+		DCK_CE_D1 <= DCK_CE;
+		CAP_CE    <= DCK_CE_D1;      -- haut 2 CLK après le front DCK_CE
+		if DCK_CE = '1' then
+			SLOT_Q <= SLOT;           -- slot qui vient de se terminer
+		end if;
+	end if;
+end process;
+
 	--BG
 	process(CLK, RST_N, SLOT, BG_X, OFS_Y, OFS_X, SCREEN, BG_BAT_CC)
 	variable BG_OFS_X : unsigned(9 downto 0);
@@ -697,25 +712,26 @@ begin
 			BG_SR3 <= (others=>'0');
 			BG_SRC <= (others=>(others=>'0'));
 		elsif rising_edge(CLK) then
-			if DCK_CE = '1' then
-				case SLOT is
+
+			-- Capture différée : la SDRAM répond ~5 CLK après l'adresse
+			if CAP_CE = '1' then
+				case SLOT_Q is
 					when BAT =>
-						BG_BAT_CC <= RAM_DI(11 downto 0);
+						BG_BAT_CC  <= RAM_DI(11 downto 0);
 						BG_BAT_COL <= RAM_DI(15 downto 12);
 					when CG0 =>
 						BG_CH0 <= RAM_DI(7 downto 0);
 						BG_CH1 <= RAM_DI(15 downto 8);
-					when CG1 =>
 					when others => null;
 				end case;
-				
-				if SLOT = CG1 or (SLOT = CG0 and VM = "11") then
-					if SLOT = CG0 and VM = "11" then
+
+				if SLOT_Q = CG1 or (SLOT_Q = CG0 and VM = "11") then
+					if SLOT_Q = CG0 and VM = "11" then
 						BG_SR0 <= BG_SR0(7 downto 0) & RAM_DI(7 downto 0);
 						BG_SR1 <= BG_SR1(7 downto 0) & RAM_DI(15 downto 8);
 						BG_SR2 <= (others=>'0');
 						BG_SR3 <= (others=>'0');
-					elsif SLOT = CG1 and VM = "11" then
+					elsif SLOT_Q = CG1 and VM = "11" then
 						BG_SR0 <= (others=>'0');
 						BG_SR1 <= (others=>'0');
 						BG_SR2 <= BG_SR2(7 downto 0) & RAM_DI(7 downto 0);
@@ -725,17 +741,22 @@ begin
 						BG_SR1 <= BG_SR1(7 downto 0) & BG_CH1;
 						BG_SR2 <= BG_SR2(7 downto 0) & RAM_DI(7 downto 0);
 						BG_SR3 <= BG_SR3(7 downto 0) & RAM_DI(15 downto 8);
-					end if; 
-					BG_SRC(1) <= BG_SRC(0); 
+					end if;
+					BG_SRC(1) <= BG_SRC(0);
 					BG_SRC(0) <= BG_BAT_COL;
-					
-					BG_X <= BG_X + 8;
-				end if; 
-				
+					if BG_X_SKIP = '0' then
+						BG_X <= BG_X + 8;
+					end if;
+				end if;
+			end if;
+
+			if DCK_CE = '1' then
+				BG_X_SKIP <= '0';
 				if TILE_CNT = HDS_END_POS - 2 and DOT_CNT = 7 then
 					BG_X <= (others=>'0');
-				end if; 
-				
+					BG_X_SKIP <= '1';   -- annule le +8 différé du CG1 qui vient de finir
+				end if;
+
 				if TILE_CNT = HDS_END_POS - 3 and DOT_CNT = 7 and DISP_CNT = VDS_END_POS + 1 then
 					OFS_Y <= unsigned(BYR);
 				elsif TILE_CNT = HDS_END_POS - 3 and DOT_CNT = 7 then
@@ -745,12 +766,12 @@ begin
 						NEW_OFS_Y := OFS_Y;
 					end if;
 					OFS_Y <= NEW_OFS_Y + 1;
-				end if; 
-				
+				end if;
+
 				if TILE_CNT = HDS_END_POS - 3 and DOT_CNT = 7 then
 					OFS_X <= unsigned(BXR);
-				end if; 
-			end if; 
+				end if;
+			end if;
 		end if;
 	end process;
 	
