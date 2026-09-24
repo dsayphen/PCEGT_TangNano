@@ -163,9 +163,9 @@ assign SDRAM2_nWE = 1;
 `include "build_id.v"
 
 `ifdef USE_INTERNAL_VRAM
-localparam MAX_SPRITES = 42;
+localparam MAX_SPRITES = 128;
 `else
-localparam MAX_SPRITES = 16;
+localparam MAX_SPRITES = 64;
 `endif
 
 localparam LITE = 0;

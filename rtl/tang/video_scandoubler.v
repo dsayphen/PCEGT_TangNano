@@ -336,8 +336,9 @@ always @(*) begin
     case (hdw_sync)
         7'd32:   hds_skip = 11'd11;    // 256 px OK
         7'd40:   hds_skip = 11'd23;   // 320 px OK
+        7'd42:   hds_skip = 11'd16;    // 336 px OK
         7'd44:   hds_skip = 11'd8;    // 352 px OK
-        7'd64:   hds_skip = 11'd23;    // 512 px - à ajuster
+        7'd64:   hds_skip = 11'd23;    // 512 px OK
         default: hds_skip = 11'd0;
     endcase
 end

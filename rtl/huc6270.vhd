@@ -5,7 +5,7 @@ library work;
 
 entity HUC6270 is
 	generic(
-		MAX_SPRITES : integer := 42
+		MAX_SPRITES : integer := 64
 	);
 	port( 
 		CLK		: in std_logic;
