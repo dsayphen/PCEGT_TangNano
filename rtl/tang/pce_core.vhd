@@ -105,7 +105,7 @@ begin
 		PSG_O_WIDTH      => 20,
 		MAX_SPRITES      => 128,
 		USE_INTERNAL_RAM => 1,
-		CD_SUPPORT       => 0,
+		CD_SUPPORT       => 1,
 		AC_SUPPORT       => 0
 	)
 	port map (
@@ -149,7 +149,7 @@ begin
 		JOY_OUT     => joy_out,
 		JOY_IN      => joy_in,
 
-		CD_EN       => '0',
+		CD_EN       => '1',
 		EXT_RAM_A   => open,
 		EXT_RAM_DO  => open,
 		EXT_RAM_DI  => ff_byte,

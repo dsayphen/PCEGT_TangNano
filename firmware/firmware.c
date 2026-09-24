@@ -715,9 +715,71 @@ static int is_rom(const char *name) {
            strcasecmp(name + n - 4, ".sgx") == 0;
 }
 
+static int is_cue(const char *name) {
+    int n = (int)strlen(name);
+    if (n < 5)
+        return 0;
+    return strcasecmp(name + n - 4, ".cue") == 0;
+}
+
+static int is_cd_dir(const char *name) {
+    int n = (int)strlen(name);
+    if (n < 4)
+        return 0;
+    return strcasecmp(name + n - 4, "(CD)") == 0 ||
+           (n >= 5 && strcasecmp(name + n - 5, " (CD)") == 0);
+}
+
 static int is_sgx(const char *name) {
     int n = (int)strlen(name);
     return n >= 5 && strcasecmp(name + n - 4, ".sgx") == 0;
+}
+
+static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_len) {
+    FIL f;
+    char line[256];
+    char *p;
+    int found = 0;
+
+    if (f_open(&f, cue_path, FA_READ) != FR_OK)
+        return -1;
+
+    bin_path[0] = '\0';
+
+    while (f_gets(line, sizeof(line), &f)) {
+        p = line;
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+            p++;
+
+        if (strncasecmp(p, "FILE", 4) != 0)
+            continue;
+
+        p += 4;
+        while (*p == ' ' || *p == '\t')
+            p++;
+
+        if (*p != '"')
+            continue;
+        p++;
+
+        char *q = p;
+        while (*q && *q != '"')
+            q++;
+        if (*q != '"')
+            continue;
+        *q = '\0';
+
+        if (strnlen(p, bin_len) >= bin_len)
+            continue;
+
+        strncpy(bin_path, p, bin_len - 1);
+        bin_path[bin_len - 1] = '\0';
+        found = 1;
+        break;
+    }
+
+    f_close(&f);
+    return found ? 0 : -1;
 }
 
 // Directories to never show in the browser, regardless of their
@@ -767,7 +829,7 @@ static int load_dir(const char *dir, int start, int len, int *count) {
             continue;
         if ((fno.fattrib & AM_DIR) && is_hidden_dir(fno.fname))
             continue;
-        if (!(fno.fattrib & AM_DIR) && !is_rom(fno.fname))
+        if (!(fno.fattrib & AM_DIR) && !is_rom(fno.fname) && !is_cue(fno.fname))
             continue;
 
         if (idx >= start && page_len < len) {
@@ -797,30 +859,62 @@ static int load_rom(const char *fname, uint32_t size) {
     UINT br;
     uint32_t total = 0;
     int last_pct = -1;
+    int is_cue_image = 0;
 
-    if (size < ROM_MIN_SIZE) {
-        message("File is too small", "not a HuCard image");
-        return -1;
-    }
-    if (size > ROM_MAX_SIZE) {
-        message("File is too large", "4 MiB maximum");
-        return -1;
-    }
+    char cue_path[PWD_SIZE + NAME_MAX + 2];
+    char bin_path[PWD_SIZE + NAME_MAX + 2];
 
-    strncpy(path_buf, pwd, sizeof(path_buf));
-    if (path_buf[1] != '\0')
-        strncat(path_buf, "/", sizeof(path_buf));
-    strncat(path_buf, fname, sizeof(path_buf));
+    if (is_cue(fname)) {
+        strncpy(cue_path, pwd, sizeof(cue_path));
+        if (cue_path[1] != '\0')
+            strncat(cue_path, "/", sizeof(cue_path));
+        strncat(cue_path, fname, sizeof(cue_path));
 
-    if (f_open(&f, path_buf, FA_READ) != FR_OK) {
-        message("Cannot open", fname);
-        return -1;
+        if (parse_cue_bin_path(cue_path, bin_path, sizeof(bin_path)) != 0) {
+            message("No BIN inside CUE", fname);
+            return -1;
+        }
+
+        strncpy(path_buf, pwd, sizeof(path_buf));
+        if (path_buf[1] != '\0')
+            strncat(path_buf, "/", sizeof(path_buf));
+        strncat(path_buf, bin_path, sizeof(path_buf));
+
+        if (f_open(&f, path_buf, FA_READ) != FR_OK) {
+            message("Cannot open BIN from CUE", bin_path);
+            return -1;
+        }
+        if ((size = (uint32_t)f_size(&f)) == 0) {
+            f_close(&f);
+            message("Empty BIN image", bin_path);
+            return -1;
+        }
+        is_cue_image = 1;
+    } else {
+        if (size < ROM_MIN_SIZE) {
+            message("File is too small", "not a HuCard image");
+            return -1;
+        }
+        if (size > ROM_MAX_SIZE) {
+            message("File is too large", "4 MiB maximum");
+            return -1;
+        }
+
+        strncpy(path_buf, pwd, sizeof(path_buf));
+        if (path_buf[1] != '\0')
+            strncat(path_buf, "/", sizeof(path_buf));
+        strncat(path_buf, fname, sizeof(path_buf));
+
+        if (f_open(&f, path_buf, FA_READ) != FR_OK) {
+            message("Cannot open", fname);
+            return -1;
+        }
     }
 
     uart_printf("loading %s, %d bytes\n", path_buf, (int)size);
 
     // holds the PC Engine in reset and publishes the image description
-    pce_load_start(size, is_sgx(fname));
+    pce_load_start(size, is_sgx(fname) || is_cue_image);
 
     while (total < size) {
         UINT want = (UINT)((size - total) > sizeof(io_buf) ? sizeof(io_buf)
@@ -840,7 +934,7 @@ static int load_rom(const char *fname, uint32_t size) {
         for (UINT i = 0; i < br; i += 4)
             pce_load_word(*w++);
 
-        total += br; 
+        total += br;
 
         int pct = (int)((total >> 8) * 100 / (size >> 8));
         if (pct != last_pct) {
@@ -910,7 +1004,7 @@ static void draw_page(int page, int total, int active) {
     clear_line(ROW_STATUS);
     cursor(1, ROW_STATUS);
     if (total == 0)
-        print("No .PCE/.SGX files here");
+        print("No .PCE/.SGX/.CUE files here");
     else
         printf("Page %d/%d  A=open B=back", page + 1, pages);
 }
