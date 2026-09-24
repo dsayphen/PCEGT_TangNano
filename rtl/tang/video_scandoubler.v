@@ -260,10 +260,13 @@ end
 // stretched to fill the 640 pixel wide output.  Clipped to the output width
 // so an oversized 2x picture is centered and cropped instead of overflowing
 // into the sync/porch area (see left_skip below).
+
+wire x1_mode = (src_w >= 11'd512);
+
 reg [10:0] want_w;
 always @(*) begin
     case (zoom_sync)
-        2'b00:   want_w = src_w << 1;                     // 2x - integer double
+        2'b00: want_w = x1_mode ? src_w : (src_w << 1);                     // 2x - integer double
         default: want_w = (src_w == 11'd540) ? 11'd540 : H_ACTIVE;
     endcase
 end
@@ -281,7 +284,7 @@ reg  [8:0]  step;
 wire [18:0] stretch_step_full = ({8'd0, src_w} << 8) / H_ACTIVE;
 always @(*) begin
     case (zoom_sync)
-        2'b00:   step = 9'd128;   // 2x: one source dot per two output pixels
+        2'b00: step = x1_mode ? 9'd256 : 9'd128;   // 2x: one source dot per two output pixels
         default: step = stretch_step_full[8:0];
     endcase
 end
@@ -334,7 +337,7 @@ always @(*) begin
         7'd32:   hds_skip = 11'd11;    // 256 px OK
         7'd40:   hds_skip = 11'd23;   // 320 px OK
         7'd44:   hds_skip = 11'd8;    // 352 px OK
-        7'd64:   hds_skip = 11'd0;    // 512 px - à ajuster
+        7'd64:   hds_skip = 11'd23;    // 512 px - à ajuster
         default: hds_skip = 11'd0;
     endcase
 end
@@ -429,26 +432,21 @@ always @(posedge clk_pix) begin
     vga_hs <= hs_p[1];
     vga_vs <= vs_p[1];
 
-    if (de_p[1]) begin
-        vga_r <= {lb_rdata[5:3], lb_rdata[5:3], lb_rdata[5:4]};
-        vga_g <= {lb_rdata[8:6], lb_rdata[8:6], lb_rdata[8:7]};
-        vga_b <= {lb_rdata[2:0], lb_rdata[2:0], lb_rdata[2:1]};
+    if (deg_p[1]) begin
+        if (bilinear_p2) begin
+            vga_r <= scanline_atten({bilinear_r, bilinear_r, bilinear_r[2:1]}, scan_sync, half_p[1]);
+            vga_g <= scanline_atten({bilinear_g, bilinear_g, bilinear_g[2:1]}, scan_sync, half_p[1]);
+            vga_b <= scanline_atten({bilinear_b, bilinear_b, bilinear_b[2:1]}, scan_sync, half_p[1]);
+        end else begin
+            vga_r <= scanline_atten({lb_rdata[5:3], lb_rdata[5:3], lb_rdata[5:4]}, scan_sync, half_p[1]);
+            vga_g <= scanline_atten({lb_rdata[8:6], lb_rdata[8:6], lb_rdata[8:7]}, scan_sync, half_p[1]);
+            vga_b <= scanline_atten({lb_rdata[2:0], lb_rdata[2:0], lb_rdata[2:1]}, scan_sync, half_p[1]);
+        end
     end else begin
         vga_r <= 8'd0;
         vga_g <= 8'd0;
         vga_b <= 8'd0;
     end
-
-// ---- DEBUG: barre horizontale = nb de pixels réellement écrits/ligne ----
-// Longueur proportionnelle à wr_addr_max_sync (nb de pixels source écrits
-// dans le buffer pour la dernière ligne). Affichée sur vline==25 (dans la
-// zone active), en surimpression, indépendamment de deg_p/de_full.
-if (vline == 10'd25 && hcnt >= H_PRE &&
-    hcnt < H_PRE + {1'b0, wr_addr_max_sync}) begin
-    vga_r <= 8'hFF;
-    vga_g <= 8'hFF;
-    vga_b <= 8'hFF;
-end
 
     if (!pix_resetn) begin
         hcnt       <= 11'd0;
