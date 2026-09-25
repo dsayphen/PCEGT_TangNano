@@ -67,6 +67,7 @@ entity pce_top is
 		EXT_RAM_CE  : out std_logic;
 		EXT_RAM_RD  : out std_logic;
 		EXT_RAM_WR  : out std_logic;
+		EXT_RAM_RDY : in  std_logic := '1';
 		AC_EN       : in  std_logic;
 
 		-- ADPCM DRAM
@@ -124,7 +125,9 @@ entity pce_top is
 		-- VDC0 active display width in 8-pixel characters, for debug/diagnosis only
 		VIDEO_HDW_DBG : out std_logic_vector(6 downto 0);
 		VIDEO_HDS_DBG : out std_logic_vector(6 downto 0);
-		CD_PHASE_DBG  : out std_logic_vector(7 downto 0)
+		CD_PHASE_DBG  : out std_logic_vector(7 downto 0);
+		CDDA_USEDW_DBG : out std_logic_vector(11 downto 0);
+		ADPCM_DBG : out std_logic_vector(7 downto 0)
 	);
 end pce_top;
 
@@ -371,7 +374,7 @@ generic map (
 port map(
 	CLK 		=> CLK,
 	RST_N		=> RESET_N,
-	WAIT_N	=> ROM_RDY and not CPU_PAUSE_EN,
+	WAIT_N	=> ROM_RDY and EXT_RAM_RDY and not CPU_PAUSE_EN,
 
 	IRQ1_N	=> VDC0_IRQ_N and VDC1_IRQ_N,
 	IRQ2_N	=> CD_IRQ_N,
@@ -777,7 +780,9 @@ port map(
 	CD_SR			=> CDDA_SR,
 	AD_S			=> ADPCM_S,
 
-	PHASE_DBG	=> CD_PHASE_DBG
+	PHASE_DBG	=> CD_PHASE_DBG,
+	CDDA_USEDW_DBG => CDDA_USEDW_DBG,
+	ADPCM_DBG => ADPCM_DBG
 );
 
 end generate;
@@ -810,6 +815,8 @@ generate_NOCD: if (CD_SUPPORT = 0) generate begin
 	CDDA_SR <= (others => '0');
 	ADPCM_S <= (others => '0');
 	CD_PHASE_DBG <= (others => '0');
+	CDDA_USEDW_DBG <= (others => '0');
+	ADPCM_DBG <= (others => '0');
 
 end generate;
 --CD_RAM_CS_N <= '1';

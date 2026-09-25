@@ -62,6 +62,16 @@ module pce_sdram_ctrl_3ch #(
     input  wire [3:0]  rv_wstrb,
     output reg  [31:0] rv_rdata,
 
+    // CD-ROM^2 backup/scratch RAM (256 KiB), shares the PicoRV32 channel
+    // above since neither device needs the bus continuously; firmware wins
+    // any collision, the PCE CPU's own wait-state gating just stalls longer.
+    input  wire        cdram_rd,
+    input  wire        cdram_wr,
+    input  wire [17:0] cdram_addr,
+    input  wire [7:0]  cdram_din,
+    output reg  [7:0]  cdram_dout,
+    output wire        cdram_rdy,
+
     output reg         init_done
 );
 
@@ -209,6 +219,57 @@ end
 // -------------------------------------------------------------------------
 // PicoRV32: one native 32-bit SDRAM transaction per bus request.
 // -------------------------------------------------------------------------
+localparam [22:0] CDRAM_BASE = 23'h60_0000;  // otherwise-unused part of bank 3
+
+reg         cdram_pending;
+reg  [17:0] cdram_addr_r;
+reg         cdram_we_r;
+reg         cdram_rd_d, cdram_wr_d;
+wire        cdram_complete;
+wire [3:0]  cdram_complete_ds;
+wire [31:0] cdram_complete_dout;
+
+assign cdram_rdy = ~cdram_pending;
+
+// New read: trigger on an address change (mirrors the ROM channel, since the
+// PCE CPU can hold the same read cycle for several clocks). New write:
+// trigger on the write-strobe's rising edge, since every write must land.
+// Cleared once the RV state machine below reports the SDRAM round trip done.
+always @(posedge clk) begin
+    if (!resetn) begin
+        cdram_pending <= 1'b0;
+        cdram_addr_r  <= 18'd0;
+        cdram_we_r    <= 1'b0;
+        cdram_rd_d    <= 1'b0;
+        cdram_wr_d    <= 1'b0;
+        cdram_dout    <= 8'hff;
+    end else begin
+        cdram_rd_d <= cdram_rd;
+        cdram_wr_d <= cdram_wr;
+
+        if (cdram_complete) begin
+            cdram_pending <= 1'b0;
+            if (!cdram_we_r)
+                case (cdram_complete_ds)
+                    4'b0001: cdram_dout <= cdram_complete_dout[7:0];
+                    4'b0010: cdram_dout <= cdram_complete_dout[15:8];
+                    4'b0100: cdram_dout <= cdram_complete_dout[23:16];
+                    default: cdram_dout <= cdram_complete_dout[31:24];
+                endcase
+        end else if (!cdram_pending) begin
+            if (cdram_wr && !cdram_wr_d) begin
+                cdram_pending <= 1'b1;
+                cdram_addr_r  <= cdram_addr;
+                cdram_we_r    <= 1'b1;
+            end else if (cdram_rd && (!cdram_rd_d || cdram_addr != cdram_addr_r)) begin
+                cdram_pending <= 1'b1;
+                cdram_addr_r  <= cdram_addr;
+                cdram_we_r    <= 1'b0;
+            end
+        end
+    end
+end
+
 reg         rv_mem_req;
 wire        rv_mem_ack;
 reg  [22:0] rv_mem_addr;
@@ -218,6 +279,12 @@ reg         rv_mem_we;
 wire [31:0] rv_mem_dout;
 reg  [1:0]  rv_mem_ack_sync;
 reg  [1:0]  rv_state;
+reg         rv_source_cd;  // latches which requester owns the in-flight transfer
+
+assign cdram_complete = rv_source_cd && (rv_state == RV_WAIT) &&
+                        (rv_mem_ack_sync[1] == rv_mem_req);
+assign cdram_complete_ds   = rv_mem_ds;
+assign cdram_complete_dout = rv_mem_dout;
 
 localparam RV_IDLE  = 2'd0;
 localparam RV_WAIT  = 2'd1;
@@ -234,24 +301,39 @@ always @(posedge clk) begin
         rv_rdata        <= 32'd0;
         rv_ready        <= 1'b0;
         rv_state        <= RV_IDLE;
+        rv_source_cd    <= 1'b0;
     end else begin
         rv_mem_ack_sync <= {rv_mem_ack_sync[0], rv_mem_ack};
         rv_ready <= 1'b0;
 
         case (rv_state)
             RV_IDLE: if (init_done && rv_valid) begin
-                rv_mem_addr <= {rv_addr[22:2], 2'b00};
-                rv_mem_din  <= rv_wdata;
-                rv_mem_ds   <= rv_wstrb;
-                rv_mem_we   <= |rv_wstrb;
-                rv_mem_req  <= ~rv_mem_req;
-                rv_state    <= RV_WAIT;
+                rv_mem_addr  <= {rv_addr[22:2], 2'b00};
+                rv_mem_din   <= rv_wdata;
+                rv_mem_ds    <= rv_wstrb;
+                rv_mem_we    <= |rv_wstrb;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_cd <= 1'b0;
+            end else if (init_done && cdram_pending) begin
+                rv_mem_addr  <= CDRAM_BASE + {5'd0, cdram_addr_r};
+                rv_mem_din   <= {4{cdram_din}};
+                rv_mem_ds    <= 4'b0001 << cdram_addr_r[1:0];
+                rv_mem_we    <= cdram_we_r;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_cd <= 1'b1;
             end
 
             RV_WAIT: if (rv_mem_ack_sync[1] == rv_mem_req) begin
-                if (!rv_mem_we)
-                    rv_rdata <= rv_mem_dout;
-                rv_ready <= 1'b1;
+                if (rv_source_cd) begin
+                    // cdram_pending/cdram_dout are cleared/latched by the
+                    // combinational cdram_complete pulse above.
+                end else begin
+                    if (!rv_mem_we)
+                        rv_rdata <= rv_mem_dout;
+                    rv_ready <= 1'b1;
+                end
                 rv_state <= RV_REPLY;
             end
 

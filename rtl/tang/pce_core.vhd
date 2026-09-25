@@ -90,7 +90,18 @@ entity pce_core is
 		cd_data_end   : out std_logic;
 		cd_dm         : in  std_logic;
 		cd_fifo_halffull : out std_logic;
-		cd_phase_dbg     : out std_logic_vector(7 downto 0)
+		cd_phase_dbg     : out std_logic_vector(7 downto 0);
+		cdda_usedw_dbg   : out std_logic_vector(11 downto 0);
+		adpcm_dbg        : out std_logic_vector(7 downto 0);
+
+		-- CD-ROM^2 backup/scratch RAM (256 KiB), external SDRAM
+		ext_ram_a    : out std_logic_vector(21 downto 0);
+		ext_ram_do   : out std_logic_vector(7 downto 0);
+		ext_ram_di   : in  std_logic_vector(7 downto 0);
+		ext_ram_ce   : out std_logic;
+		ext_ram_rd   : out std_logic;
+		ext_ram_wr   : out std_logic;
+		ext_ram_rdy  : in  std_logic
 	);
 end pce_core;
 
@@ -102,6 +113,11 @@ architecture rtl of pce_core is
 	signal ff_byte   : std_logic_vector(7 downto 0) := x"FF";
 	signal zero_byte : std_logic_vector(7 downto 0) := x"00";
 	signal zero_nib  : std_logic_vector(3 downto 0) := x"0";
+
+	signal brm_a_i  : std_logic_vector(10 downto 0);
+	signal brm_di_i : std_logic_vector(7 downto 0);
+	signal brm_do_i : std_logic_vector(7 downto 0);
+	signal brm_we_i : std_logic;
 
 	signal psg_l : signed(19 downto 0);
 	signal psg_r : signed(19 downto 0);
@@ -138,10 +154,10 @@ begin
 		ROM_POP     => '0',
 		ROM_CLKEN   => open,
 
-		BRM_A       => open,
-		BRM_DI      => open,
-		BRM_DO      => ff_byte,
-		BRM_WE      => open,
+		BRM_A       => brm_a_i,
+		BRM_DI      => brm_di_i,
+		BRM_DO      => brm_do_i,
+		BRM_WE      => brm_we_i,
 
 		VRAM0_A     => vram0_a,
 		VRAM0_DO    => vram0_do,
@@ -167,12 +183,13 @@ begin
 		JOY_IN      => joy_in,
 
 		CD_EN       => cd_enable,
-		EXT_RAM_A   => open,
-		EXT_RAM_DO  => open,
-		EXT_RAM_DI  => ff_byte,
-		EXT_RAM_CE  => open,
-		EXT_RAM_RD  => open,
-		EXT_RAM_WR  => open,
+		EXT_RAM_A   => ext_ram_a,
+		EXT_RAM_DO  => ext_ram_do,
+		EXT_RAM_DI  => ext_ram_di,
+		EXT_RAM_CE  => ext_ram_ce,
+		EXT_RAM_RD  => ext_ram_rd,
+		EXT_RAM_WR  => ext_ram_wr,
+		EXT_RAM_RDY => ext_ram_rdy,
 		AC_EN       => '0',
 
 		ADRAM_A     => open,
@@ -227,10 +244,27 @@ begin
 		VIDEO_VBL   => vid_vbl,
 		VIDEO_HDW_DBG => vid_hdw_dbg,
 		VIDEO_HDS_DBG => vid_hds_dbg,
-		CD_PHASE_DBG  => cd_phase_dbg
+		CD_PHASE_DBG  => cd_phase_dbg,
+		CDDA_USEDW_DBG => cdda_usedw_dbg,
+		ADPCM_DBG => adpcm_dbg
 	);
 
 	aud_l <= std_logic_vector(psg_l);
 	aud_r <= std_logic_vector(psg_r);
+
+	-- 2 KiB battery-backed save RAM used by CD-ROM^2 games; a real block RAM
+	-- (not a hardwired constant) so BIOS/game write-then-verify checks succeed
+	BRM_RAM : entity work.dpram
+	generic map (
+		addr_width => 11,
+		data_width => 8
+	)
+	port map (
+		clock     => clk,
+		address_a => brm_a_i,
+		data_a    => brm_di_i,
+		wren_a    => brm_we_i,
+		q_a       => brm_do_i
+	);
 
 end rtl;
