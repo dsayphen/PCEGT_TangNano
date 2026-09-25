@@ -318,6 +318,7 @@ reg  [31:0] time_reg;
 reg  [7:0]  cd_events;
 reg  [95:0] cd_comm_reg;
 reg  [79:0] cd_dout_reg;
+reg         cd_start_pending;
 
 // ROM streaming state, declared here because mem_ready depends on it
 reg  [31:0] rl_buf;
@@ -596,11 +597,7 @@ always @(posedge clk) begin
         end
         if (mem_wdata[4]) begin
             loading      <= 1'b0;
-            image_valid  <= 1'b1;
-            cd_mode      <= 1'b1;
-            rom_sz       <= 8'd0;
-            rom_offset   <= 23'd0;
-            sgx_mode     <= 1'b0;
+            cd_start_pending <= 1'b1;
         end
     end
 
@@ -625,6 +622,10 @@ always @(posedge clk) begin
             rom_sz       <= rl_size[23:16];
             rom_offset   <= (rl_size[9:0] == 10'h200) ? 23'd512 : 23'd0;
             image_valid  <= rl_size_ok;
+            if (cd_start_pending) begin
+                cd_mode          <= 1'b1;
+                cd_start_pending <= 1'b0;
+            end
         end
     end
 
@@ -663,6 +664,7 @@ always @(posedge clk) begin
         cd_events    <= 8'd0;
         cd_comm_reg  <= 96'd0;
         cd_dout_reg  <= 80'd0;
+        cd_start_pending <= 1'b0;
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;
