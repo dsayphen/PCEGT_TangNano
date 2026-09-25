@@ -60,7 +60,9 @@ entity cd is
 		CD_SR			: out signed(CDDA_O_WIDTH-1 downto 0);
 		AD_S			: out signed(15 downto 0);
 
-		PHASE_DBG	: out std_logic_vector(7 downto 0)
+		PHASE_DBG	: out std_logic_vector(7 downto 0);
+		CDDA_USEDW_DBG : out std_logic_vector(11 downto 0);
+		ADPCM_DBG : out std_logic_vector(7 downto 0)
 	);
 end cd;
 
@@ -675,6 +677,8 @@ begin
 	end process;
 
 	CD_FIFO_HALFFULL <= FIFO_USEDW(11);
+	CDDA_USEDW_DBG <= FIFO_USEDW;
+	ADPCM_DBG <= ADPCM_PLAY & ADPCM_END_EN & ADPCM_HALF_EN & ADPCM_DMA_EN & ADPCM_CTRL(3 downto 0);
 
 	FIFO : entity work.CDDA_FIFO 
 	port map(

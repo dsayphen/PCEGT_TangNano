@@ -124,6 +124,8 @@ module iosys #(
     output reg         cd_dm,
     output reg         cd_ack,
     input  wire [7:0]  cd_phase_dbg,
+    input  wire [11:0] cdda_usedw_dbg,
+    input  wire [7:0]  adpcm_dbg,
 
     // ---- read-only debug: VCE dot clock select (VIDEO_DCC), see huc6260;
     // piggybacked onto reg_core_id's unused bits 17:16, no new address decode
@@ -309,6 +311,8 @@ wire cd_data2_sel  = mem_valid && (mem_addr == 32'h0200_008c);
 wire cd_feed_sel   = mem_valid && (mem_addr == 32'h0200_0090);
 wire cd_ack_sel    = mem_valid && (mem_addr == 32'h0200_0094);
 wire cd_phase_sel  = mem_valid && (mem_addr == 32'h0200_0098);
+wire cd_usedw_sel  = mem_valid && (mem_addr == 32'h0200_009c);
+wire cd_adpcm_sel  = mem_valid && (mem_addr == 32'h0200_00a0);
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -360,6 +364,8 @@ assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    cd_event_sel || cd_stat_sel || cd_cmd0_sel || cd_cmd1_sel || cd_cmd2_sel ||
                    cd_data0_sel || cd_data1_sel || cd_data2_sel || cd_feed_sel || cd_ack_sel ||
                    cd_phase_sel ||
+                   cd_usedw_sel ||
+                   cd_adpcm_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -383,6 +389,8 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    cd_data1_sel ? cd_dout_reg[63:32] :
                    cd_data2_sel ? {16'b0, cd_dout_reg[79:64]} :
                    cd_phase_sel ? {24'b0, cd_phase_dbg} :
+                   cd_usedw_sel ? {20'b0, cdda_usedw_dbg} :
+                   cd_adpcm_sel ? {24'b0, adpcm_dbg} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;
 

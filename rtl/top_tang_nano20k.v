@@ -215,6 +215,15 @@ wire        cd_data_end;
 wire        cd_dm;
 wire        cd_fifo_halffull;
 wire [7:0]  cd_phase_dbg;
+wire [11:0] cdda_usedw_dbg;
+wire [7:0]  adpcm_dbg;
+wire [21:0] ext_ram_a;
+wire [7:0]  ext_ram_do;
+wire [7:0]  ext_ram_di;
+wire        ext_ram_ce;
+wire        ext_ram_rd;
+wire        ext_ram_wr;
+wire        ext_ram_rdy;
 
 wire        osd_on;
 wire [23:0] osd_rgb;
@@ -293,6 +302,8 @@ iosys #(
     .vid_hdw_dbg      (vid_hdw_dbg),
     .vid_hds_dbg      (vid_hds_dbg),
     .cd_phase_dbg     (cd_phase_dbg),
+    .cdda_usedw_dbg   (cdda_usedw_dbg),
+    .adpcm_dbg        (adpcm_dbg),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -456,6 +467,13 @@ pce_sdram_ctrl_3ch #(
     .rv_wstrb      (rv_wstrb),
     .rv_rdata      (rv_rdata),
 
+    .cdram_rd      (ext_ram_rd),
+    .cdram_wr      (ext_ram_wr),
+    .cdram_addr    (ext_ram_a[17:0]),
+    .cdram_din     (ext_ram_do),
+    .cdram_dout    (ext_ram_di),
+    .cdram_rdy     (ext_ram_rdy),
+
     .init_done     (sdram_init_done)
 );
 
@@ -573,6 +591,15 @@ pce_core #(
     ,.cd_dm         (cd_dm)
     ,.cd_fifo_halffull (cd_fifo_halffull)
     ,.cd_phase_dbg  (cd_phase_dbg)
+    ,.cdda_usedw_dbg (cdda_usedw_dbg)
+    ,.adpcm_dbg (adpcm_dbg)
+    ,.ext_ram_a   (ext_ram_a)
+    ,.ext_ram_do  (ext_ram_do)
+    ,.ext_ram_di  (ext_ram_di)
+    ,.ext_ram_ce  (ext_ram_ce)
+    ,.ext_ram_rd  (ext_ram_rd)
+    ,.ext_ram_wr  (ext_ram_wr)
+    ,.ext_ram_rdy (ext_ram_rdy)
 );
 
 // ===========================================================================
