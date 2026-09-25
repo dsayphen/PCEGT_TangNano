@@ -229,42 +229,101 @@ wire        cdram_complete;
 wire [3:0]  cdram_complete_ds;
 wire [31:0] cdram_complete_dout;
 
+// Real CD-ROM^2 scratch RAM is plain SRAM: games poke it as fast working
+// memory, not the occasional bulk transfer the "rv" SDRAM round trip was
+// sized for. Cache the last fetched 4-byte-aligned word so repeated/nearby
+// reads (the common access pattern) are answered in the same cycle instead
+// of paying the full arbitrated SDRAM latency every time - without this the
+// CPU falls behind real time and its own vblank-timed VRAM writes spill into
+// the active display, seen as continuous snow that only clears when the CPU
+// is halted (pause) and stops generating new traffic.
+// Real CD-ROM^2 scratch RAM is plain SRAM: games poke it as fast working
+// memory, not the occasional bulk transfer the "rv" SDRAM round trip was
+// sized for. Cache the last few fetched 4-byte-aligned words (4-way, so a
+// handful of distinct hot structures can stay resident at once) so
+// repeated/nearby reads - the common access pattern - are answered in the
+// same cycle instead of paying the full arbitrated SDRAM latency every time.
+// Without this the CPU falls behind real time and its own vblank-timed VRAM
+// writes spill into the active display, seen as snow that tracks how much
+// the game is actually doing (worst during busy/active moments, clean when
+// idle/paused).
+localparam CDRAM_WAYS = 4;
+reg         cdram_cache_valid [0:CDRAM_WAYS-1];
+reg  [15:0] cdram_cache_tag   [0:CDRAM_WAYS-1];
+reg  [31:0] cdram_cache_data  [0:CDRAM_WAYS-1];
+reg  [1:0]  cdram_cache_next;   // round-robin fill pointer
+wire [1:0]  cdram_cache_hit_way =
+    (cdram_cache_valid[0] && cdram_cache_tag[0] == cdram_addr[17:2]) ? 2'd0 :
+    (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr[17:2]) ? 2'd1 :
+    (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr[17:2]) ? 2'd2 : 2'd3;
+wire        cdram_cache_hit =
+    (cdram_cache_valid[0] && cdram_cache_tag[0] == cdram_addr[17:2]) ||
+    (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr[17:2]) ||
+    (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr[17:2]) ||
+    (cdram_cache_valid[3] && cdram_cache_tag[3] == cdram_addr[17:2]);
+
 assign cdram_rdy = ~cdram_pending;
 
 // New read: trigger on an address change (mirrors the ROM channel, since the
 // PCE CPU can hold the same read cycle for several clocks). New write:
 // trigger on the write-strobe's rising edge, since every write must land.
 // Cleared once the RV state machine below reports the SDRAM round trip done.
+integer w;
 always @(posedge clk) begin
     if (!resetn) begin
-        cdram_pending <= 1'b0;
-        cdram_addr_r  <= 18'd0;
-        cdram_we_r    <= 1'b0;
-        cdram_rd_d    <= 1'b0;
-        cdram_wr_d    <= 1'b0;
-        cdram_dout    <= 8'hff;
+        cdram_pending     <= 1'b0;
+        cdram_addr_r      <= 18'd0;
+        cdram_we_r        <= 1'b0;
+        cdram_rd_d        <= 1'b0;
+        cdram_wr_d        <= 1'b0;
+        cdram_dout        <= 8'hff;
+        cdram_cache_next  <= 2'd0;
+        for (w = 0; w < CDRAM_WAYS; w = w + 1) begin
+            cdram_cache_valid[w] <= 1'b0;
+            cdram_cache_tag[w]   <= 16'd0;
+            cdram_cache_data[w]  <= 32'd0;
+        end
     end else begin
         cdram_rd_d <= cdram_rd;
         cdram_wr_d <= cdram_wr;
 
         if (cdram_complete) begin
             cdram_pending <= 1'b0;
-            if (!cdram_we_r)
+            if (!cdram_we_r) begin
                 case (cdram_complete_ds)
                     4'b0001: cdram_dout <= cdram_complete_dout[7:0];
                     4'b0010: cdram_dout <= cdram_complete_dout[15:8];
                     4'b0100: cdram_dout <= cdram_complete_dout[23:16];
                     default: cdram_dout <= cdram_complete_dout[31:24];
                 endcase
+                cdram_cache_valid[cdram_cache_next] <= 1'b1;
+                cdram_cache_tag[cdram_cache_next]   <= cdram_addr_r[17:2];
+                cdram_cache_data[cdram_cache_next]  <= cdram_complete_dout;
+                cdram_cache_next <= cdram_cache_next + 2'd1;
+            end
         end else if (!cdram_pending) begin
             if (cdram_wr && !cdram_wr_d) begin
+                // a write invalidates any cached copy, keeping later reads honest
+                for (w = 0; w < CDRAM_WAYS; w = w + 1)
+                    if (cdram_cache_valid[w] && cdram_cache_tag[w] == cdram_addr[17:2])
+                        cdram_cache_valid[w] <= 1'b0;
                 cdram_pending <= 1'b1;
                 cdram_addr_r  <= cdram_addr;
                 cdram_we_r    <= 1'b1;
             end else if (cdram_rd && (!cdram_rd_d || cdram_addr != cdram_addr_r)) begin
-                cdram_pending <= 1'b1;
-                cdram_addr_r  <= cdram_addr;
-                cdram_we_r    <= 1'b0;
+                if (cdram_cache_hit) begin
+                    cdram_addr_r <= cdram_addr;
+                    case (cdram_addr[1:0])
+                        2'b00: cdram_dout <= cdram_cache_data[cdram_cache_hit_way][7:0];
+                        2'b01: cdram_dout <= cdram_cache_data[cdram_cache_hit_way][15:8];
+                        2'b10: cdram_dout <= cdram_cache_data[cdram_cache_hit_way][23:16];
+                        default: cdram_dout <= cdram_cache_data[cdram_cache_hit_way][31:24];
+                    endcase
+                end else begin
+                    cdram_pending <= 1'b1;
+                    cdram_addr_r  <= cdram_addr;
+                    cdram_we_r    <= 1'b0;
+                end
             end
         end
     end
@@ -307,15 +366,12 @@ always @(posedge clk) begin
         rv_ready <= 1'b0;
 
         case (rv_state)
-            RV_IDLE: if (init_done && rv_valid) begin
-                rv_mem_addr  <= {rv_addr[22:2], 2'b00};
-                rv_mem_din   <= rv_wdata;
-                rv_mem_ds    <= rv_wstrb;
-                rv_mem_we    <= |rv_wstrb;
-                rv_mem_req   <= ~rv_mem_req;
-                rv_state     <= RV_WAIT;
-                rv_source_cd <= 1'b0;
-            end else if (init_done && cdram_pending) begin
+            // CD-RAM wins ties: it is the HuC6280's own bus cycle, so any
+            // extra latency here shows up as CPU timing jitter (visible as
+            // raster/video shimmer). The firmware side is background
+            // housekeeping (SD card, joypad, menu) that can absorb a few
+            // extra cycles of delay without any visible effect.
+            RV_IDLE: if (init_done && cdram_pending) begin
                 rv_mem_addr  <= CDRAM_BASE + {5'd0, cdram_addr_r};
                 rv_mem_din   <= {4{cdram_din}};
                 rv_mem_ds    <= 4'b0001 << cdram_addr_r[1:0];
@@ -323,6 +379,14 @@ always @(posedge clk) begin
                 rv_mem_req   <= ~rv_mem_req;
                 rv_state     <= RV_WAIT;
                 rv_source_cd <= 1'b1;
+            end else if (init_done && rv_valid) begin
+                rv_mem_addr  <= {rv_addr[22:2], 2'b00};
+                rv_mem_din   <= rv_wdata;
+                rv_mem_ds    <= rv_wstrb;
+                rv_mem_we    <= |rv_wstrb;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_cd <= 1'b0;
             end
 
             RV_WAIT: if (rv_mem_ack_sync[1] == rv_mem_req) begin
@@ -606,6 +670,10 @@ reg [2:0]  active;
 reg [1:0]  channel1_port;
 reg        host_cas_done;
 
+localparam CHANNEL1_NONE  = 2'd0;
+localparam CHANNEL1_RV    = 2'd1;
+localparam CHANNEL1_VRAM1 = 2'd2;
+
 // Distributed, on-demand refresh (SNESTang model): instead of concentrating
 // all refresh commands into the vblank window (refresh_window), where they
 // directly compete with the VDC0 SATB/sprite burst fetch right at the start
@@ -626,15 +694,22 @@ always @(posedge clk)
 // would never be refreshed: rows that the softcore does not touch for a few
 // seconds (its own idle code and stack frames, i.e. what it runs right after a
 // long load) then decay. In that window the VDC condition is dropped.
+//
+// Channel 1's busy flag must only block refresh when it was actually claimed
+// by VDC1: that transaction is cycle-locked to the pixel clock and cannot
+// absorb an extra delay. PicoRV32/CD-RAM traffic on the same channel already
+// tolerates arbitrary extra latency (its req/ack toggle just waits longer),
+// so letting refresh preempt it is safe. A CD game reading/writing its
+// scratch RAM on nearly every dot would otherwise keep channel 1 "busy" for
+// this check continuously and starve refresh entirely (seen as widespread,
+// snow-like VRAM corruption during play that instantly resolves when the CPU
+// is halted and traffic stops).
+wire       chan1_busy_vdc1 = active[1] && (channel1_port == CHANNEL1_VRAM1);
 wire       refresh_now   = need_refresh && !refresh_block && slot_first &&
-                            !active[0] && !active[1] && !active[2] &&
+                            !active[0] && !chan1_busy_vdc1 && !active[2] &&
                             (in_reset_window ||
                              (!vram_pending && !vram1_pending &&
                               !vram_active && !vram1_active));
-
-localparam CHANNEL1_NONE  = 2'd0;
-localparam CHANNEL1_RV    = 2'd1;
-localparam CHANNEL1_VRAM1 = 2'd2;
 
 always @(posedge clk) begin
     if (!resetn) begin
