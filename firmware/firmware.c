@@ -806,6 +806,59 @@ static int is_cd_dir(const char *name) {
     return n >= 4 && strcasecmp(name + n - 4, "(CD)") == 0;
 }
 
+static int load_system_card(void) {
+    static const char *names[] = {
+        "/config/systemcard.pce",
+        "/config/syscard.pce",
+        "/config/system_card.pce",
+        NULL
+    };
+    FIL f;
+    UINT br;
+    uint32_t total = 0;
+    uint32_t size;
+    int i;
+
+    for (i = 0; names[i]; i++) {
+        if (f_open(&f, names[i], FA_READ) == FR_OK)
+            break;
+    }
+    if (!names[i]) {
+        message("System Card missing", "Put it in /config");
+        return -1;
+    }
+
+    size = (uint32_t)f_size(&f);
+    if (size < ROM_MIN_SIZE || size > ROM_MAX_SIZE) {
+        f_close(&f);
+        message("Invalid System Card", "Use a PCE image");
+        return -1;
+    }
+
+    pce_load_start(size, 0);
+    while (total < size) {
+        UINT want = (UINT)((size - total) > sizeof(io_buf) ? sizeof(io_buf)
+                                                               : (size - total));
+        if (f_read(&f, io_buf, want, &br) != FR_OK || br == 0) {
+            pce_load_end();
+            f_close(&f);
+            message("System Card read error", names[i]);
+            return -1;
+        }
+
+        total += br;
+        while (br & 3)
+            io_buf[br++] = 0xff;
+        const uint32_t *w = (const uint32_t *)io_buf;
+        for (UINT j = 0; j < br; j += 4)
+            pce_load_word(*w++);
+    }
+
+    f_close(&f);
+    pce_load_end();
+    return 0;
+}
+
 static int open_cd_image(const char *cue_name) {
     FIL cue;
     char cue_path[PWD_SIZE + NAME_MAX + 2];
@@ -863,6 +916,8 @@ static int open_cd_image(const char *cue_name) {
 
     if (cd_active)
         f_close(&cd_image);
+    if (load_system_card() != 0)
+        return -1;
     if (f_open(&cd_image, bin_path, FA_READ) != FR_OK) {
         message("Cannot open CD image", bin_name);
         return -1;
