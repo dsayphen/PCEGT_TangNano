@@ -20,7 +20,9 @@
 //
 // Memory map seen by the softcore
 // -------------------------------
-//   0x0000_0000 .. 0x001F_FFFF   RAM (2 MiB, physically SDRAM RV_BASE + a)
+//   0x0000_0000 .. 0x001A_FFFF   firmware RAM (physically SDRAM 0x400000 + a)
+//   0x001B_0000 .. 0x001E_FFFF   CD-ROM² scratch RAM (reserved from firmware)
+//   0x001F_0000 .. 0x001F_FFFF   VDC1 VRAM
 //   0x0200_0000                  OSD character / overlay control
 //   0x0200_0010                  UART clock divider
 //   0x0200_0014                  UART data

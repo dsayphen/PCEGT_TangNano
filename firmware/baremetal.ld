@@ -2,8 +2,8 @@
  * Linker script for the PicoRV32 IO subsystem firmware of the Tang Nano 20K
  * PC Engine port.
  *
- * The softcore uses 1984 KiB at address 0, which iosys.v maps onto SDRAM
- * 0x400000..0x5EFFFF. The final 64 KiB of bank 2 is reserved for VDC1 VRAM.
+ * The softcore uses 1792 KiB at address 0, mapped onto SDRAM 0x400000..0x5AFFFF.
+ * The next 256 KiB is reserved for CD scratch RAM; the final 64 KiB is VDC1 VRAM.
  * _start (start.S) must sit at address 0 because that is where the core
  * begins executing once the firmware has been copied out of SPI flash.
  *
@@ -15,7 +15,7 @@
  */
 MEMORY
 {
-    RAM (RWX) : ORIGIN = 0x00000, LENGTH = 0x1F0000
+    RAM (RWX) : ORIGIN = 0x00000, LENGTH = 0x1B0000
 }
 SECTIONS
 {
