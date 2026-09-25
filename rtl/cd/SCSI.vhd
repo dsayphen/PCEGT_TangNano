@@ -37,7 +37,8 @@ entity SCSI is
 		CD_DATA_END	: out std_logic;
 		STOP_CD_SND	: out std_logic;
 		
-		DBG_DATAIN_CNT: out unsigned(15 downto 0)
+		DBG_DATAIN_CNT: out unsigned(15 downto 0);
+		PHASE_DBG	: out std_logic_vector(7 downto 0)
 	);
 end SCSI;
 
@@ -90,6 +91,12 @@ architecture rtl of SCSI is
 	signal DOUT_PEND: std_logic;
 	
 	signal DATAIN_CNT 	: unsigned(15 downto 0);
+	signal PHASE_CODE	: std_logic_vector(3 downto 0);
+	signal PHASE_ACC	: std_logic_vector(3 downto 0) := (others => '0');
+	signal SEL_EVER		: std_logic := '0';
+	signal BSY_EVER		: std_logic := '0';
+	signal REQ_EVER		: std_logic := '0';
+	signal ACK_EVER		: std_logic := '0';
 
 begin
 
@@ -331,5 +338,45 @@ begin
 	DOUT_SEND <= DATA_OUT;
 	
 	DBG_DATAIN_CNT <= DATAIN_CNT;
+
+	process(SP)
+	begin
+		case SP is
+			when SP_FREE          => PHASE_CODE <= "0000";
+			when SP_COMM_START    => PHASE_CODE <= "0001";
+			when SP_COMM_END      => PHASE_CODE <= "0010";
+			when SP_STAT_START    => PHASE_CODE <= "0011";
+			when SP_STAT_END      => PHASE_CODE <= "0100";
+			when SP_MSGIN_START   => PHASE_CODE <= "0101";
+			when SP_MSGIN_END     => PHASE_CODE <= "0110";
+			when SP_DATAIN_START  => PHASE_CODE <= "0111";
+			when SP_DATAIN_END    => PHASE_CODE <= "1000";
+			when SP_DATAOUT_START => PHASE_CODE <= "1001";
+			when SP_DATAOUT_END   => PHASE_CODE <= "1010";
+		end case;
+	end process;
+
+	-- bit7=ACK asserted, bit6=REQ asserted, bit5=BSY asserted, bit4=SEL asserted
+	-- bit7=ACK ever asserted, bit6=REQ ever, bit5=BSY ever, bit4=SEL ever;
+	-- bits3:0 = sticky OR of every phase code visited this session, so a
+	-- transaction lasting only a few clocks is never missed by slow polling.
+	process(CLK, RESET_N)
+	begin
+		if RESET_N = '0' then
+			PHASE_ACC <= (others => '0');
+			SEL_EVER  <= '0';
+			BSY_EVER  <= '0';
+			REQ_EVER  <= '0';
+			ACK_EVER  <= '0';
+		elsif rising_edge(CLK) then
+			PHASE_ACC <= PHASE_ACC or PHASE_CODE;
+			if SEL_N = '0' then SEL_EVER <= '1'; end if;
+			if BSY_Nr = '0' then BSY_EVER <= '1'; end if;
+			if REQ_Nr = '0' then REQ_EVER <= '1'; end if;
+			if ACK_N = '0' then ACK_EVER <= '1'; end if;
+		end if;
+	end process;
+
+	PHASE_DBG <= ACK_EVER & REQ_EVER & BSY_EVER & SEL_EVER & PHASE_ACC;
 
 end rtl;

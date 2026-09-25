@@ -44,6 +44,7 @@
 #define reg_cd_data2       (*(volatile uint32_t*)0x0200008c)
 #define reg_cd_feed        (*(volatile uint32_t*)0x02000090)
 #define reg_cd_ack         (*(volatile uint32_t*)0x02000094)
+#define reg_cd_phase       (*(volatile uint32_t*)0x02000098)
 
 // VCE dot clock select (VIDEO_DCC), debug only: piggybacked onto reg_core_id
 // bits 17:16 (see iosys.v) instead of its own address decode.

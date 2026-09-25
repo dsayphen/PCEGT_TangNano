@@ -214,6 +214,7 @@ wire        cd_wr;
 wire        cd_data_end;
 wire        cd_dm;
 wire        cd_fifo_halffull;
+wire [7:0]  cd_phase_dbg;
 
 wire        osd_on;
 wire [23:0] osd_rgb;
@@ -291,6 +292,7 @@ iosys #(
     .vid_dcc_dbg      (vid_dcc),
     .vid_hdw_dbg      (vid_hdw_dbg),
     .vid_hds_dbg      (vid_hds_dbg),
+    .cd_phase_dbg     (cd_phase_dbg),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -570,6 +572,7 @@ pce_core #(
     ,.cd_data_end   (cd_data_end)
     ,.cd_dm         (cd_dm)
     ,.cd_fifo_halffull (cd_fifo_halffull)
+    ,.cd_phase_dbg  (cd_phase_dbg)
 );
 
 // ===========================================================================
