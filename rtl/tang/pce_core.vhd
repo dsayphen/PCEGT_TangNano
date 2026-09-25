@@ -38,6 +38,7 @@ entity pce_core is
 		rom_do     : in  std_logic_vector(7 downto 0);
 		rom_sz     : in  std_logic_vector(7 downto 0);
 		sgx_mode   : in  std_logic;
+		cd_enable  : in  std_logic;
 
 		-- VDC0 video RAM (external SDRAM)
 		vram0_a    : out std_logic_vector(15 downto 0);
@@ -73,7 +74,22 @@ entity pce_core is
 		vid_dcc    : out std_logic_vector(1 downto 0);
 		-- VDC0 active display width in 8-pixel characters, debug/diagnosis only
 		vid_hdw_dbg : out std_logic_vector(6 downto 0);
-		vid_hds_dbg : out std_logic_vector(6 downto 0)
+		vid_hds_dbg : out std_logic_vector(6 downto 0);
+
+		-- CD host bridge, serviced by the firmware through iosys
+		cd_stat       : in  std_logic_vector(15 downto 0);
+		cd_stat_get   : in  std_logic;
+		cd_comm       : out std_logic_vector(95 downto 0);
+		cd_comm_send  : out std_logic;
+		cd_dout_req   : in  std_logic;
+		cd_dout       : out std_logic_vector(79 downto 0);
+		cd_dout_send  : out std_logic;
+		cd_reset      : out std_logic;
+		cd_data       : in  std_logic_vector(7 downto 0);
+		cd_wr         : in  std_logic;
+		cd_data_end   : out std_logic;
+		cd_dm         : in  std_logic;
+		cd_fifo_halffull : out std_logic
 	);
 end pce_core;
 
@@ -149,7 +165,7 @@ begin
 		JOY_OUT     => joy_out,
 		JOY_IN      => joy_in,
 
-		CD_EN       => '1',
+		CD_EN       => cd_enable,
 		EXT_RAM_A   => open,
 		EXT_RAM_DO  => open,
 		EXT_RAM_DI  => ff_byte,
@@ -164,25 +180,25 @@ begin
 		ADRAM_WE    => open,
 		ADRAM_RD    => open,
 
-		CD_STAT     => zero_byte,
-		CD_MSG      => zero_byte,
-		CD_STAT_GET => '0',
+		CD_STAT     => cd_stat(7 downto 0),
+		CD_MSG      => cd_stat(15 downto 8),
+		CD_STAT_GET => cd_stat_get,
 
-		CD_COMM     => open,
-		CD_COMM_SEND=> open,
+		CD_COMM     => cd_comm,
+		CD_COMM_SEND=> cd_comm_send,
 
-		CD_DOUT_REQ => '0',
-		CD_DOUT     => open,
-		CD_DOUT_SEND=> open,
+		CD_DOUT_REQ => cd_dout_req,
+		CD_DOUT     => cd_dout,
+		CD_DOUT_SEND=> cd_dout_send,
 
 		CD_REGION   => '0',
-		CD_RESET    => open,
+		CD_RESET    => cd_reset,
 
-		CD_DATA     => zero_byte,
-		CD_WR       => '0',
-		CD_DATA_END => open,
-		CD_DM       => '0',
-		CD_FIFO_HALFFULL => open,
+		CD_DATA     => cd_data,
+		CD_WR       => cd_wr,
+		CD_DATA_END => cd_data_end,
+		CD_DM       => cd_dm,
+		CD_FIFO_HALFFULL => cd_fifo_halffull,
 
 		CDDA_SL     => cdda_l_nc,
 		CDDA_SR     => cdda_r_nc,

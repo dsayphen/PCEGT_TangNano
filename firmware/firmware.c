@@ -53,6 +53,12 @@ static uint8_t io_buf[2048];
 
 static char current_game_name[NAME_MAX] = "";
 
+static FIL cd_image;
+static int cd_active = 0;
+static uint32_t cd_track_start = 0;
+static uint32_t cd_sector_size = 2048;
+static uint32_t cd_data_offset = 0;
+
 // Extrait le nom du fichier sans le chemin
 static void extract_filename(char *dst, const char *path) {
     const char *slash = strrchr(path, '/');
@@ -110,6 +116,17 @@ static int starts_with(const char *line, const char *prefix) {
     return 1;
 }
 
+static int starts_with_ci_n(const char *line, const char *prefix, int n) {
+    for (int i = 0; i < n; i++) {
+        char a = line[i];
+        char b = prefix[i];
+        if (a >= 'a' && a <= 'z') a -= 'a' - 'A';
+        if (b >= 'a' && b <= 'z') b -= 'a' - 'A';
+        if (a != b) return 0;
+    }
+    return 1;
+}
+
 // Extraction de la valeur numérique
 static uint8_t parse_u8(const char *str) {
     uint8_t val = 0;
@@ -118,6 +135,15 @@ static uint8_t parse_u8(const char *str) {
         str++;
     }
     return val;
+}
+
+static int contains_ci(const char *line, const char *needle) {
+    while (*line) {
+        if (starts_with_ci_n(line, needle, (int)strlen(needle)))
+            return 1;
+        line++;
+    }
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -722,14 +748,6 @@ static int is_cue(const char *name) {
     return strcasecmp(name + n - 4, ".cue") == 0;
 }
 
-static int is_cd_dir(const char *name) {
-    int n = (int)strlen(name);
-    if (n < 4)
-        return 0;
-    return strcasecmp(name + n - 4, "(CD)") == 0 ||
-           (n >= 5 && strcasecmp(name + n - 5, " (CD)") == 0);
-}
-
 static int is_sgx(const char *name) {
     int n = (int)strlen(name);
     return n >= 5 && strcasecmp(name + n - 4, ".sgx") == 0;
@@ -751,7 +769,7 @@ static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_l
         while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
             p++;
 
-        if (strncasecmp(p, "FILE", 4) != 0)
+        if (!starts_with_ci_n(p, "FILE", 4))
             continue;
 
         p += 4;
@@ -769,7 +787,8 @@ static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_l
             continue;
         *q = '\0';
 
-        if (strnlen(p, bin_len) >= bin_len)
+        size_t path_len = strlen(p);
+        if (path_len >= bin_len)
             continue;
 
         strncpy(bin_path, p, bin_len - 1);
@@ -780,6 +799,139 @@ static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_l
 
     f_close(&f);
     return found ? 0 : -1;
+}
+
+static int is_cd_dir(const char *name) {
+    int n = (int)strlen(name);
+    return n >= 4 && strcasecmp(name + n - 4, "(CD)") == 0;
+}
+
+static int open_cd_image(const char *cue_name) {
+    FIL cue;
+    char cue_path[PWD_SIZE + NAME_MAX + 2];
+    char bin_name[NAME_MAX];
+    char line[256];
+    char bin_path[PWD_SIZE + NAME_MAX + 2];
+    uint32_t index_frame = 0;
+
+    strncpy(cue_path, pwd, sizeof(cue_path));
+    if (cue_path[1] != '\0')
+        strncat(cue_path, "/", sizeof(cue_path));
+    strncat(cue_path, cue_name, sizeof(cue_path));
+
+    if (parse_cue_bin_path(cue_path, bin_name, sizeof(bin_name)) != 0 ||
+        f_open(&cue, cue_path, FA_READ) != FR_OK) {
+        message("Invalid CUE file", cue_name);
+        return -1;
+    }
+
+    cd_sector_size = 2048;
+    cd_data_offset = 0;
+    while (f_gets(line, sizeof(line), &cue)) {
+        if (contains_ci(line, "MODE1/2352")) {
+            cd_sector_size = 2352;
+            cd_data_offset = 16;
+        } else if (contains_ci(line, "MODE2/2352")) {
+            cd_sector_size = 2352;
+            cd_data_offset = 24;
+        }
+
+        char *p = line;
+        while (*p && !starts_with_ci_n(p, "INDEX 01", 8))
+            p++;
+        if (*p) {
+            p += 8;
+            while (*p == ' ' || *p == '\t')
+                p++;
+            uint32_t minutes = parse_u8(p);
+            while (*p && *p != ':') p++;
+            if (*p) p++;
+            uint32_t seconds = parse_u8(p);
+            while (*p && *p != ':') p++;
+            if (*p) p++;
+            uint32_t frames = parse_u8(p);
+            index_frame = (minutes * 60 + seconds) * 75 + frames;
+            break;
+        }
+    }
+    f_close(&cue);
+
+    strncpy(bin_path, pwd, sizeof(bin_path));
+    if (bin_path[1] != '\0')
+        strncat(bin_path, "/", sizeof(bin_path));
+    strncat(bin_path, bin_name, sizeof(bin_path));
+
+    if (cd_active)
+        f_close(&cd_image);
+    if (f_open(&cd_image, bin_path, FA_READ) != FR_OK) {
+        message("Cannot open CD image", bin_name);
+        return -1;
+    }
+
+    cd_track_start = index_frame * cd_sector_size;
+    cd_active = 1;
+    extract_filename(current_game_name, cue_name);
+    game_pad_mode_load(current_game_name);
+    pce_cd_start();
+    return 0;
+}
+
+static int find_cd_cue(char *cue_name, size_t cue_len) {
+    DIR d;
+    FILINFO fno;
+    if (f_opendir(&d, pwd) != FR_OK)
+        return -1;
+    while (f_readdir(&d, &fno) == FR_OK && fno.fname[0]) {
+        if (!(fno.fattrib & AM_DIR) && is_cue(fno.fname)) {
+            strncpy(cue_name, fno.fname, cue_len - 1);
+            cue_name[cue_len - 1] = '\0';
+            f_closedir(&d);
+            return 0;
+        }
+    }
+    f_closedir(&d);
+    return -1;
+}
+
+static void cd_service(void) {
+    uint32_t events = reg_cd_events;
+    if (!cd_active)
+        return;
+
+    if (events & 0x08) {
+        reg_cd_stat = 0;
+        reg_cd_ack = 0x08;
+    }
+
+    if (events & 0x01) {
+        uint32_t cmd0 = reg_cd_cmd0;
+        uint32_t cmd1 = reg_cd_cmd1;
+        reg_cd_stat = 0;
+        reg_cd_ack = 0x08;
+        uint32_t lba = ((cmd0 >> 8) & 0xff) << 16 |
+                       (cmd0 >> 16 & 0xff) << 8 |
+                       (cmd0 >> 24 & 0xff);
+        uint32_t count = cmd1 & 0xff;
+            if ((cmd0 & 0xff) == 0x08 && count == 0)
+            count = 256;
+
+        if ((cmd0 & 0xff) == 0x08 && count != 0) {
+            uint32_t offset = cd_track_start + lba * cd_sector_size + cd_data_offset;
+            if (f_lseek(&cd_image, offset) == FR_OK) {
+                UINT br;
+                uint32_t bytes = count * 2048;
+                while (bytes) {
+                    UINT want = bytes > sizeof(io_buf) ? sizeof(io_buf) : (UINT)bytes;
+                    if (f_read(&cd_image, io_buf, want, &br) != FR_OK || br == 0)
+                        break;
+                    for (UINT i = 0; i < br; i++)
+                        reg_cd_feed = (uint32_t)io_buf[i] | 0x100;
+                    bytes -= br;
+                }
+            }
+        }
+        reg_cd_ack = 0x01;
+    }
 }
 
 // Directories to never show in the browser, regardless of their
@@ -863,6 +1015,11 @@ static int load_rom(const char *fname, uint32_t size) {
 
     char cue_path[PWD_SIZE + NAME_MAX + 2];
     char bin_path[PWD_SIZE + NAME_MAX + 2];
+
+    if (cd_active) {
+        f_close(&cd_image);
+        cd_active = 0;
+    }
 
     if (is_cue(fname)) {
         strncpy(cue_path, pwd, sizeof(cue_path));
@@ -1082,6 +1239,16 @@ static void browse(void) {
                     if (pwd[1] != '\0')
                         strncat(pwd, "/", PWD_SIZE);
                     strncat(pwd, names[active], PWD_SIZE);
+
+                    if (is_cd_dir(names[active])) {
+                        char cue_name[NAME_MAX];
+                        if (find_cd_cue(cue_name, sizeof(cue_name)) == 0 &&
+                            open_cd_image(cue_name) == 0) {
+                            overlay(0);
+                            return;
+                        }
+                        go_parent();
+                    }
                     page = 0;
                     active = 0;
                     need_redraw = 1;
@@ -1090,7 +1257,10 @@ static void browse(void) {
                     need_redraw = 1;
                 }
             } else {
-                if (load_rom(names[active], sizes[active]) == 0) {
+                int loaded = is_cue(names[active])
+                    ? open_cd_image(names[active])
+                    : load_rom(names[active], sizes[active]);
+                if (loaded == 0) {
                     overlay(0);         // hand the screen back to the console
                     return;
                 }
@@ -1177,6 +1347,8 @@ int main(void) {
         uint32_t raw = joy_raw();
         uint32_t e = joy_edge();
         static uint32_t loops = 0;
+
+        cd_service();
 
         loops++;
         if (time_millis() - last_hb >= 1000) {
