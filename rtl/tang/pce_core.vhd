@@ -89,7 +89,8 @@ entity pce_core is
 		cd_wr         : in  std_logic;
 		cd_data_end   : out std_logic;
 		cd_dm         : in  std_logic;
-		cd_fifo_halffull : out std_logic
+		cd_fifo_halffull : out std_logic;
+		cd_phase_dbg     : out std_logic_vector(7 downto 0)
 	);
 end pce_core;
 
@@ -225,7 +226,8 @@ begin
 		VIDEO_HBL   => vid_hbl,
 		VIDEO_VBL   => vid_vbl,
 		VIDEO_HDW_DBG => vid_hdw_dbg,
-		VIDEO_HDS_DBG => vid_hds_dbg
+		VIDEO_HDS_DBG => vid_hds_dbg,
+		CD_PHASE_DBG  => cd_phase_dbg
 	);
 
 	aud_l <= std_logic_vector(psg_l);

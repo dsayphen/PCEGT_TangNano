@@ -123,6 +123,7 @@ module iosys #(
     output reg         cd_wr,
     output reg         cd_dm,
     output reg         cd_ack,
+    input  wire [7:0]  cd_phase_dbg,
 
     // ---- read-only debug: VCE dot clock select (VIDEO_DCC), see huc6260;
     // piggybacked onto reg_core_id's unused bits 17:16, no new address decode
@@ -307,6 +308,7 @@ wire cd_data1_sel  = mem_valid && (mem_addr == 32'h0200_0088);
 wire cd_data2_sel  = mem_valid && (mem_addr == 32'h0200_008c);
 wire cd_feed_sel   = mem_valid && (mem_addr == 32'h0200_0090);
 wire cd_ack_sel    = mem_valid && (mem_addr == 32'h0200_0094);
+wire cd_phase_sel  = mem_valid && (mem_addr == 32'h0200_0098);
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -318,7 +320,6 @@ reg  [31:0] time_reg;
 reg  [7:0]  cd_events;
 reg  [95:0] cd_comm_reg;
 reg  [79:0] cd_dout_reg;
-reg         cd_start_pending;
 
 // ROM streaming state, declared here because mem_ready depends on it
 reg  [31:0] rl_buf;
@@ -358,6 +359,7 @@ assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    time_sel || pad_mode_sel || color_mode_sel || id_sel || audio_sel ||
                    cd_event_sel || cd_stat_sel || cd_cmd0_sel || cd_cmd1_sel || cd_cmd2_sel ||
                    cd_data0_sel || cd_data1_sel || cd_data2_sel || cd_feed_sel || cd_ack_sel ||
+                   cd_phase_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -380,6 +382,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    cd_data0_sel ? cd_dout_reg[31:0] :
                    cd_data1_sel ? cd_dout_reg[63:32] :
                    cd_data2_sel ? {16'b0, cd_dout_reg[79:64]} :
+                   cd_phase_sel ? {24'b0, cd_phase_dbg} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;
 
@@ -597,7 +600,7 @@ always @(posedge clk) begin
         end
         if (mem_wdata[4]) begin
             loading      <= 1'b0;
-            cd_start_pending <= 1'b1;
+            cd_mode      <= 1'b1;
         end
     end
 
@@ -622,10 +625,6 @@ always @(posedge clk) begin
             rom_sz       <= rl_size[23:16];
             rom_offset   <= (rl_size[9:0] == 10'h200) ? 23'd512 : 23'd0;
             image_valid  <= rl_size_ok;
-            if (cd_start_pending) begin
-                cd_mode          <= 1'b1;
-                cd_start_pending <= 1'b0;
-            end
         end
     end
 
@@ -664,7 +663,6 @@ always @(posedge clk) begin
         cd_events    <= 8'd0;
         cd_comm_reg  <= 96'd0;
         cd_dout_reg  <= 80'd0;
-        cd_start_pending <= 1'b0;
         rl_buf       <= 32'd0;
         rl_cnt       <= 3'd0;
         rl_addr      <= 23'd0;

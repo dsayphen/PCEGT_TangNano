@@ -123,7 +123,8 @@ entity pce_top is
 		VIDEO_VBL   : out std_logic;
 		-- VDC0 active display width in 8-pixel characters, for debug/diagnosis only
 		VIDEO_HDW_DBG : out std_logic_vector(6 downto 0);
-		VIDEO_HDS_DBG : out std_logic_vector(6 downto 0)
+		VIDEO_HDS_DBG : out std_logic_vector(6 downto 0);
+		CD_PHASE_DBG  : out std_logic_vector(7 downto 0)
 	);
 end pce_top;
 
@@ -724,7 +725,7 @@ BRM_WE <= CPU_CE and not CPU_BRM_SEL_N and not CPU_WR_N;
 
 generate_CD: if (CD_SUPPORT /= 0) generate begin
 
-CD_UNIT : cd
+CD_UNIT : entity work.cd
 generic map(
 	CDDA_O_WIDTH => PSG_O_WIDTH
 )
@@ -774,7 +775,9 @@ port map(
 	
 	CD_SL			=> CDDA_SL,
 	CD_SR			=> CDDA_SR,
-	AD_S			=> ADPCM_S
+	AD_S			=> ADPCM_S,
+
+	PHASE_DBG	=> CD_PHASE_DBG
 );
 
 end generate;
@@ -806,6 +809,7 @@ generate_NOCD: if (CD_SUPPORT = 0) generate begin
 	CDDA_SL <= (others => '0');
 	CDDA_SR <= (others => '0');
 	ADPCM_S <= (others => '0');
+	CD_PHASE_DBG <= (others => '0');
 
 end generate;
 --CD_RAM_CS_N <= '1';

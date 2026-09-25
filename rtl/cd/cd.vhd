@@ -58,7 +58,9 @@ entity cd is
 		
 		CD_SL			: out signed(CDDA_O_WIDTH-1 downto 0);
 		CD_SR			: out signed(CDDA_O_WIDTH-1 downto 0);
-		AD_S			: out signed(15 downto 0)
+		AD_S			: out signed(15 downto 0);
+
+		PHASE_DBG	: out std_logic_vector(7 downto 0)
 	);
 end cd;
 
@@ -562,7 +564,9 @@ begin
 		
 		CD_DATA		=> CD_DATA,
 		CD_WR			=> CD_WR and DM,
-		CD_DATA_END	=> CD_DATA_END
+		CD_DATA_END	=> CD_DATA_END,
+
+		PHASE_DBG	=> PHASE_DBG
 	);
 
 
