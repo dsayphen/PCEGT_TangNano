@@ -365,16 +365,8 @@ always @(posedge clk) begin
         rv_ready <= 1'b0;
 
         case (rv_state)
-            // CD-RAM wins ties; VDC1 still has priority inside the SDRAM slot.
-            RV_IDLE: if (init_done && cdram_pending) begin
-                rv_mem_addr  <= CDRAM_BASE + {5'd0, cdram_addr_r};
-                rv_mem_din   <= {4{cdram_din}};
-                rv_mem_ds    <= 4'b0001 << cdram_addr_r[1:0];
-                rv_mem_we    <= cdram_we_r;
-                rv_mem_req   <= ~rv_mem_req;
-                rv_state     <= RV_WAIT;
-                rv_source_cd <= 1'b1;
-            end else if (init_done && rv_valid) begin
+            // Keep firmware transactions ahead of CD-RAM, as in the known-good CD revision.
+            RV_IDLE: if (init_done && rv_valid) begin
                 rv_mem_addr  <= {rv_addr[22:2], 2'b00};
                 rv_mem_din   <= rv_wdata;
                 rv_mem_ds    <= rv_wstrb;
@@ -382,6 +374,14 @@ always @(posedge clk) begin
                 rv_mem_req   <= ~rv_mem_req;
                 rv_state     <= RV_WAIT;
                 rv_source_cd <= 1'b0;
+            end else if (init_done && cdram_pending) begin
+                rv_mem_addr  <= CDRAM_BASE + {5'd0, cdram_addr_r};
+                rv_mem_din   <= {4{cdram_din}};
+                rv_mem_ds    <= 4'b0001 << cdram_addr_r[1:0];
+                rv_mem_we    <= cdram_we_r;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_cd <= 1'b1;
             end
 
             RV_WAIT: if (rv_mem_ack_sync[1] == rv_mem_req) begin
