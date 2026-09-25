@@ -56,6 +56,7 @@ static char current_game_name[NAME_MAX] = "";
 static FIL cd_image;
 static int cd_active = 0;
 static uint32_t cd_track_start = 0;
+static uint32_t cd_track_lba = 0;
 static uint32_t cd_sector_size = 2048;
 static uint32_t cd_data_offset = 0;
 
@@ -866,6 +867,8 @@ static int open_cd_image(const char *cue_name) {
     char line[256];
     char bin_path[PWD_SIZE + NAME_MAX + 2];
     uint32_t index_frame = 0;
+    int in_data_track = 0;
+    int data_track_found = 0;
 
     strncpy(cue_path, pwd, sizeof(cue_path));
     if (cue_path[1] != '\0')
@@ -881,18 +884,30 @@ static int open_cd_image(const char *cue_name) {
     cd_sector_size = 2048;
     cd_data_offset = 0;
     while (f_gets(line, sizeof(line), &cue)) {
-        if (contains_ci(line, "MODE1/2352")) {
-            cd_sector_size = 2352;
-            cd_data_offset = 16;
-        } else if (contains_ci(line, "MODE2/2352")) {
-            cd_sector_size = 2352;
-            cd_data_offset = 24;
+        char *p = line;
+        while (*p == ' ' || *p == '\t')
+            p++;
+
+        if (starts_with_ci_n(p, "TRACK", 5)) {
+            in_data_track = contains_ci(p, "MODE1/2048") ||
+                            contains_ci(p, "MODE1/2352") ||
+                            contains_ci(p, "MODE2/2352");
+            if (in_data_track) {
+                if (contains_ci(p, "MODE1/2352")) {
+                    cd_sector_size = 2352;
+                    cd_data_offset = 16;
+                } else if (contains_ci(p, "MODE2/2352")) {
+                    cd_sector_size = 2352;
+                    cd_data_offset = 24;
+                } else {
+                    cd_sector_size = 2048;
+                    cd_data_offset = 0;
+                }
+            }
+            continue;
         }
 
-        char *p = line;
-        while (*p && !starts_with_ci_n(p, "INDEX 01", 8))
-            p++;
-        if (*p) {
+        if (in_data_track && starts_with_ci_n(p, "INDEX 01", 8)) {
             p += 8;
             while (*p == ' ' || *p == '\t')
                 p++;
@@ -904,10 +919,16 @@ static int open_cd_image(const char *cue_name) {
             if (*p) p++;
             uint32_t frames = parse_u8(p);
             index_frame = (minutes * 60 + seconds) * 75 + frames;
-            break;
+            data_track_found = 1;
+            in_data_track = 0;
         }
     }
     f_close(&cue);
+
+    if (!data_track_found) {
+        message("No data track in CUE", cue_name);
+        return -1;
+    }
 
     strncpy(bin_path, pwd, sizeof(bin_path));
     if (bin_path[1] != '\0')
@@ -923,6 +944,7 @@ static int open_cd_image(const char *cue_name) {
         return -1;
     }
 
+    cd_track_lba = index_frame;
     cd_track_start = index_frame * cd_sector_size;
     cd_active = 1;
     extract_filename(current_game_name, cue_name);
@@ -963,7 +985,7 @@ static void cd_service(void) {
         uint32_t cmd1 = reg_cd_cmd1;
         reg_cd_stat = 0;
         reg_cd_ack = 0x08;
-        uint32_t lba = ((cmd0 >> 8) & 0xff) << 16 |
+        uint32_t lba = ((cmd0 >> 8) & 0x1f) << 16 |
                        (cmd0 >> 16 & 0xff) << 8 |
                        (cmd0 >> 24 & 0xff);
         uint32_t count = cmd1 & 0xff;
@@ -971,7 +993,8 @@ static void cd_service(void) {
             count = 256;
 
         if ((cmd0 & 0xff) == 0x08 && count != 0) {
-            uint32_t offset = cd_track_start + lba * cd_sector_size + cd_data_offset;
+            uint32_t relative_lba = lba >= cd_track_lba ? lba - cd_track_lba : lba;
+            uint32_t offset = cd_track_start + relative_lba * cd_sector_size + cd_data_offset;
             if (f_lseek(&cd_image, offset) == FR_OK) {
                 UINT br;
                 uint32_t bytes = count * 2048;
