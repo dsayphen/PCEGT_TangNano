@@ -192,6 +192,7 @@ wire        rv_image_valid;
 wire [7:0]  rv_rom_sz;
 wire [22:0] rv_rom_offset;
 wire        rv_sgx_mode;
+wire        rv_cd_mode;
 
 wire        rv_valid;
 wire        rv_ready;
@@ -199,6 +200,20 @@ wire [22:0] rv_addr;
 wire [31:0] rv_wdata;
 wire [3:0]  rv_wstrb;
 wire [31:0] rv_rdata;
+
+wire [15:0] cd_stat;
+wire        cd_stat_get;
+wire [95:0] cd_comm;
+wire        cd_comm_send;
+wire        cd_dout_req;
+wire [79:0] cd_dout;
+wire        cd_dout_send;
+wire        cd_reset_req;
+wire [7:0]  cd_data;
+wire        cd_wr;
+wire        cd_data_end;
+wire        cd_dm;
+wire        cd_fifo_halffull;
 
 wire        osd_on;
 wire [23:0] osd_rgb;
@@ -248,6 +263,7 @@ iosys #(
     .rom_sz           (rv_rom_sz),
     .rom_offset       (rv_rom_offset),
     .sgx_mode         (rv_sgx_mode),
+    .cd_mode          (rv_cd_mode),
     .video_zoom       (video_zoom),
     .scanline         (scanline),
     .game_pause       (game_pause),
@@ -258,6 +274,20 @@ iosys #(
     .audio_volume     (audio_volume),
     .audio_bass       (audio_bass),
     .audio_treble     (audio_treble),
+    .cd_comm          (cd_comm),
+    .cd_comm_send     (cd_comm_send),
+    .cd_dout          (cd_dout),
+    .cd_dout_send     (cd_dout_send),
+    .cd_data_end      (cd_data_end),
+    .cd_reset         (cd_reset_req),
+    .cd_fifo_halffull (cd_fifo_halffull),
+    .cd_stat          (cd_stat),
+    .cd_stat_strobe   (cd_stat_get),
+    .cd_dout_req      (cd_dout_req),
+    .cd_data          (cd_data),
+    .cd_wr            (cd_wr),
+    .cd_dm            (cd_dm),
+    .cd_ack           (),
     .vid_dcc_dbg      (vid_dcc),
     .vid_hdw_dbg      (vid_hdw_dbg),
     .vid_hds_dbg      (vid_hds_dbg),
@@ -496,6 +526,7 @@ pce_core #(
     .rom_do     (rom_do),
     .rom_sz     (rom_sz),
     .sgx_mode   (sgx_mode),
+    .cd_enable  (rv_cd_mode),
 
     .vram0_a    (vram0_a),
     .vram0_do   (vram0_do),
@@ -526,6 +557,19 @@ pce_core #(
     .vid_dcc    (vid_dcc),
     .vid_hdw_dbg (vid_hdw_dbg),
     .vid_hds_dbg (vid_hds_dbg)
+    ,.cd_stat       (cd_stat)
+    ,.cd_stat_get   (cd_stat_get)
+    ,.cd_comm       (cd_comm)
+    ,.cd_comm_send  (cd_comm_send)
+    ,.cd_dout_req   (cd_dout_req)
+    ,.cd_dout       (cd_dout)
+    ,.cd_dout_send  (cd_dout_send)
+    ,.cd_reset      (cd_reset_req)
+    ,.cd_data       (cd_data)
+    ,.cd_wr         (cd_wr)
+    ,.cd_data_end   (cd_data_end)
+    ,.cd_dm         (cd_dm)
+    ,.cd_fifo_halffull (cd_fifo_halffull)
 );
 
 // ===========================================================================

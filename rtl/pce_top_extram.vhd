@@ -731,7 +731,7 @@ generic map(
 port map(
 	CLK 			=> CLK,
 	RST_N			=> RESET_N,
-	EN				=> '1',
+	EN				=> CD_EN,
 
 	EXT_A			=> CPU_A,
 	EXT_DI		=> CPU_DO,

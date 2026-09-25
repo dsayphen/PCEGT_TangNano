@@ -34,6 +34,16 @@
 #define reg_color_mode     (*(volatile uint32_t*)0x0200005c)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
 #define reg_audio          (*(volatile uint32_t*)0x02000064)
+#define reg_cd_events      (*(volatile uint32_t*)0x02000070)
+#define reg_cd_stat        (*(volatile uint32_t*)0x02000074)
+#define reg_cd_cmd0        (*(volatile uint32_t*)0x02000078)
+#define reg_cd_cmd1        (*(volatile uint32_t*)0x0200007c)
+#define reg_cd_cmd2        (*(volatile uint32_t*)0x02000080)
+#define reg_cd_data0       (*(volatile uint32_t*)0x02000084)
+#define reg_cd_data1       (*(volatile uint32_t*)0x02000088)
+#define reg_cd_data2       (*(volatile uint32_t*)0x0200008c)
+#define reg_cd_feed        (*(volatile uint32_t*)0x02000090)
+#define reg_cd_ack         (*(volatile uint32_t*)0x02000094)
 
 // VCE dot clock select (VIDEO_DCC), debug only: piggybacked onto reg_core_id
 // bits 17:16 (see iosys.v) instead of its own address decode.
@@ -135,6 +145,9 @@ static inline void pce_reset(void) {
 
 static inline void pce_stop(void) {
     reg_game_ctrl = 8;
+}
+static inline void pce_cd_start(void) {
+    reg_game_ctrl = 16;
 }
 
 // ---- tiny libc ------------------------------------------------------------

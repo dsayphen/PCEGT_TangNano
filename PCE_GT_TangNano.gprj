@@ -42,6 +42,12 @@
         <File path="rtl/dpram.vhd" type="file.vhdl" enable="1"/>
         <File path="rtl/dpram_ip.vhd" type="file.vhdl" enable="1"/>
         <File path="rtl/dpram_ip_9x10.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/CEGen.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/cd/cd.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/cd/SCSI.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/cd/SCSI_FIFO.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/cd/MSM5205.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/cd/CDDA_FIFO.vhd" type="file.vhdl" enable="1"/>
         <File path="rtl/huc6202.vhd" type="file.vhdl" enable="1"/>
         <File path="rtl/huc6260.vhd" type="file.vhdl" enable="1"/>
         <File path="rtl/huc6270.vhd" type="file.vhdl" enable="1"/>
