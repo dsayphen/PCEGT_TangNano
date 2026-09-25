@@ -1040,6 +1040,7 @@ static int open_cd_image(const char *cue_name) {
     cd_active = 1;
     extract_filename(current_game_name, cue_name);
     game_pad_mode_load(current_game_name);
+    uart_print("cd: sending start request\n");
     pce_cd_start();
     return 0;
 }
@@ -1542,6 +1543,7 @@ static void browse(void) {
                         if (find_cd_cue(cue_name, sizeof(cue_name)) == 0 &&
                             open_cd_image(cue_name) == 0) {
                             overlay(0);
+                            uart_printf("browser: CD started, overlay=%d\n", overlay_status());
                             return;
                         }
                         go_parent();
@@ -1559,6 +1561,8 @@ static void browse(void) {
                     : load_rom(names[active], sizes[active]);
                 if (loaded == 0) {
                     overlay(0);         // hand the screen back to the console
+                    uart_printf("browser: launch ok cd=%d overlay=%d\n",
+                                cd_active, overlay_status());
                     return;
                 }
                 need_redraw = 1;
@@ -1650,11 +1654,12 @@ int main(void) {
         loops++;
         if (time_millis() - last_hb >= 1000) {
             last_hb += 1000;
-            uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d cd_ev=%x cd_active=%d cd_phase=%x adpcm=%x\n",
+            uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d cd_ev=%x cd_active=%d cd_phase=%x cdda=%d cd_play=%d adpcm=%x\n",
                         (int)loops, reg_joystick, reg_vid_dcc_dbg(),
                         reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
                         reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8,
                         (unsigned)reg_cd_events, cd_active, (unsigned)reg_cd_phase,
+                        (unsigned)reg_cd_usedw, cd_audio_playing,
                         (unsigned)reg_cd_adpcm);
             loops = 0;
         }

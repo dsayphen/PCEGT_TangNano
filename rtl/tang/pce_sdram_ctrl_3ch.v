@@ -2,7 +2,7 @@
 //
 // The 8 MiB memory is partitioned by physical SDRAM bank:
 //   banks 0-1: HuCard ROM and loader writes
-//   bank 2:    PicoRV32 firmware/data and VDC1 VRAM
+//   bank 2:    PicoRV32 firmware/data, CD scratch RAM, and VDC1 VRAM
 //   bank 3:    VDC0 VRAM (last 64 KiB, 0x7f0000-0x7fffff)
 //
 // The fixed eight-cycle schedule is derived from SNESTang's Nano 20K
@@ -29,7 +29,6 @@ module pce_sdram_ctrl_3ch #(
     output wire [10:0] O_sdram_addr,
     output wire [1:0]  O_sdram_ba,
     output wire [3:0]  O_sdram_dqm,
-
     input  wire        ld_wr,
     input  wire [22:0] ld_addr,
     input  wire [7:0]  ld_data,
@@ -42,7 +41,6 @@ module pce_sdram_ctrl_3ch #(
     input  wire [22:0] rom_offset,
     output wire [7:0]  rom_do,
     output wire        rom_rdy,
-
     input  wire [15:0] vram_addr,
     input  wire [15:0] vram_din,
     output wire [15:0] vram_dout,
@@ -62,14 +60,13 @@ module pce_sdram_ctrl_3ch #(
     input  wire [3:0]  rv_wstrb,
     output reg  [31:0] rv_rdata,
 
-    // CD-ROM^2 backup/scratch RAM (256 KiB), shares the PicoRV32 channel
-    // above since neither device needs the bus continuously; firmware wins
-    // any collision, the PCE CPU's own wait-state gating just stalls longer.
+    // CD-ROM^2 scratch RAM shares the PicoRV32 channel; the CPU-side request
+    // is prioritized while firmware accesses wait for the same SDRAM slot.
     input  wire        cdram_rd,
     input  wire        cdram_wr,
     input  wire [17:0] cdram_addr,
     input  wire [7:0]  cdram_din,
-    output reg  [7:0]  cdram_dout,
+    output wire [7:0]  cdram_dout,
     output wire        cdram_rdy,
 
     output reg         init_done
@@ -219,7 +216,7 @@ end
 // -------------------------------------------------------------------------
 // PicoRV32: one native 32-bit SDRAM transaction per bus request.
 // -------------------------------------------------------------------------
-localparam [22:0] CDRAM_BASE = 23'h60_0000;  // otherwise-unused part of bank 3
+localparam [22:0] CDRAM_BASE = 23'h5B_0000;  // reserved upper 256 KiB of bank 2
 
 reg         cdram_pending;
 reg  [17:0] cdram_addr_r;
@@ -261,6 +258,14 @@ wire        cdram_cache_hit =
     (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr[17:2]) ||
     (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr[17:2]) ||
     (cdram_cache_valid[3] && cdram_cache_tag[3] == cdram_addr[17:2]);
+reg [7:0] cdram_dout_r;
+wire [31:0] cdram_cache_word = cdram_cache_data[cdram_cache_hit_way];
+assign cdram_dout = cdram_rd && cdram_cache_hit ?
+                    (cdram_addr[1:0] == 2'b00 ? cdram_cache_word[7:0] :
+                     cdram_addr[1:0] == 2'b01 ? cdram_cache_word[15:8] :
+                     cdram_addr[1:0] == 2'b10 ? cdram_cache_word[23:16] :
+                                                cdram_cache_word[31:24]) :
+                    cdram_dout_r;
 
 assign cdram_rdy = ~cdram_pending;
 
@@ -276,7 +281,7 @@ always @(posedge clk) begin
         cdram_we_r        <= 1'b0;
         cdram_rd_d        <= 1'b0;
         cdram_wr_d        <= 1'b0;
-        cdram_dout        <= 8'hff;
+        cdram_dout_r      <= 8'hff;
         cdram_cache_next  <= 2'd0;
         for (w = 0; w < CDRAM_WAYS; w = w + 1) begin
             cdram_cache_valid[w] <= 1'b0;
@@ -291,10 +296,10 @@ always @(posedge clk) begin
             cdram_pending <= 1'b0;
             if (!cdram_we_r) begin
                 case (cdram_complete_ds)
-                    4'b0001: cdram_dout <= cdram_complete_dout[7:0];
-                    4'b0010: cdram_dout <= cdram_complete_dout[15:8];
-                    4'b0100: cdram_dout <= cdram_complete_dout[23:16];
-                    default: cdram_dout <= cdram_complete_dout[31:24];
+                    4'b0001: cdram_dout_r <= cdram_complete_dout[7:0];
+                    4'b0010: cdram_dout_r <= cdram_complete_dout[15:8];
+                    4'b0100: cdram_dout_r <= cdram_complete_dout[23:16];
+                    default: cdram_dout_r <= cdram_complete_dout[31:24];
                 endcase
                 cdram_cache_valid[cdram_cache_next] <= 1'b1;
                 cdram_cache_tag[cdram_cache_next]   <= cdram_addr_r[17:2];
@@ -313,12 +318,6 @@ always @(posedge clk) begin
             end else if (cdram_rd && (!cdram_rd_d || cdram_addr != cdram_addr_r)) begin
                 if (cdram_cache_hit) begin
                     cdram_addr_r <= cdram_addr;
-                    case (cdram_addr[1:0])
-                        2'b00: cdram_dout <= cdram_cache_data[cdram_cache_hit_way][7:0];
-                        2'b01: cdram_dout <= cdram_cache_data[cdram_cache_hit_way][15:8];
-                        2'b10: cdram_dout <= cdram_cache_data[cdram_cache_hit_way][23:16];
-                        default: cdram_dout <= cdram_cache_data[cdram_cache_hit_way][31:24];
-                    endcase
                 end else begin
                     cdram_pending <= 1'b1;
                     cdram_addr_r  <= cdram_addr;
@@ -366,11 +365,7 @@ always @(posedge clk) begin
         rv_ready <= 1'b0;
 
         case (rv_state)
-            // CD-RAM wins ties: it is the HuC6280's own bus cycle, so any
-            // extra latency here shows up as CPU timing jitter (visible as
-            // raster/video shimmer). The firmware side is background
-            // housekeeping (SD card, joypad, menu) that can absorb a few
-            // extra cycles of delay without any visible effect.
+            // CD-RAM wins ties; VDC1 still has priority inside the SDRAM slot.
             RV_IDLE: if (init_done && cdram_pending) begin
                 rv_mem_addr  <= CDRAM_BASE + {5'd0, cdram_addr_r};
                 rv_mem_din   <= {4{cdram_din}};

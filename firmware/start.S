@@ -1,13 +1,13 @@
 # Startup code for the PicoRV32 IO subsystem firmware.
 #
 # Based on the SNESTang start.S (nand2mario, GPLv3).  The stack top matches
-# the 2 MiB RAM window described in baremetal.ld.
+# the firmware RAM window described in baremetal.ld.
 
 .text
 .global _start
 .type _start, @function
 
-.equ    STACK_TOP, 0x1F0000       # 1984 KiB of RAM (avoids VDC1 VRAM window at 0x1F0000..0x1FFFFF)
+.equ    STACK_TOP, 0x1B0000       # CD RAM starts here; stack grows down into firmware RAM
 
 _start:
     li  sp,STACK_TOP    # load stack pointer
