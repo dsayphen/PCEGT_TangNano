@@ -7,7 +7,7 @@
 .global _start
 .type _start, @function
 
-.equ    STACK_TOP, 0x1B0000       # CD RAM starts here; stack grows down into firmware RAM
+.equ    STACK_TOP, 0x1A0000       # ADPCM RAM starts here; stack grows down into firmware RAM
 
 _start:
     li  sp,STACK_TOP    # load stack pointer

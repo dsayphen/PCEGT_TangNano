@@ -51,6 +51,11 @@ wire        rv_ready;
 reg  [22:0] rv_addr  = 23'd0;
 wire [31:0] rv_rdata;
 
+reg  [16:0] adram_addr = 17'd0;
+reg  [3:0]  adram_din = 4'd0;
+wire [3:0] adram_dout;
+reg         adram_we = 0, adram_rd = 0, adram_clken = 0;
+
 reg         ld_wr   = 1'b0;
 reg  [22:0] ld_addr = 23'd0;
 reg  [7:0]  ld_data = 8'd0;
@@ -59,6 +64,14 @@ reg         ld_active = 1'b0;
 
 reg         refresh_window = 1'b0;
 reg         clkref = 1'b0;
+
+`ifdef ADPCM_TEST
+reg [2:0] adpcm_slot = 0;
+always @(negedge clk) begin
+    adpcm_slot <= adpcm_slot + 1'b1;
+    clkref <= (adpcm_slot == 3'd0);
+end
+`endif
 
 wire        sdram_init_done;
 
@@ -112,6 +125,13 @@ pce_sdram_ctrl_3ch #(.FREQ(86_400_000)) mem (
     .rv_wdata      (32'd0),
     .rv_wstrb      (4'd0),
     .rv_rdata      (rv_rdata),
+
+    .adram_addr    (adram_addr),
+    .adram_din     (adram_din),
+    .adram_dout    (adram_dout),
+    .adram_we      (adram_we),
+    .adram_rd      (adram_rd),
+    .adram_clken   (adram_clken),
 
     .init_done     (sdram_init_done)
 );
@@ -183,6 +203,87 @@ task preload_all;
             if (a[0]) word32[31:16] = expect_word1[p];
             else      word32[15:0] = expect_word1[p];
             sd.mem[phys_word_addr1(a)] = word32;
+        end
+    end
+endtask
+
+task write_adpcm_nibble;
+    input [16:0] addr;
+    input [3:0] value;
+    begin
+        @(negedge clk);
+        adram_addr = addr;
+        adram_din = value;
+        adram_we = 1'b1;
+        adram_clken = 1'b1;
+        @(negedge clk);
+        adram_clken = 1'b0;
+        adram_we = 1'b0;
+    end
+endtask
+
+task check_adpcm_ram;
+    integer sample;
+    reg [31:0] stored_word;
+    reg [7:0] expected_byte;
+    begin
+        $display("--- ADPCM SDRAM ---");
+        write_adpcm_nibble(17'd0, 4'hA);
+        write_adpcm_nibble(17'd1, 4'h5);
+        write_adpcm_nibble(17'd2, 4'hC);
+        write_adpcm_nibble(17'd3, 4'hD);
+        repeat (80) @(posedge clk);
+        $display("ADPCM bridge: pending=%b queued=%b rv_state=%d rv_addr=%h rv_ds=%h rv_we=%b word=%h",
+             mem.adram_wr_pending, mem.adram_wr_queued, mem.rv_state,
+             mem.rv_mem_addr, mem.rv_mem_ds, mem.rv_mem_we, sd.mem[21'h168000]);
+        if (sd.mem[21'h168000][15:0] !== 16'hCDA5) begin
+            $display("FAIL ADPCM bytes = %h, expected CDA5", sd.mem[21'h168000][15:0]);
+            errors = errors + 1;
+        end
+        @(negedge clk);
+        adram_addr = 17'd0;
+        adram_rd = 1'b1;
+        repeat (80) @(posedge clk);
+        if (adram_dout !== 4'hA) begin
+            $display("FAIL ADPCM high nibble = %h", adram_dout);
+            errors = errors + 1;
+        end
+        @(negedge clk);
+        adram_addr = 17'd1;
+        #1;
+        if (adram_dout !== 4'h5) begin
+            $display("FAIL ADPCM low nibble = %h", adram_dout);
+            errors = errors + 1;
+        end
+        adram_addr = 17'd2;
+        #1;
+        if (adram_dout !== 4'hC) begin
+            $display("FAIL ADPCM next high nibble = %h", adram_dout);
+            errors = errors + 1;
+        end
+        adram_addr = 17'd3;
+        #1;
+        if (adram_dout !== 4'hD) begin
+            $display("FAIL ADPCM next low nibble = %h", adram_dout);
+            errors = errors + 1;
+        end
+        adram_rd = 1'b0;
+
+        for (sample = 2; sample < 34; sample = sample + 1) begin
+            write_adpcm_nibble(sample * 2, sample[3:0]);
+            write_adpcm_nibble(sample * 2 + 1, ~sample[3:0]);
+            repeat (16) @(posedge clk);
+        end
+        repeat (120) @(posedge clk);
+        for (sample = 2; sample < 34; sample = sample + 1) begin
+            stored_word = sd.mem[21'h168000 + (sample / 4)];
+            expected_byte = {sample[3:0], ~sample[3:0]};
+            if (((stored_word >> ((sample % 4) * 8)) & 8'hff) !== expected_byte) begin
+                $display("FAIL ADPCM burst byte %0d = %h, expected %h",
+                         sample, (stored_word >> ((sample % 4) * 8)) & 8'hff,
+                         expected_byte);
+                errors = errors + 1;
+            end
         end
     end
 endtask
@@ -259,6 +360,15 @@ initial begin
     resetn = 1;
     wait (sdram_init_done);
     repeat (10) @(posedge clk);
+
+    check_adpcm_ram;
+`ifdef ADPCM_TEST
+    if (errors == 0)
+        $display("*** ADPCM_TEST PASSED ***");
+    else
+        $display("*** ADPCM_TEST FAILED with %0d error(s) ***", errors);
+    $finish;
+`endif
 
     preload_all;
     repeat (5) @(posedge clk);

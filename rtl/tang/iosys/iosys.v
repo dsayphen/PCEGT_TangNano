@@ -329,6 +329,7 @@ wire brm_addr_sel  = mem_valid && (mem_addr == 32'h0200_00a8);
 wire brm_data_sel  = mem_valid && (mem_addr == 32'h0200_00ac);
 wire brm_access_sel= mem_valid && (mem_addr == 32'h0200_00b0);
 wire cd_hold_sel   = mem_valid && (mem_addr == 32'h0200_00b4);
+wire cd_audio_word_sel = mem_valid && (mem_addr == 32'h0200_00b8);
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -340,6 +341,9 @@ reg  [31:0] time_reg;
 reg  [7:0]  cd_events;
 reg  [95:0] cd_comm_reg;
 reg  [79:0] cd_dout_reg;
+reg  [31:0] cd_audio_buf;
+reg  [2:0]  cd_audio_count;
+reg         cd_audio_gap;
 
 // ROM streaming state, declared here because mem_ready depends on it
 reg  [31:0] rl_buf;
@@ -378,12 +382,14 @@ assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    game_ctrl_sel ||
                    time_sel || pad_mode_sel || color_mode_sel || id_sel || audio_sel ||
                    cd_event_sel || cd_stat_sel || cd_cmd0_sel || cd_cmd1_sel || cd_cmd2_sel ||
-                   cd_data0_sel || cd_data1_sel || cd_data2_sel || cd_feed_sel || cd_ack_sel ||
+                   cd_data0_sel || cd_data1_sel || cd_data2_sel ||
+                   (cd_feed_sel && cd_audio_count == 0) || cd_ack_sel ||
                    cd_phase_sel ||
                    cd_usedw_sel ||
                    cd_adpcm_sel ||
                    rom_pop_sel || brm_addr_sel || brm_data_sel || brm_access_sel ||
                    cd_hold_sel ||
+                   (cd_audio_word_sel && cd_audio_count == 0) ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -518,7 +524,23 @@ always @(posedge clk) begin
         cd_stat <= mem_wdata[15:0];
         cd_stat_strobe <= 1'b1;
     end
-    if (cd_feed_sel && (mem_wstrb != 4'b0)) begin
+    if (cd_audio_count != 0) begin
+        if (!cd_audio_gap) begin
+            cd_data <= cd_audio_buf[7:0];
+            cd_dm <= 1'b0;
+            cd_wr <= 1'b1;
+            cd_audio_buf <= cd_audio_buf >> 8;
+            cd_audio_count <= cd_audio_count - 1'b1;
+        end
+        cd_audio_gap <= ~cd_audio_gap;
+    end else begin
+        cd_audio_gap <= 1'b0;
+    end
+    if (cd_audio_word_sel && (mem_wstrb != 4'b0) && cd_audio_count == 0) begin
+        cd_audio_buf <= mem_wdata;
+        cd_audio_count <= 3'd4;
+    end
+    if (cd_feed_sel && (mem_wstrb != 4'b0) && cd_audio_count == 0) begin
         cd_data <= mem_wdata[7:0];
         cd_dm <= mem_wdata[8];
         cd_wr <= 1'b1;
@@ -710,6 +732,9 @@ always @(posedge clk) begin
         cd_data      <= 8'd0;
         cd_wr        <= 1'b0;
         cd_dm        <= 1'b0;
+        cd_audio_buf <= 32'd0;
+        cd_audio_count <= 3'd0;
+        cd_audio_gap <= 1'b0;
         cd_audio_hold <= 1'b0;
         cd_ack       <= 1'b0;
         cd_events    <= 8'd0;

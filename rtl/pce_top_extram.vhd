@@ -77,6 +77,7 @@ entity pce_top is
 		ADRAM_DO    : in  std_logic_vector(3 downto 0);
 		ADRAM_WE    : out std_logic;
 		ADRAM_RD    : out std_logic;
+		ADRAM_CLKEN : out std_logic;
 
 		-- CD signals
 		CD_STAT     : in  std_logic_vector(7 downto 0);
@@ -752,7 +753,7 @@ port map(
 	ADRAM_DO => ADRAM_DO,
 	ADRAM_WE => ADRAM_WE,
 	ADRAM_RD => ADRAM_RD,
-	ADRAM_CLKEN => open,
+	ADRAM_CLKEN => ADRAM_CLKEN,
 
 	RAM_CS_N		=> CD_RAM_CS_N,
 	BRAM_EN		=> CD_BRAM_EN,
@@ -805,6 +806,7 @@ generate_NOCD: if (CD_SUPPORT = 0) generate begin
 	ADRAM_DI    <= (others => '0');
 	ADRAM_WE    <= '0';
 	ADRAM_RD    <= '0';
+	ADRAM_CLKEN <= '0';
 
 	CD_COMM      <= (others => '0');
 	CD_COMM_SEND <= '0';

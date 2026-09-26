@@ -2,7 +2,7 @@
 //
 // The 8 MiB memory is partitioned by physical SDRAM bank:
 //   banks 0-1: HuCard ROM and loader writes
-//   bank 2:    PicoRV32 firmware/data, CD scratch RAM, and VDC1 VRAM
+//   bank 2:    PicoRV32 firmware/data, ADPCM RAM, CD scratch RAM, VDC1 VRAM
 //   bank 3:    VDC0 VRAM (last 64 KiB, 0x7f0000-0x7fffff)
 //
 // The fixed eight-cycle schedule is derived from SNESTang's Nano 20K
@@ -68,6 +68,13 @@ module pce_sdram_ctrl_3ch #(
     input  wire [7:0]  cdram_din,
     output wire [7:0]  cdram_dout,
     output wire        cdram_rdy,
+
+    input  wire [16:0] adram_addr,
+    input  wire [3:0]  adram_din,
+    output wire [3:0] adram_dout,
+    input  wire        adram_we,
+    input  wire        adram_rd,
+    input  wire        adram_clken,
 
     output reg         init_done
 );
@@ -217,6 +224,7 @@ end
 // PicoRV32: one native 32-bit SDRAM transaction per bus request.
 // -------------------------------------------------------------------------
 localparam [22:0] CDRAM_BASE = 23'h5B_0000;  // reserved upper 256 KiB of bank 2
+localparam [22:0] ADRAM_BASE = 23'h5A_0000;  // 64 KiB before CD scratch RAM
 
 reg         cdram_pending;
 reg  [17:0] cdram_addr_r;
@@ -268,6 +276,79 @@ assign cdram_dout = cdram_rd && cdram_cache_hit ?
                     cdram_dout_r;
 
 assign cdram_rdy = ~cdram_pending;
+
+reg  [3:0]  adram_high_nibble;
+reg         adram_wr_pending, adram_wr_queued;
+reg  [15:0] adram_wr_addr, adram_queued_addr;
+reg  [7:0]  adram_wr_byte, adram_queued_byte;
+reg         adram_rd_pending;
+reg  [13:0] adram_rd_tag;
+reg         adram_cache_valid;
+reg  [13:0] adram_cache_tag;
+reg  [31:0] adram_cache_word;
+wire        adram_cache_hit = adram_cache_valid &&
+                              adram_cache_tag == adram_addr[16:3];
+wire [2:0] adram_nibble_index = {adram_addr[2:1], ~adram_addr[0]};
+assign adram_dout = adram_cache_hit ?
+                    (adram_cache_word >> {adram_nibble_index, 2'b00}) : 4'd0;
+wire adram_take_write = rv_state == RV_IDLE && init_done && adram_wr_pending;
+wire adram_complete = rv_source_ad && rv_state == RV_WAIT &&
+                      rv_mem_ack_sync[1] == rv_mem_req;
+
+always @(posedge clk) begin
+    if (!resetn) begin
+        adram_high_nibble <= 4'd0;
+        adram_wr_pending <= 1'b0;
+        adram_wr_queued <= 1'b0;
+        adram_wr_addr <= 16'd0;
+        adram_queued_addr <= 16'd0;
+        adram_wr_byte <= 8'd0;
+        adram_queued_byte <= 8'd0;
+        adram_rd_pending <= 1'b0;
+        adram_rd_tag <= 14'd0;
+        adram_cache_valid <= 1'b0;
+        adram_cache_tag <= 14'd0;
+        adram_cache_word <= 32'd0;
+    end else begin
+        if (adram_complete && !rv_mem_we) begin
+            adram_cache_word <= rv_mem_dout;
+            adram_cache_tag <= adram_rd_tag;
+            adram_cache_valid <= 1'b1;
+            adram_rd_pending <= 1'b0;
+        end
+        if (adram_complete && rv_mem_we)
+            adram_cache_valid <= 1'b0;
+        if (adram_rd && !adram_rd_pending && !adram_cache_hit) begin
+            adram_rd_tag <= adram_addr[16:3];
+            adram_rd_pending <= 1'b1;
+        end
+
+        if (adram_we && adram_clken && !adram_addr[0]) begin
+            adram_high_nibble <= adram_din;
+        end
+        if (adram_take_write) begin
+            if (adram_wr_queued) begin
+                adram_wr_addr <= adram_queued_addr;
+                adram_wr_byte <= adram_queued_byte;
+                adram_wr_queued <= 1'b0;
+            end else begin
+                adram_wr_pending <= 1'b0;
+            end
+        end
+        if (adram_we && adram_clken && adram_addr[0]) begin
+            adram_cache_valid <= 1'b0;
+            if (!adram_wr_pending || (adram_take_write && !adram_wr_queued)) begin
+                adram_wr_pending <= 1'b1;
+                adram_wr_addr <= adram_addr[16:1];
+                adram_wr_byte <= {adram_high_nibble, adram_din};
+            end else if (!adram_wr_queued || adram_take_write) begin
+                adram_wr_queued <= 1'b1;
+                adram_queued_addr <= adram_addr[16:1];
+                adram_queued_byte <= {adram_high_nibble, adram_din};
+            end
+        end
+    end
+end
 
 // New read: trigger on an address change (mirrors the ROM channel, since the
 // PCE CPU can hold the same read cycle for several clocks). New write:
@@ -346,6 +427,7 @@ wire [31:0] rv_mem_dout;
 reg  [1:0]  rv_mem_ack_sync;
 reg  [1:0]  rv_state;
 reg         rv_source_cd;  // latches which requester owns the in-flight transfer
+reg         rv_source_ad;
 
 assign cdram_complete = rv_source_cd && (rv_state == RV_WAIT) &&
                         (rv_mem_ack_sync[1] == rv_mem_req);
@@ -368,13 +450,22 @@ always @(posedge clk) begin
         rv_ready        <= 1'b0;
         rv_state        <= RV_IDLE;
         rv_source_cd    <= 1'b0;
+        rv_source_ad    <= 1'b0;
     end else begin
         rv_mem_ack_sync <= {rv_mem_ack_sync[0], rv_mem_ack};
         rv_ready <= 1'b0;
 
         case (rv_state)
-            // Keep firmware transactions ahead of CD-RAM, as in the known-good CD revision.
-            RV_IDLE: if (init_done && rv_valid) begin
+            RV_IDLE: if (adram_take_write) begin
+                rv_mem_addr  <= ADRAM_BASE + {7'd0, adram_wr_addr};
+                rv_mem_din   <= {4{adram_wr_byte}};
+                rv_mem_ds    <= 4'b0001 << adram_wr_addr[1:0];
+                rv_mem_we    <= 1'b1;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_ad <= 1'b1;
+                rv_source_cd <= 1'b0;
+            end else if (init_done && rv_valid) begin
                 rv_mem_addr  <= {rv_addr[22:2], 2'b00};
                 rv_mem_din   <= rv_wdata;
                 rv_mem_ds    <= rv_wstrb;
@@ -382,6 +473,7 @@ always @(posedge clk) begin
                 rv_mem_req   <= ~rv_mem_req;
                 rv_state     <= RV_WAIT;
                 rv_source_cd <= 1'b0;
+                rv_source_ad <= 1'b0;
             end else if (init_done && cdram_pending) begin
                 rv_mem_addr  <= CDRAM_BASE + {5'd0, cdram_addr_r};
                 rv_mem_din   <= {4{cdram_din}};
@@ -390,10 +482,19 @@ always @(posedge clk) begin
                 rv_mem_req   <= ~rv_mem_req;
                 rv_state     <= RV_WAIT;
                 rv_source_cd <= 1'b1;
+                rv_source_ad <= 1'b0;
+            end else if (init_done && adram_rd_pending) begin
+                rv_mem_addr  <= ADRAM_BASE + {7'd0, adram_rd_tag, 2'b00};
+                rv_mem_ds    <= 4'b1111;
+                rv_mem_we    <= 1'b0;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_ad <= 1'b1;
+                rv_source_cd <= 1'b0;
             end
 
             RV_WAIT: if (rv_mem_ack_sync[1] == rv_mem_req) begin
-                if (rv_source_cd) begin
+                if (rv_source_ad || rv_source_cd) begin
                     // cdram_pending/cdram_dout are cleared/latched by the
                     // combinational cdram_complete pulse above.
                 end else begin
