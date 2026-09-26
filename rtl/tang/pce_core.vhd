@@ -167,7 +167,7 @@ begin
 		MAX_SPRITES      => 128,
 		USE_INTERNAL_RAM => 1,
 		CD_SUPPORT       => 1,
-		AC_SUPPORT       => 0
+		AC_SUPPORT       => 1
 	)
 	port map (
 		RESET       => reset,
@@ -219,7 +219,7 @@ begin
 		EXT_RAM_RD  => ext_ram_rd,
 		EXT_RAM_WR  => ext_ram_wr,
 		EXT_RAM_RDY => ext_ram_rdy,
-		AC_EN       => '0',
+		AC_EN       => cd_enable,
 
 		ADRAM_A     => adram_a,
 		ADRAM_DI    => adram_di,

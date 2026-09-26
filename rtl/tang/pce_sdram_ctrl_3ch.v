@@ -64,7 +64,7 @@ module pce_sdram_ctrl_3ch #(
     // is prioritized while firmware accesses wait for the same SDRAM slot.
     input  wire        cdram_rd,
     input  wire        cdram_wr,
-    input  wire [17:0] cdram_addr,
+    input  wire [21:0] cdram_addr,
     input  wire [7:0]  cdram_din,
     output wire [7:0]  cdram_dout,
     output wire        cdram_rdy,
@@ -227,7 +227,7 @@ localparam [22:0] CDRAM_BASE = 23'h5B_0000;  // reserved upper 256 KiB of bank 2
 localparam [22:0] ADRAM_BASE = 23'h5A_0000;  // 64 KiB before CD scratch RAM
 
 reg         cdram_pending;
-reg  [17:0] cdram_addr_r;
+reg  [21:0] cdram_addr_r;
 reg         cdram_we_r;
 reg         cdram_rd_d, cdram_wr_d;
 wire        cdram_complete;
@@ -254,18 +254,18 @@ wire [31:0] cdram_complete_dout;
 // idle/paused).
 localparam CDRAM_WAYS = 4;
 reg         cdram_cache_valid [0:CDRAM_WAYS-1];
-reg  [15:0] cdram_cache_tag   [0:CDRAM_WAYS-1];
+reg  [19:0] cdram_cache_tag   [0:CDRAM_WAYS-1];
 reg  [31:0] cdram_cache_data  [0:CDRAM_WAYS-1];
 reg  [1:0]  cdram_cache_next;   // round-robin fill pointer
 wire [1:0]  cdram_cache_hit_way =
-    (cdram_cache_valid[0] && cdram_cache_tag[0] == cdram_addr[17:2]) ? 2'd0 :
-    (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr[17:2]) ? 2'd1 :
-    (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr[17:2]) ? 2'd2 : 2'd3;
+    (cdram_cache_valid[0] && cdram_cache_tag[0] == cdram_addr[21:2]) ? 2'd0 :
+    (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr[21:2]) ? 2'd1 :
+    (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr[21:2]) ? 2'd2 : 2'd3;
 wire        cdram_cache_hit =
-    (cdram_cache_valid[0] && cdram_cache_tag[0] == cdram_addr[17:2]) ||
-    (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr[17:2]) ||
-    (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr[17:2]) ||
-    (cdram_cache_valid[3] && cdram_cache_tag[3] == cdram_addr[17:2]);
+    (cdram_cache_valid[0] && cdram_cache_tag[0] == cdram_addr[21:2]) ||
+    (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr[21:2]) ||
+    (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr[21:2]) ||
+    (cdram_cache_valid[3] && cdram_cache_tag[3] == cdram_addr[21:2]);
 reg [7:0] cdram_dout_r;
 wire [31:0] cdram_cache_word = cdram_cache_data[cdram_cache_hit_way];
 assign cdram_dout = cdram_rd && cdram_cache_hit ?
@@ -358,7 +358,7 @@ integer w;
 always @(posedge clk) begin
     if (!resetn) begin
         cdram_pending     <= 1'b0;
-        cdram_addr_r      <= 18'd0;
+        cdram_addr_r      <= 22'd0;
         cdram_we_r        <= 1'b0;
         cdram_rd_d        <= 1'b0;
         cdram_wr_d        <= 1'b0;
@@ -366,7 +366,7 @@ always @(posedge clk) begin
         cdram_cache_next  <= 2'd0;
         for (w = 0; w < CDRAM_WAYS; w = w + 1) begin
             cdram_cache_valid[w] <= 1'b0;
-            cdram_cache_tag[w]   <= 16'd0;
+            cdram_cache_tag[w]   <= 20'd0;
             cdram_cache_data[w]  <= 32'd0;
         end
     end else begin
@@ -391,7 +391,7 @@ always @(posedge clk) begin
                     default: cdram_dout_r <= cdram_complete_dout[31:24];
                 endcase
                 cdram_cache_valid[cdram_cache_next] <= 1'b1;
-                cdram_cache_tag[cdram_cache_next]   <= cdram_addr_r[17:2];
+                cdram_cache_tag[cdram_cache_next]   <= cdram_addr_r[21:2];
                 cdram_cache_data[cdram_cache_next]  <= cdram_complete_dout;
                 cdram_cache_next <= cdram_cache_next + 2'd1;
             end
@@ -399,7 +399,7 @@ always @(posedge clk) begin
             if (cdram_wr && !cdram_wr_d) begin
                 // a write invalidates any cached copy, keeping later reads honest
                 for (w = 0; w < CDRAM_WAYS; w = w + 1)
-                    if (cdram_cache_valid[w] && cdram_cache_tag[w] == cdram_addr[17:2])
+                    if (cdram_cache_valid[w] && cdram_cache_tag[w] == cdram_addr[21:2])
                         cdram_cache_valid[w] <= 1'b0;
                 cdram_pending <= 1'b1;
                 cdram_addr_r  <= cdram_addr;
@@ -475,7 +475,9 @@ always @(posedge clk) begin
                 rv_source_cd <= 1'b0;
                 rv_source_ad <= 1'b0;
             end else if (init_done && cdram_pending) begin
-                rv_mem_addr  <= CDRAM_BASE + {5'd0, cdram_addr_r};
+                rv_mem_addr  <= cdram_addr_r[21] ?
+                                CDRAM_BASE + {5'd0, cdram_addr_r[17:0]} :
+                                {2'b01, cdram_addr_r[20:0]};
                 rv_mem_din   <= {4{cdram_din}};
                 rv_mem_ds    <= 4'b0001 << cdram_addr_r[1:0];
                 rv_mem_we    <= cdram_we_r;
