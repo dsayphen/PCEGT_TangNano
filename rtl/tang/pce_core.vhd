@@ -1,17 +1,14 @@
 --------------------------------------------------------------------------------
--- HuCard-only wrapper around pce_top (extram variant) for the Tang Nano 20K.
+-- PCE/CD/SuperGrafx wrapper around pce_top (extram variant) for Tang Nano 20K.
 --
 -- Purpose:
---   * enable the SuperGrafx second VDC while keeping Game Genie disabled;
---     CD_SUPPORT = 0 / AC_SUPPORT = 0
---     so neither the CD-ROM unit nor the Arcade Card are built, and
---     USE_INTERNAL_RAM = 1 so the 8 KiB work RAM is a block RAM)
---   * tie off every interface that this build does not use
+--   * enable the SuperGrafx second VDC and CD-ROM unit while keeping the
+--     Game Genie and Arcade Card disabled
+--   * use internal block RAM for the 8 KiB work RAM and backup RAM
 --   * expose both VDC video RAM ports to the interleaved SDRAM controller
 --   * expose a small, all-lowercase port list to the Verilog top level
 --
--- Only the HuCard ROM remains as an external memory client, which is what
--- rtl/tang/pce_sdram_ctrl.v serves from the on-package SDRAM.
+-- HuCard/CD-ROM data and both VDC VRAMs use the on-package SDRAM.
 --------------------------------------------------------------------------------
 
 library IEEE;
@@ -39,6 +36,13 @@ entity pce_core is
 		rom_sz     : in  std_logic_vector(7 downto 0);
 		sgx_mode   : in  std_logic;
 		cd_enable  : in  std_logic;
+		cd_audio_hold : in std_logic;
+		rom_pop    : in  std_logic;
+		brm_host_addr : in  std_logic_vector(10 downto 0);
+		brm_host_data : in  std_logic_vector(7 downto 0);
+		brm_host_we   : in  std_logic;
+		brm_host_access : in std_logic;
+		brm_host_q    : out std_logic_vector(7 downto 0);
 
 		-- VDC0 video RAM (external SDRAM)
 		vram0_a    : out std_logic_vector(15 downto 0);
@@ -91,7 +95,7 @@ entity pce_core is
 		cd_dm         : in  std_logic;
 		cd_fifo_halffull : out std_logic;
 		cd_phase_dbg     : out std_logic_vector(7 downto 0);
-		cdda_usedw_dbg   : out std_logic_vector(11 downto 0);
+		cdda_usedw_dbg   : out std_logic_vector(12 downto 0);
 		adpcm_dbg        : out std_logic_vector(7 downto 0);
 
 		-- CD-ROM^2 backup/scratch RAM (256 KiB), external SDRAM
@@ -118,14 +122,33 @@ architecture rtl of pce_core is
 	signal brm_di_i : std_logic_vector(7 downto 0);
 	signal brm_do_i : std_logic_vector(7 downto 0);
 	signal brm_we_i : std_logic;
+	signal brm_ram_a : std_logic_vector(10 downto 0);
+	signal brm_ram_di : std_logic_vector(7 downto 0);
+	signal brm_ram_we : std_logic;
+	signal brm_ram_q : std_logic_vector(7 downto 0);
 
 	signal psg_l : signed(19 downto 0);
 	signal psg_r : signed(19 downto 0);
+	signal aud_mix_l : signed(21 downto 0);
+	signal aud_mix_r : signed(21 downto 0);
 
-	-- unused CD / Arcade Card / Game Genie outputs
-	signal cdda_l_nc : signed(19 downto 0);
-	signal cdda_r_nc : signed(19 downto 0);
+	-- Arcade Card / Game Genie outputs not used by this build
+	signal cdda_l : signed(19 downto 0);
+	signal cdda_r : signed(19 downto 0);
 	signal adpcm_nc  : signed(15 downto 0);
+
+	function saturate_audio(value : signed(21 downto 0)) return signed is
+		variable result : signed(19 downto 0);
+	begin
+		if value(21 downto 19) = "000" or value(21 downto 19) = "111" then
+			result := value(19 downto 0);
+		elsif value(21) = '0' then
+			result := '0' & (18 downto 0 => '1');
+		else
+			result := '1' & (18 downto 0 => '0');
+		end if;
+		return result;
+	end function;
 
 begin
 
@@ -151,7 +174,7 @@ begin
 		ROM_A       => rom_a,
 		ROM_DO      => rom_do,
 		ROM_SZ      => rom_sz,
-		ROM_POP     => '0',
+		ROM_POP     => rom_pop,
 		ROM_CLKEN   => open,
 
 		BRM_A       => brm_a_i,
@@ -183,6 +206,7 @@ begin
 		JOY_IN      => joy_in,
 
 		CD_EN       => cd_enable,
+		CD_AUDIO_HOLD => cd_audio_hold,
 		EXT_RAM_A   => ext_ram_a,
 		EXT_RAM_DO  => ext_ram_do,
 		EXT_RAM_DI  => ext_ram_di,
@@ -218,8 +242,8 @@ begin
 		CD_DM       => cd_dm,
 		CD_FIFO_HALFFULL => cd_fifo_halffull,
 
-		CDDA_SL     => cdda_l_nc,
-		CDDA_SR     => cdda_r_nc,
+		CDDA_SL     => cdda_l,
+		CDDA_SR     => cdda_r,
 		ADPCM_S     => adpcm_nc,
 		PSG_SL      => psg_l,
 		PSG_SR      => psg_r,
@@ -249,8 +273,14 @@ begin
 		ADPCM_DBG => adpcm_dbg
 	);
 
-	aud_l <= std_logic_vector(psg_l);
-	aud_r <= std_logic_vector(psg_r);
+	aud_mix_l <= resize(psg_l, aud_mix_l'length) +
+		      resize(cdda_l, aud_mix_l'length) +
+		      shift_left(resize(adpcm_nc, aud_mix_l'length), 4);
+	aud_mix_r <= resize(psg_r, aud_mix_r'length) +
+		      resize(cdda_r, aud_mix_r'length) +
+		      shift_left(resize(adpcm_nc, aud_mix_r'length), 4);
+	aud_l <= std_logic_vector(saturate_audio(aud_mix_l));
+	aud_r <= std_logic_vector(saturate_audio(aud_mix_r));
 
 	-- 2 KiB battery-backed save RAM used by CD-ROM^2 games; a real block RAM
 	-- (not a hardwired constant) so BIOS/game write-then-verify checks succeed
@@ -261,10 +291,16 @@ begin
 	)
 	port map (
 		clock     => clk,
-		address_a => brm_a_i,
-		data_a    => brm_di_i,
-		wren_a    => brm_we_i,
-		q_a       => brm_do_i
+		address_a => brm_ram_a,
+		data_a    => brm_ram_di,
+		wren_a    => brm_ram_we,
+		q_a       => brm_ram_q
 	);
+
+	brm_ram_a  <= brm_host_addr when brm_host_access = '1' else brm_a_i;
+	brm_ram_di <= brm_host_data when brm_host_access = '1' else brm_di_i;
+	brm_ram_we <= brm_host_we when brm_host_access = '1' else brm_we_i;
+	brm_do_i   <= brm_ram_q;
+	brm_host_q <= brm_ram_q;
 
 end rtl;

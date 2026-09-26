@@ -1,8 +1,8 @@
 //
 // PC Engine / TurboGrafx-16 for the Sipeed Tang Nano 20K  (GW2AR-LV18QN88C8/I7)
 //
-// HuCard-only build:
-//   * HuCard ROM in the on-package 64 Mbit SDRAM.  A PicoRV32 IO subsystem
+// PCE / SuperGrafx / experimental CD build:
+//   * ROM images in the on-package 64 Mbit SDRAM. A PicoRV32 IO subsystem
 //     (rtl/tang/iosys/, SNESTang style) boots its firmware from the on-board
 //     SPI flash, mounts the microSD card with FatFs, shows an on-screen menu
 //     over the DVI output and streams the .PCE file the user selects with the
@@ -13,8 +13,7 @@
 //   * PSG -> I2S -> on-board audio amplifier / headphone jack
 //   * one SNES style pad on the GPIO header, plus the two on-board buttons
 //
-// Not built: CD-ROM^2 / Super CD / Arcade Card, backup RAM, Populous SRAM,
-// multitap, 6-button pads, Game Genie.
+// Not built: Arcade Card, multitap, 6-button pads, Game Genie.
 //
 // See README.md for the build, flash, load and wiring instructions.
 //
@@ -193,6 +192,12 @@ wire [7:0]  rv_rom_sz;
 wire [22:0] rv_rom_offset;
 wire        rv_sgx_mode;
 wire        rv_cd_mode;
+wire        rv_rom_pop;
+wire [10:0] brm_host_addr;
+wire [7:0]  brm_host_data;
+wire [7:0]  brm_host_q;
+wire        brm_host_we;
+wire        brm_host_access;
 
 wire        rv_valid;
 wire        rv_ready;
@@ -214,8 +219,9 @@ wire        cd_wr;
 wire        cd_data_end;
 wire        cd_dm;
 wire        cd_fifo_halffull;
+wire        cd_audio_hold;
 wire [7:0]  cd_phase_dbg;
-wire [11:0] cdda_usedw_dbg;
+wire [12:0] cdda_usedw_dbg;
 wire [7:0]  adpcm_dbg;
 wire [21:0] ext_ram_a;
 wire [7:0]  ext_ram_do;
@@ -274,6 +280,7 @@ iosys #(
     .rom_offset       (rv_rom_offset),
     .sgx_mode         (rv_sgx_mode),
     .cd_mode          (rv_cd_mode),
+    .rom_pop          (rv_rom_pop),
     .video_zoom       (video_zoom),
     .scanline         (scanline),
     .game_pause       (game_pause),
@@ -284,6 +291,11 @@ iosys #(
     .audio_volume     (audio_volume),
     .audio_bass       (audio_bass),
     .audio_treble     (audio_treble),
+    .brm_host_q       (brm_host_q),
+    .brm_host_addr    (brm_host_addr),
+    .brm_host_data    (brm_host_data),
+    .brm_host_we      (brm_host_we),
+    .brm_host_access  (brm_host_access),
     .cd_comm          (cd_comm),
     .cd_comm_send     (cd_comm_send),
     .cd_dout          (cd_dout),
@@ -297,6 +309,7 @@ iosys #(
     .cd_data          (cd_data),
     .cd_wr            (cd_wr),
     .cd_dm            (cd_dm),
+    .cd_audio_hold    (cd_audio_hold),
     .cd_ack           (),
     .vid_dcc_dbg      (vid_dcc),
     .vid_hdw_dbg      (vid_hdw_dbg),
@@ -547,6 +560,13 @@ pce_core #(
     .rom_sz     (rom_sz),
     .sgx_mode   (sgx_mode),
     .cd_enable  (rv_cd_mode),
+    .cd_audio_hold (cd_audio_hold),
+    .rom_pop    (rv_rom_pop),
+    .brm_host_addr (brm_host_addr),
+    .brm_host_data (brm_host_data),
+    .brm_host_we   (brm_host_we),
+    .brm_host_access (brm_host_access),
+    .brm_host_q    (brm_host_q),
 
     .vram0_a    (vram0_a),
     .vram0_do   (vram0_do),

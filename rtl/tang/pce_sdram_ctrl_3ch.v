@@ -292,6 +292,14 @@ always @(posedge clk) begin
         cdram_rd_d <= cdram_rd;
         cdram_wr_d <= cdram_wr;
 
+        // Firmware save-state transfers write the Populous SRAM backing
+        // window directly through rv_valid; rv_addr already includes RV_BASE.
+        if (rv_valid && (|rv_wstrb) &&
+            rv_addr >= 23'h5b_0000 && rv_addr < 23'h5b_8000) begin
+            for (w = 0; w < CDRAM_WAYS; w = w + 1)
+                cdram_cache_valid[w] <= 1'b0;
+        end
+
         if (cdram_complete) begin
             cdram_pending <= 1'b0;
             if (!cdram_we_r) begin

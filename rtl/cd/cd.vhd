@@ -13,6 +13,7 @@ entity cd is
 		RST_N			: in  std_logic;
 		CLK 			: in  std_logic;
 		EN 			: in  std_logic;
+		AUDIO_PAUSE	: in  std_logic := '0';
 
 		EXT_A 		: in  std_logic_vector(20 downto 0);
 		EXT_DI 		: in  std_logic_vector(7 downto 0);
@@ -61,7 +62,7 @@ entity cd is
 		AD_S			: out signed(15 downto 0);
 
 		PHASE_DBG	: out std_logic_vector(7 downto 0);
-		CDDA_USEDW_DBG : out std_logic_vector(11 downto 0);
+		CDDA_USEDW_DBG : out std_logic_vector(12 downto 0);
 		ADPCM_DBG : out std_logic_vector(7 downto 0)
 	);
 end cd;
@@ -175,7 +176,7 @@ architecture rtl of cd is
 	signal FIFO_WR_REQ		: std_logic;
 	signal FIFO_D 				: std_logic_vector(31 downto 0);
 	signal FIFO_Q 				: std_logic_vector(31 downto 0);
-	signal FIFO_USEDW       : std_logic_vector(11 downto 0);
+	signal FIFO_USEDW       : std_logic_vector(12 downto 0);
 	signal SAMPLE_CE 			: std_logic;
 	signal ADPCM_CE             : std_logic;
 	signal OUTL 				: signed(25 downto 0);
@@ -676,13 +677,14 @@ begin
 		end if;
 	end process;
 
-	CD_FIFO_HALFFULL <= FIFO_USEDW(11);
+	CD_FIFO_HALFFULL <= '1' when unsigned(FIFO_USEDW) >= 3072 else '0';
 	CDDA_USEDW_DBG <= FIFO_USEDW;
 	ADPCM_DBG <= ADPCM_PLAY & ADPCM_END_EN & ADPCM_HALF_EN & ADPCM_DMA_EN & ADPCM_CTRL(3 downto 0);
 
 	FIFO : entity work.CDDA_FIFO 
 	port map(
 		clock		=> CLK,
+		clear		=> not RST_N,
 		data		=> FIFO_D,
 		wrreq		=> FIFO_WR_REQ,
 		full		=> FIFO_FULL,
@@ -720,7 +722,10 @@ begin
 		elsif rising_edge(CLK) then
 			FIFO_RD_REQ <= '0';
 			if SAMPLE_CE = '1' and EN = '1' then	-- ~44.1kHz
-				if FIFO_EMPTY = '0' then
+				if AUDIO_PAUSE = '1' then
+					OUTL <= (others => '0');
+					OUTR <= (others => '0');
+				elsif FIFO_EMPTY = '0' then
 					FIFO_RD_REQ <= '1';
 					if (CD_STOP_CD_SND = '0') then
 						OUTL <= resize(signed(FIFO_Q(15 downto 0)) * signed('0'&CDDA_FADE_VOL), OUTL'length);
