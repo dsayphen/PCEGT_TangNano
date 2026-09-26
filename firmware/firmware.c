@@ -73,6 +73,9 @@ static uint32_t cd_disc_total_lba = 0;
 static int      cd_stat_pending = 0;
 static int      cd_audio_playing = 0;
 static int      cd_audio_paused = 0;
+static uint32_t cd_audio_bytes_fed = 0;
+static uint32_t cd_audio_read_ms = 0;
+static uint32_t cd_audio_feed_ms = 0;
 static uint32_t cd_audio_pos = 0;   // absolute byte offset into cd_image
 static uint32_t cd_audio_start = 0;
 static uint32_t cd_audio_end = 0;
@@ -1263,6 +1266,7 @@ static int find_cd_cue(char *cue_name, size_t cue_len) {
 }
 
 static void cd_service(void) {
+    static uint32_t logged_events = 0;
     uint32_t events = reg_cd_events;
     if (!cd_active)
         return;
@@ -1283,15 +1287,28 @@ static void cd_service(void) {
         UINT br;
         UINT want = (UINT)((cd_audio_end - cd_audio_pos) > sizeof(io_buf)
                            ? sizeof(io_buf) : (cd_audio_end - cd_audio_pos));
+        uint32_t read_start = time_millis();
         FRESULT seek_result = f_tell(&cd_audio_file) == cd_audio_pos
             ? FR_OK : f_lseek(&cd_audio_file, cd_audio_pos);
         FRESULT read_result = seek_result == FR_OK
             ? f_read(&cd_audio_file, io_buf, want, &br)
             : seek_result;
+        cd_audio_read_ms += time_millis() - read_start;
         if (read_result == FR_OK && br > 0) {
-            for (UINT i = 0; i < br; i++)
+            uint32_t feed_start = time_millis();
+            UINT i = 0;
+            for (; i + 4 <= br; i += 4) {
+                uint32_t word = (uint32_t)io_buf[i] |
+                                ((uint32_t)io_buf[i + 1] << 8) |
+                                ((uint32_t)io_buf[i + 2] << 16) |
+                                ((uint32_t)io_buf[i + 3] << 24);
+                reg_cd_audio_word = word;
+            }
+            for (; i < br; i++)
                 reg_cd_feed = (uint32_t)io_buf[i];
+            cd_audio_feed_ms += time_millis() - feed_start;
             cd_audio_pos += br;
+            cd_audio_bytes_fed += br;
         } else {
             uart_printf("cd: audio stopped read=%d pos=%d size=%d\n",
                         (int)read_result, (int)cd_audio_pos,
@@ -1301,7 +1318,9 @@ static void cd_service(void) {
         }
     }
 
-    if (events)
+    uint32_t new_events = (events & 0x1f) & ~logged_events;
+    logged_events = events & 0x1f;
+    if (new_events)
         uart_printf("cd: t=%d events=%x\n", (int)time_millis(), (unsigned)events);
 
     // The SCSI core must fully drain any FIFO bytes pushed below before it
@@ -1496,7 +1515,15 @@ static void cd_service(void) {
                                        ? sizeof(io_buf) : (cd_audio_end - cd_audio_pos));
                     if (f_read(&cd_audio_file, io_buf, want, &br) != FR_OK || br == 0)
                         break;
-                    for (UINT i = 0; i < br; i++)
+                    UINT i = 0;
+                    for (; i + 4 <= br; i += 4) {
+                        uint32_t word = (uint32_t)io_buf[i] |
+                                        ((uint32_t)io_buf[i + 1] << 8) |
+                                        ((uint32_t)io_buf[i + 2] << 16) |
+                                        ((uint32_t)io_buf[i + 3] << 24);
+                        reg_cd_audio_word = word;
+                    }
+                    for (; i < br; i++)
                         reg_cd_feed = (uint32_t)io_buf[i];
                     cd_audio_pos += br;
                 }
@@ -1963,31 +1990,45 @@ int main(void) {
         loops++;
         if (time_millis() - last_hb >= 1000) {
             last_hb += 1000;
-            uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d cd_ev=%x cd_active=%d cd_phase=%x cdda=%d cd_play=%d min_cdda=%d empty=%d adpcm=%x\n",
-                        (int)loops, reg_joystick, reg_vid_dcc_dbg(),
-                        reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
-                        reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8,
-                        (unsigned)reg_cd_events, cd_active, (unsigned)reg_cd_phase,
-                        (unsigned)reg_cd_usedw, cd_audio_playing,
-                        cd_min_usedw == 0xffffffffu ? -1 : (int)cd_min_usedw,
-                        (int)cd_empty_polls,
-                        (unsigned)reg_cd_adpcm);
+            if (cd_audio_playing) {
+                uart_printf("cd: m=%d e=%d u=%d b=%d r=%d f=%d l=%d\n",
+                            cd_min_usedw == 0xffffffffu ? -1 : (int)cd_min_usedw,
+                            (int)cd_empty_polls, (int)reg_cd_usedw,
+                            (int)cd_audio_bytes_fed, (int)cd_audio_read_ms,
+                            (int)cd_audio_feed_ms, (int)loops);
+            } else {
+                uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d cd_ev=%x cd_active=%d cd_phase=%x cdda=%d cd_play=%d adpcm=%x\n",
+                            (int)loops, reg_joystick, reg_vid_dcc_dbg(),
+                            reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
+                            reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8,
+                            (unsigned)reg_cd_events, cd_active, (unsigned)reg_cd_phase,
+                            (unsigned)reg_cd_usedw, cd_audio_playing,
+                            (unsigned)reg_cd_adpcm);
+            }
             loops = 0;
+            cd_audio_bytes_fed = 0;
+            cd_audio_read_ms = 0;
+            cd_audio_feed_ms = 0;
             cd_min_usedw = 0xffffffffu;
             cd_empty_polls = 0;
         }
 
         if (raw != last_raw) {
-            uart_printf("joy %x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
-                        raw, reg_vid_dcc_dbg(), reg_vid_hds_dbg(),
-                        reg_vid_hds_dbg() * 8, reg_vid_hdw_dbg(),
-                        reg_vid_hdw_dbg() * 8);
+            if (!cd_audio_playing)
+                uart_printf("joy %x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
+                            raw, reg_vid_dcc_dbg(), reg_vid_hds_dbg(),
+                            reg_vid_hds_dbg() * 8, reg_vid_hdw_dbg(),
+                            reg_vid_hdw_dbg() * 8);
             last_raw = raw;
         }
 
         static uint32_t last_reg = 0xffffffff;
         uint32_t r = reg_joystick;
-        if (r != last_reg) { uart_printf("reg %x\n", r); last_reg = r; }
+        if (r != last_reg) {
+            if (!cd_audio_playing)
+                uart_printf("reg %x\n", r);
+            last_reg = r;
+        }
 
         if (!(raw & JOY_SELECT)) {
             // Select released: require another 500 ms hold next time.
@@ -2022,7 +2063,10 @@ int main(void) {
                    (e & (JOY_LEFT | JOY_RIGHT))) {
             scanline_cycle((e & JOY_RIGHT) ? 1 : -1);
         }
-        delay(cd_audio_playing ? 2 : 20);
+        if (!cd_audio_playing)
+            delay(20);
+        else if (reg_cd_usedw >= 3072)
+            delay(2);
     }
 
     return 0;

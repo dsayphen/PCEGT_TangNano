@@ -223,6 +223,9 @@ wire        cd_audio_hold;
 wire [7:0]  cd_phase_dbg;
 wire [12:0] cdda_usedw_dbg;
 wire [7:0]  adpcm_dbg;
+wire [16:0] adram_a;
+wire [3:0]  adram_di, adram_do;
+wire        adram_we, adram_rd, adram_clken;
 wire [21:0] ext_ram_a;
 wire [7:0]  ext_ram_do;
 wire [7:0]  ext_ram_di;
@@ -487,6 +490,13 @@ pce_sdram_ctrl_3ch #(
     .cdram_dout    (ext_ram_di),
     .cdram_rdy     (ext_ram_rdy),
 
+    .adram_addr    (adram_a),
+    .adram_din     (adram_di),
+    .adram_dout    (adram_do),
+    .adram_we      (adram_we),
+    .adram_rd      (adram_rd),
+    .adram_clken   (adram_clken),
+
     .init_done     (sdram_init_done)
 );
 
@@ -613,6 +623,12 @@ pce_core #(
     ,.cd_phase_dbg  (cd_phase_dbg)
     ,.cdda_usedw_dbg (cdda_usedw_dbg)
     ,.adpcm_dbg (adpcm_dbg)
+    ,.adram_a (adram_a)
+    ,.adram_di (adram_di)
+    ,.adram_do (adram_do)
+    ,.adram_we (adram_we)
+    ,.adram_rd (adram_rd)
+    ,.adram_clken (adram_clken)
     ,.ext_ram_a   (ext_ram_a)
     ,.ext_ram_do  (ext_ram_do)
     ,.ext_ram_di  (ext_ram_di)

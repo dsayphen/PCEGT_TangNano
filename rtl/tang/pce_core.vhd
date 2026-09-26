@@ -97,6 +97,12 @@ entity pce_core is
 		cd_phase_dbg     : out std_logic_vector(7 downto 0);
 		cdda_usedw_dbg   : out std_logic_vector(12 downto 0);
 		adpcm_dbg        : out std_logic_vector(7 downto 0);
+		adram_a          : out std_logic_vector(16 downto 0);
+		adram_di         : out std_logic_vector(3 downto 0);
+		adram_do         : in  std_logic_vector(3 downto 0);
+		adram_we         : out std_logic;
+		adram_rd         : out std_logic;
+		adram_clken      : out std_logic;
 
 		-- CD-ROM^2 backup/scratch RAM (256 KiB), external SDRAM
 		ext_ram_a    : out std_logic_vector(21 downto 0);
@@ -116,7 +122,6 @@ architecture rtl of pce_core is
 	signal gg_code_z : std_logic_vector(128 downto 0) := (others => '0');
 	signal ff_byte   : std_logic_vector(7 downto 0) := x"FF";
 	signal zero_byte : std_logic_vector(7 downto 0) := x"00";
-	signal zero_nib  : std_logic_vector(3 downto 0) := x"0";
 
 	signal brm_a_i  : std_logic_vector(10 downto 0);
 	signal brm_di_i : std_logic_vector(7 downto 0);
@@ -216,11 +221,12 @@ begin
 		EXT_RAM_RDY => ext_ram_rdy,
 		AC_EN       => '0',
 
-		ADRAM_A     => open,
-		ADRAM_DI    => open,
-		ADRAM_DO    => zero_nib,
-		ADRAM_WE    => open,
-		ADRAM_RD    => open,
+		ADRAM_A     => adram_a,
+		ADRAM_DI    => adram_di,
+		ADRAM_DO    => adram_do,
+		ADRAM_WE    => adram_we,
+		ADRAM_RD    => adram_rd,
+		ADRAM_CLKEN => adram_clken,
 
 		CD_STAT     => cd_stat(7 downto 0),
 		CD_MSG      => cd_stat(15 downto 8),

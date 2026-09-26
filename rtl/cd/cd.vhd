@@ -750,12 +750,12 @@ begin
 			FADE_CNT <= (others => '0');
 		elsif rising_edge(CLK) then
 			if SAMPLE_CE = '1' and EN = '1' then
-				if FADE_VOL(9 downto 0) > 0 and ADPCM_FADER(2) = '1' then
+				if FADE_VOL /= 0 and ADPCM_FADER(2) = '1' then
 					FADE_CNT <= FADE_CNT + 1;
 					if (FADE_CNT = 107 and ADPCM_FADER(1) = '1') or 	--2.5s
 						(FADE_CNT = 255 and ADPCM_FADER(1) = '0') then	--6s
 						FADE_CNT <= (others => '0');
-						FADE_VOL <= "0" & (FADE_VOL(9 downto 0) - 1);
+						FADE_VOL <= FADE_VOL - 1;
 					end if;
 				elsif ADPCM_FADER(2) = '0' then
 					FADE_VOL <= "10000000000";

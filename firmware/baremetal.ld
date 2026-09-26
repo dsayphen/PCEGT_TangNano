@@ -2,20 +2,21 @@
  * Linker script for the PicoRV32 IO subsystem firmware of the Tang Nano 20K
  * PC Engine port.
  *
- * The softcore uses 1792 KiB at address 0, mapped onto SDRAM 0x400000..0x5AFFFF.
- * The next 256 KiB is reserved for CD scratch RAM; the final 64 KiB is VDC1 VRAM.
+ * The softcore uses 1664 KiB at address 0, mapped onto SDRAM 0x400000..0x59FFFF.
+ * The next 64 KiB is ADPCM RAM (0x5A0000..0x5AFFFF), then 256 KiB CD scratch
+ * RAM and 64 KiB VDC1 VRAM.
  * _start (start.S) must sit at address 0 because that is where the core
  * begins executing once the firmware has been copied out of SPI flash.
  *
  * Only the first FIRMWARE_SIZE bytes (128 KiB, see rtl/top_tang_nano20k.v)
  * are copied from flash, so .text + .data must stay below that; .bss is
- * zeroed by start.S and may live anywhere in the remaining 1984 KiB.
+ * zeroed by start.S and may live anywhere in the remaining firmware RAM.
  *
  * Based on the SNESTang baremetal.ld (nand2mario, GPLv3).
  */
 MEMORY
 {
-    RAM (RWX) : ORIGIN = 0x00000, LENGTH = 0x1B0000
+    RAM (RWX) : ORIGIN = 0x00000, LENGTH = 0x1A0000
 }
 SECTIONS
 {

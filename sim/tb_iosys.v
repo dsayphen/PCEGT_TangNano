@@ -213,6 +213,15 @@ integer errors = 0;
 integer marks  = 0;
 integer refreshes = 0;
 reg [7:0] mark_log [0:15];
+reg [7:0] cd_audio_log [0:7];
+integer cd_audio_marks = 0;
+
+always @(negedge clk) begin
+    if (resetn && dut.cd_wr && !dut.cd_dm && cd_audio_marks < 8) begin
+        cd_audio_log[cd_audio_marks] = dut.cd_data;
+        cd_audio_marks = cd_audio_marks + 1;
+    end
+end
 
 always @(negedge clk_mem)
     if (!O_sdram_cs_n && !O_sdram_ras_n &&
@@ -239,6 +248,54 @@ task check_eq;
         end
     end
 endtask
+
+task check_cd_audio_feed;
+    begin
+        $display("--- CDDA word feed ---");
+        @(negedge clk);
+        force dut.mem_valid = 1'b1;
+        force dut.mem_addr = 32'h0200_00b8;
+        force dut.mem_wdata = 32'h44332211;
+        force dut.mem_wstrb = 4'hf;
+        @(posedge clk);
+        #1;
+        check_eq(dut.cd_audio_count, 4, "audio word accepted");
+        @(negedge clk);
+        force dut.mem_wdata = 32'h88776655;
+        check_eq(dut.mem_ready, 1'b0, "second word stalled");
+        wait (dut.mem_ready);
+        @(posedge clk);
+        #1;
+        force dut.mem_valid = 1'b0;
+        repeat (12) @(posedge clk);
+        release dut.mem_valid;
+        release dut.mem_addr;
+        release dut.mem_wdata;
+        release dut.mem_wstrb;
+        check_eq(cd_audio_marks, 8, "audio byte count");
+        check_eq(cd_audio_log[0], 8'h11, "audio byte 0");
+        check_eq(cd_audio_log[1], 8'h22, "audio byte 1");
+        check_eq(cd_audio_log[2], 8'h33, "audio byte 2");
+        check_eq(cd_audio_log[3], 8'h44, "audio byte 3");
+        check_eq(cd_audio_log[4], 8'h55, "audio byte 4");
+        check_eq(cd_audio_log[5], 8'h66, "audio byte 5");
+        check_eq(cd_audio_log[6], 8'h77, "audio byte 6");
+        check_eq(cd_audio_log[7], 8'h88, "audio byte 7");
+    end
+endtask
+
+`ifdef CD_AUDIO_TEST
+initial begin
+    wait (resetn);
+    repeat (4) @(posedge clk);
+    check_cd_audio_feed();
+    if (errors == 0)
+        $display("*** CD_AUDIO_TEST PASSED ***");
+    else
+        $display("*** CD_AUDIO_TEST FAILED with %0d error(s) ***", errors);
+    $finish;
+end
+`endif
 
 // snoop the OSD character register writes the program uses as markers
 always @(posedge clk) begin
@@ -330,6 +387,8 @@ initial begin
     end else begin
         $display("ok   refresh burst count = %0d", refreshes);
     end
+
+    check_cd_audio_feed();
 
     if (errors == 0)
         $display("\n*** tb_iosys PASSED ***");

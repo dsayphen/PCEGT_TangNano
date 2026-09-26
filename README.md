@@ -1,19 +1,20 @@
 # PC Engine / TurboGrafx-16 for the Sipeed Tang Nano 20K
 
-A HuCard-only port of the [mist-devel/TurboGrafx16_FPGA](https://github.com/mist-devel/TurboGrafx16_FPGA)
-PC Engine core to the **Sipeed Tang Nano 20K** (Gowin `GW2AR-LV18QN88C8/I7`).
+A PC Engine / SuperGrafx port of the
+[mist-devel/TurboGrafx16_FPGA](https://github.com/mist-devel/TurboGrafx16_FPGA)
+core to the **Sipeed Tang Nano 20K** (Gowin `GW2AR-LV18QN88C8/I7`). CD-ROM
+support is experimental.
 
-ROM images are pushed into the on-package SDRAM over the board's USB serial
-port, video goes out of the HDMI connector and sound out of the on-board
-headphone amplifier.
+The PicoRV32 firmware boots from SPI flash, browses a FAT-formatted microSD
+card on the OSD and loads HuCard or System Card images into SDRAM. The USB-UART
+loader is also available as a fallback. Video uses the HDMI connector (DVI
+signalling); audio uses the board's I2S amplifier/headphone output, not HDMI.
 
 ```
-        USB-C ──► BL616 ──► UART ──► ROM loader ──► SDRAM (HuCard ROM)
-                                                       │
-   SNES pad ──► pad reader ──► JOY ──►  pce_top (HuC6280/6270/6260)
-                                          │             │
-                                          │             └──► PSG ─► I2S ─► headphone jack
-                                          └──► line doubler ─► DVI/TMDS ─► HDMI
+microSD -> PicoRV32 + OSD -> SDRAM (HuCard / System Card, CD/ADPCM RAM)
+USB-UART -----------------> SDRAM (fallback HuCard loader)
+SNES pad -> HuC6280 / VDC / VCE -> line doubler -> DVI over HDMI
+           PSG + CDDA + ADPCM -> I2S -> board audio output
 ```
 
 ---
@@ -24,18 +25,18 @@ headphone amplifier.
 | --- | --- |
 | HuCard games up to 4 MiB (incl. the SF2 mapper) | yes |
 | HuC6280 CPU, HuC6270 VDC, HuC6260 VCE, PSG | yes |
-| 8 KiB work RAM, 64 KiB VRAM, palette RAM | yes; VRAM in SDRAM, the rest in block RAM |
+| 8 KiB work RAM, dual 64 KiB VRAMs, palette RAM | yes; VRAMs in SDRAM, work/palette RAM in block RAM |
 | Video output | 640x480-class DVI over HDMI, genlocked line doubler |
-| Audio | stereo PSG, I2S to the on-board amplifier / headphone jack |
-| Controller | one SNES-style pad on the GPIO header; S1 resets the console |
-| ROM loading | UART, see section 4 |
-| CD-ROM² / Super CD | experimental; CUE/BIN, System Card and CD audio are supported |
+| Audio | PSG + CDDA mixed to stereo I2S; ADPCM path connected to SDRAM, hardware audio test pending |
+| Controller | one SNES-style pad, 2/6-button modes; S1 resets the console |
+| ROM loading | microSD browser; USB-UART fallback, see section 4 |
+| CD-ROM² / Super CD | experimental CUE/BIN, System Card, CDDA, SCSI data and ADPCM |
 | Arcade Card | **not built** (`AC_SUPPORT = 0`) |
 | SuperGrafx (second VDC / VPC) | yes (`SGX_SUPPORT = 1`) |
 | Game Genie / cheat engine | **not built** (`CHEAT_SUPPORT = 0`) |
-| Backup RAM (BRAM), Populous SRAM | persistent per-game saves on microSD (`/saves`) |
-| Multitap, 6-button pads, mouse, MB128 | not implemented |
-| OSD / menu | none, this is a standalone build |
+| Backup RAM (BRAM), Populous SRAM | saved per game on microSD at firmware-menu entry (not on power loss) |
+| Multitap, mouse, MB128 | not implemented |
+| OSD / menu | microSD browser, in-game pause, audio and video settings |
 
 The console runs at **43.2 MHz** instead of the nominal 42.954 MHz, i.e. **0.57 %
 fast**. 42.954 MHz cannot be synthesised from the board's 27 MHz crystal: the
@@ -47,18 +48,30 @@ detector at 1.2 MHz, far below its 3 MHz minimum. The audible/visible effect of
 
 ## 2. Building
 
-Requires the **Gowin EDA IDE** (Education or Standard edition, V1.9.9 or newer)
-with GowinSynthesis.
+The tested FPGA tool is **Gowin V1.9.11.03 Education**, targeting
+`GW2AR-LV18QN88C8/I7`. The PicoRV32 firmware additionally needs an RV32I
+bare-metal GCC toolchain; `firmware/build.ps1` finds xPack RISC-V GCC under
+`%USERPROFILE%\opt` or via `RISCV_PREFIX`.
 
-1. `File → Open Project…` and select `PCE_GT_TangNano.gprj`.
-2. Check that the device is `GW2AR-18C` / `GW2AR-LV18QN88C8/I7`.
-3. `Process → Synthesize`, then `Process → Place & Route`.
-4. Program with the Gowin Programmer or `openFPGALoader`:
+From the repository root, build **both** components:
 
-   ```
-   openFPGALoader -b tangnano20k impl/pnr/PCE_GT_TangNano.fs          # volatile
-   openFPGALoader -b tangnano20k -f impl/pnr/PCE_GT_TangNano.fs       # to flash
-   ```
+```powershell
+& .\firmware\build.ps1
+& "G:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\gw_sh.exe" tools/build.tcl
+```
+
+The resulting FPGA bitstream is `impl/pnr/PCE_GT_TangNano.fs`. Program it
+with the Gowin Programmer or `openFPGALoader`:
+
+```sh
+openFPGALoader -b tangnano20k impl/pnr/PCE_GT_TangNano.fs     # volatile
+openFPGALoader -b tangnano20k -f impl/pnr/PCE_GT_TangNano.fs  # FPGA flash
+```
+
+Flash `firmware/firmware.bin` **separately** into the board SPI flash at
+**offset `0x500000`**. The FPGA bitstream alone does not update the firmware.
+Do not write the firmware binary at offset zero. On Windows, the Gowin
+Programmer can write the binary at this address.
 
 Project settings that matter (already stored in
 `impl/PCE_GT_TangNano_process_config.json`):
@@ -90,7 +103,7 @@ python tools/mif2vhd.py
 | 27 MHz clock | 4 | |
 | `s1` (button) | 88 | **reset** the console |
 | `uart_rx` | 70 | from the on-board BL616 USB-serial bridge |
-| `uart_tx` | 69 | idle, nothing is sent back |
+| `uart_tx` | 69 | firmware status and CD diagnostics at 115200 baud |
 | `led[1:0]` | 16,15 | status, active low |
 | HDMI TMDS clk ± | 33 / 34 | |
 | HDMI TMDS d0/d1/d2 ± | 35/36, 37/38, 39/40 | |
@@ -134,12 +147,33 @@ Board button **S1** resets the console (the loaded ROM stays in SDRAM).
 If no pad is connected, DATA idles high and no button is reported; the console
 can still be reset with S1.
 
+In the firmware browser, Up/Down select a file, Left/Right change pages, A
+opens a directory or loads a `.pce`, `.sgx` or `.cue`, and B goes to the parent
+directory. A folder ending in `(CD)` automatically opens its first CUE file.
+During a game, Select+Start opens the firmware pause menu (Resume, Reset,
+Return to browser, gamepad mode and video/audio settings). Hold Select for
+500 ms before using Select+Up/Down for zoom or Select+Left/Right for scanlines.
+The game's own RUN/Start button does not pause CD music on its own.
+
 ---
 
 ## 4. Loading a ROM
 
-The core has no file system; a HuCard image is streamed into SDRAM over the
-board's USB serial port.
+Insert a FAT16/FAT32/exFAT microSD card with `.pce` HuCard images, `.sgx`
+SuperGrafx images or `.cue` files and their referenced BIN tracks. The
+firmware mounts the card, presents the OSD browser and streams the selected
+HuCard into SDRAM. Selecting a CUE loads the System Card and enables the CD
+unit; selecting a folder ending in `(CD)` looks for its first CUE file.
+
+CD boot requires a System Card image at `/config/syscard.pce` (also accepted:
+`systemcard.pce` or `system_card.pce`). The CD reader supports quoted filenames
+and MODE1/2048, MODE1/2352 and MODE2/2352 data tracks; CDDA uses raw 2352-byte
+audio sectors. The implementation is experimental, and CHD and Arcade Card
+images are not supported.
+
+The board's USB serial port remains a fallback for HuCards, even without a
+microSD card. This path uses `tools/pce_send.py` and does not provide the OSD
+browser's per-game save handling:
 
 ```
 pip install pyserial
@@ -151,10 +185,17 @@ python tools/pce_send.py COM7 game.pce
 The console is held in reset while the transfer runs and starts automatically
 when it finishes. Sending another image at any time replaces the current one.
 
-When using the microSD browser, backup RAM is stored in `/saves/<image>.brm`.
-Populous SRAM is stored in `/saves/<image>.pop`. Existing files are restored
-when the game is loaded; saves are written when the firmware pause menu opens.
-Keep the SD card inserted and open that menu before powering the console off.
+When using the microSD browser, the 2 KiB backup RAM is stored in
+`/saves/<filename>.brm`. Populous's 32 KiB SRAM uses
+`/saves/<filename>.pop`. `<filename>` includes the image extension: for
+`game.cue`, for example, the BRAM file is `game.cue.brm`. Existing saves are
+restored when that game is loaded; they are written when the **firmware pause
+menu** opens. In-game pause and power-off do not trigger a save. Keep the SD
+card inserted and open the firmware menu before switching power off.
+
+Global video and audio settings live in `/config/video.cfg` and
+`/config/audio.cfg`. The current game's 2/6-button mode lives in
+`/config/<filename>.cfg`.
 
 ### Wire protocol
 
@@ -216,6 +257,16 @@ the correct 4:3 aspect ratio.
 Signalling is **DVI** (no HDMI data islands), which every HDMI sink accepts.
 There is therefore **no HDMI audio**; sound comes out of the headphone jack.
 
+The HuC6280 PSG, CDDA and decoded ADPCM are mixed before the board's 16-bit
+stereo I2S output (about 48.2 kHz); the CDDA sample clock is approximately
+44.35 kHz rather than exactly 44.1 kHz. The CDDA FIFO is 6 KiB; firmware services
+it from the SD card through a 32-bit audio feed port. The CD unit supports
+track selection, repeat, pause, GET SUBQ and register-controlled CDDA/ADPCM
+fade. The ADPCM nibble RAM is in SDRAM, not block RAM. CDDA and data playback
+have been exercised on hardware; the newly connected ADPCM memory path passed
+focused SDRAM simulation and Gowin place-and-route but still needs an audible
+on-board test. The GW2AR-18 build currently uses all 46 available BSRAM blocks.
+
 ### Clocks
 
 | Clock | Frequency | Source |
@@ -231,25 +282,28 @@ There is therefore **no HDMI audio**; sound comes out of the headphone jack.
 
 ## 6. Memory map
 
-The HuCard ROM, PicoRV32 RAM and both VDC VRAMs share the external SDRAM
-through three fixed interleaved channels. VDC1 shares the bank-2 channel with
-PicoRV32 and takes priority while SuperGrafx video fetches are active.
+The HuCard ROM, PicoRV32 RAM, CD scratch/ADPCM RAM and both VDC VRAMs share the
+on-package SDRAM through three fixed interleaved channels. VDC1 shares the
+bank-2 channel with the firmware and CD memories.
 
 | What | Where | Size |
 | --- | --- | --- |
 | HuCard ROM | SDRAM, byte address 0 (+512 if the image has a header) | ≤ 4 MiB |
 | Work RAM | block RAM inside `pce_top` (`USE_INTERNAL_RAM = 1`) | 8 KiB |
-| PicoRV32 RAM | SDRAM bank 2, byte address `0x400000` | 1984 KiB |
+| PicoRV32 firmware/data | SDRAM bank 2, `0x400000..0x59FFFF` | 1664 KiB |
+| ADPCM nibble RAM | SDRAM bank 2, `0x5A0000..0x5AFFFF` | 64 KiB |
+| CD-ROM scratch RAM (incl. Populous SRAM backing) | SDRAM bank 2, `0x5B0000..0x5EFFFF` | 256 KiB |
+| Battery-backed RAM emulation | block RAM, saved to microSD at firmware-menu entry | 2 KiB |
 | VDC0 VRAM | SDRAM bank 3, byte address `0x7F0000` | 32K × 16 |
 | VDC1 VRAM | SDRAM bank 2, byte address `0x5F0000` | 32K × 16 |
 | Palette RAM, sprite/attribute buffers, PSG table | block RAM inside the core | small |
 | Line buffers for the scan doubler | block RAM | 2 × 1024 × 9 |
 
 `rtl/tang/pce_sdram_ctrl_3ch.v` runs the SDRAM at 86.4 MHz and assigns fixed
-slots to (1) HuCard ROM/loader, (2) PicoRV32 or VDC1 and (3) VDC0. Its
-eight-cycle schedule returns both VRAM data words within one fastest PCE pixel
-period. Refresh commands are issued in alternating slots during vertical
-blanking and while the console is held in reset.
+slots to (1) HuCard ROM/loader, (2) PicoRV32/CD/ADPCM or VDC1 and (3) VDC0.
+Its eight-cycle schedule returns VRAM data within one fastest PCE pixel period.
+Refresh is distributed across available idle slots and is also allowed while
+the console is held in reset.
 
 ---
 
@@ -259,17 +313,19 @@ blanking and while the console is held in reset.
 rtl/
   top_tang_nano20k.v          board top level
   pce_top_extram.vhd          console (upstream, + CD_SUPPORT/AC_SUPPORT generics)
-  huc6202/6260/6270.vhd       VPC / VCE / VDC (upstream)
+  huc6202.vhd, huc6260.vhd,
+  huc6270.vhd                 VPC / VCE / VDC (upstream)
   HUC6280/                    CPU + PSG (upstream)
   dpram.vhd                   portable block RAM (replaces the altsyncram version)
   mem_init_pkg.vhd            generated memory initialisation tables
-  cd/                         CD-ROM² unit - kept for reference, NOT in the project
+  cd/                         CD-ROM unit, SCSI, CDDA FIFO, ADPCM decoder (built)
   shared/                     MiST wrapper - kept for reference, NOT in the project
   tang/
-    pce_core.vhd              HuCard-only wrapper + external VRAM interface
+    pce_core.vhd              console wrapper: ROM, both VRAMs, CD and ADPCM
+    iosys/                    PicoRV32, SPI microSD, OSD, UART and CD bridge
+    audio_tone.v              global volume / bass / treble
     pll_clocks.v              rPLL / CLKDIV instances
-    sdram.v                   SDRAM controller (nand2mario, GPLv3)
-    pce_sdram_ctrl_3ch.v      interleaved ROM / PicoRV32 / VRAM controller
+    pce_sdram_ctrl_3ch.v      interleaved ROM / firmware / CD / VRAM controller
     uart_rx.v, rom_loader.v   UART ROM loader
     video_scandoubler.v       genlocked line doubler + HDMI timing
     tmds_encoder.v, dvi_tx.v  DVI encoder, OSER10 serialisers, ELVDS buffers
@@ -280,35 +336,39 @@ constraints/
   tang_nano20k.sdc            clock constraints
 tools/
   pce_send.py                 host side ROM sender
+  build.tcl                   Gowin batch build
   mif2vhd.py                  .mif -> VHDL constant tables
+firmware/
+  build.ps1                   RV32I firmware build
+  firmware.c                  microSD browser, CD and save handling
+sim/
+  run.ps1                     Icarus simulation runner
 ```
 
-`rtl/cd/`, `rtl/shared/`, `rtl/arcade.sv`, `rtl/cheatcodes.sv`, `rtl/mb128.sv`,
-`rtl/color_mix.sv`, `rtl/CEGen.vhd` and `rtl/pce_top.vhd` are **not referenced**
-by `PCE_GT_TangNano.gprj`. They are left in the tree so that the port stays
-close to upstream and so that the CD build can be revived later.
+`rtl/shared/`, `rtl/arcade.sv`, `rtl/mb128.sv`, `rtl/pce_top.vhd` and the older
+`rtl/tang/sdram.v` / `rtl/tang/pce_sdram_ctrl.v` are retained for reference,
+but are not part of `PCE_GT_TangNano.gprj`. The project **does** include
+`rtl/cd/`, `rtl/CEGen.vhd`, `rtl/cheatcodes.sv` and `rtl/color_mix.sv`.
 
 ---
 
 ## 8. Changes made to the upstream core
 
-Kept deliberately small:
+The original core is adapted to Gowin and the board interfaces:
 
 * `rtl/dpram.vhd` — rewritten with inferred, vendor independent VHDL. The entity
   names, generics, ports and defaults are unchanged, and the behaviour of the
   original `altsyncram` configuration is reproduced (synchronous unregistered
   read, `NEW_DATA` read-during-write on the same port, `cs_x` masking).
   `mem_init_file` now selects one of the tables in `work.mem_init_pkg`.
-* `rtl/pce_top_extram.vhd` — added the `CD_SUPPORT` and `AC_SUPPORT` generics
-  (both default to `1`, so existing top levels are unaffected). With them at `0`
-  the CD-ROM unit and the Arcade Card are not instantiated and all their
-  interface signals are tied to their inactive state. The CD unit is now a
-  component instantiation instead of a direct entity instantiation, so
-  `rtl/cd/*` does not have to be part of the project. `VOLTAB_FILE` was
-  corrected from the non-existent `../voltab/voltab_small.mif` to
-  `voltab_small.mif`. The unused `VRAM1_*` outputs are driven when
-  `SGX_SUPPORT = 0`
-  branch.
+* `rtl/pce_top_extram.vhd` — exposes external VRAM, CD scratch RAM, ADPCM RAM
+  and debug ports. The Tang build enables CD and SuperGrafx but not Arcade
+  Card or Game Genie; the CD unit and its FIFOs are included in the project.
+  `VOLTAB_FILE` uses `voltab_small.mif`.
+* `rtl/tang/iosys/` and `firmware/` — PicoRV32 firmware, microSD/FatFs browser,
+  CD SCSI command handling, audio streaming and per-game save persistence.
+* `rtl/tang/pce_sdram_ctrl_3ch.v` — SDRAM arbitration, HuCard/VRAM bridges,
+  four-way CD-RAM read cache and the nibble-oriented ADPCM memory bridge.
 * `rtl/huc6270.vhd` — one-character fix in the `SPR_CACHE` reset aggregate,
   where the 4-bit `PAL` record element was initialised with a 2-bit literal.
 * `rtl/huc6260.vhd` — power-up values for the free running video counters
