@@ -31,7 +31,7 @@ SNES pad -> HuC6280 / VDC / VCE -> line doubler -> DVI over HDMI
 | Controller | one SNES-style pad, 2/6-button modes; S1 resets the console |
 | ROM loading | microSD browser; USB-UART fallback, see section 4 |
 | CD-ROM² / Super CD | experimental CUE/BIN, System Card, CDDA, SCSI data and ADPCM |
-| Arcade Card | **not built** (`AC_SUPPORT = 0`) |
+| Arcade Card | enabled in CD mode; 2 MiB SDRAM tested in simulation, game compatibility not yet tested on hardware |
 | SuperGrafx (second VDC / VPC) | yes (`SGX_SUPPORT = 1`) |
 | Game Genie / cheat engine | **not built** (`CHEAT_SUPPORT = 0`) |
 | Backup RAM (BRAM), Populous SRAM | saved per game on microSD at firmware-menu entry (not on power loss) |
@@ -168,8 +168,9 @@ unit; selecting a folder ending in `(CD)` looks for its first CUE file.
 CD boot requires a System Card image at `/config/syscard.pce` (also accepted:
 `systemcard.pce` or `system_card.pce`). The CD reader supports quoted filenames
 and MODE1/2048, MODE1/2352 and MODE2/2352 data tracks; CDDA uses raw 2352-byte
-audio sectors. The implementation is experimental, and CHD and Arcade Card
-images are not supported.
+audio sectors. The implementation is experimental; CHD images are not
+supported. Arcade Card registers and RAM are enabled for CD games, but Arcade
+CD game compatibility still needs an on-board test.
 
 The board's USB serial port remains a fallback for HuCards, even without a
 microSD card. This path uses `tools/pce_send.py` and does not provide the OSD
@@ -289,6 +290,7 @@ bank-2 channel with the firmware and CD memories.
 | What | Where | Size |
 | --- | --- | --- |
 | HuCard ROM | SDRAM, byte address 0 (+512 if the image has a header) | ≤ 4 MiB |
+| Arcade Card RAM (CD mode only) | SDRAM bank 1, `0x200000..0x3FFFFF` | 2 MiB |
 | Work RAM | block RAM inside `pce_top` (`USE_INTERNAL_RAM = 1`) | 8 KiB |
 | PicoRV32 firmware/data | SDRAM bank 2, `0x400000..0x59FFFF` | 1664 KiB |
 | ADPCM nibble RAM | SDRAM bank 2, `0x5A0000..0x5AFFFF` | 64 KiB |
@@ -299,8 +301,13 @@ bank-2 channel with the firmware and CD memories.
 | Palette RAM, sprite/attribute buffers, PSG table | block RAM inside the core | small |
 | Line buffers for the scan doubler | block RAM | 2 × 1024 × 9 |
 
-`rtl/tang/pce_sdram_ctrl_3ch.v` runs the SDRAM at 86.4 MHz and assigns fixed
-slots to (1) HuCard ROM/loader, (2) PicoRV32/CD/ADPCM or VDC1 and (3) VDC0.
+The Arcade Card uses bank 1 only in CD mode; 4 MiB HuCards continue to use
+banks 0 and 1 when CD mode is off. The CD/Arcade read cache shares the bank-2
+PicoRV32/CD/ADPCM channel, so Arcade accesses contend with those clients.
+The latest Gowin place-and-route uses 46/46 BSRAM blocks and 9983/10368 CLS
+(97%), leaving little logic headroom. `rtl/tang/pce_sdram_ctrl_3ch.v` runs the
+SDRAM at 86.4 MHz and assigns fixed slots to (1) HuCard ROM/loader, (2)
+PicoRV32/CD/Arcade/ADPCM or VDC1 and (3) VDC0.
 Its eight-cycle schedule returns VRAM data within one fastest PCE pixel period.
 Refresh is distributed across available idle slots and is also allowed while
 the console is held in reset.
@@ -345,10 +352,11 @@ sim/
   run.ps1                     Icarus simulation runner
 ```
 
-`rtl/shared/`, `rtl/arcade.sv`, `rtl/mb128.sv`, `rtl/pce_top.vhd` and the older
+`rtl/shared/`, `rtl/mb128.sv`, `rtl/pce_top.vhd` and the older
 `rtl/tang/sdram.v` / `rtl/tang/pce_sdram_ctrl.v` are retained for reference,
 but are not part of `PCE_GT_TangNano.gprj`. The project **does** include
-`rtl/cd/`, `rtl/CEGen.vhd`, `rtl/cheatcodes.sv` and `rtl/color_mix.sv`.
+`rtl/arcade.sv`, `rtl/cd/`, `rtl/CEGen.vhd`, `rtl/cheatcodes.sv` and
+`rtl/color_mix.sv`.
 
 ---
 
@@ -362,13 +370,13 @@ The original core is adapted to Gowin and the board interfaces:
   read, `NEW_DATA` read-during-write on the same port, `cs_x` masking).
   `mem_init_file` now selects one of the tables in `work.mem_init_pkg`.
 * `rtl/pce_top_extram.vhd` — exposes external VRAM, CD scratch RAM, ADPCM RAM
-  and debug ports. The Tang build enables CD and SuperGrafx but not Arcade
-  Card or Game Genie; the CD unit and its FIFOs are included in the project.
+  and debug ports. The Tang build enables CD, Arcade Card and SuperGrafx but
+  not Game Genie; the CD unit and its FIFOs are included in the project.
   `VOLTAB_FILE` uses `voltab_small.mif`.
 * `rtl/tang/iosys/` and `firmware/` — PicoRV32 firmware, microSD/FatFs browser,
   CD SCSI command handling, audio streaming and per-game save persistence.
 * `rtl/tang/pce_sdram_ctrl_3ch.v` — SDRAM arbitration, HuCard/VRAM bridges,
-  four-way CD-RAM read cache and the nibble-oriented ADPCM memory bridge.
+  shared four-way CD/Arcade RAM read cache and the nibble-oriented ADPCM bridge.
 * `rtl/huc6270.vhd` — one-character fix in the `SPR_CACHE` reset aggregate,
   where the 4-bit `PAL` record element was initialised with a 2-bit literal.
 * `rtl/huc6260.vhd` — power-up values for the free running video counters

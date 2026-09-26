@@ -26,10 +26,10 @@ module ARCADE_CARD
 	input         RD_N,
 	input  [20:0] A,
 	input   [7:0] DI,
-	output  [7:0] DO,
+	output reg [7:0] DO,
 	output        SEL_N,
 	
-	output        RAM_CS_N,
+	output reg    RAM_CS_N,
 	output [20:0] RAM_A
 );
 
@@ -44,7 +44,7 @@ typedef struct packed
 } port_t;
 
 port_t port[4];
-wire [1:0] p;
+reg [1:0] p;
 
 reg        ena;
 reg [31:0] shift_latch;

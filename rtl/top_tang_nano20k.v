@@ -485,7 +485,7 @@ pce_sdram_ctrl_3ch #(
 
     .cdram_rd      (ext_ram_rd),
     .cdram_wr      (ext_ram_wr),
-    .cdram_addr    (ext_ram_a[17:0]),
+    .cdram_addr    (ext_ram_a),
     .cdram_din     (ext_ram_do),
     .cdram_dout    (ext_ram_di),
     .cdram_rdy     (ext_ram_rdy),
