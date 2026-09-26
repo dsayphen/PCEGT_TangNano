@@ -39,6 +39,9 @@
 
 #define ROM_MIN_SIZE 1024
 #define ROM_MAX_SIZE (4*1024*1024)
+#define BRM_SAVE_SIZE 2048
+#define POP_SAVE_SIZE 32768
+#define POP_SAVE_BASE ((volatile uint8_t *)0x001b0000)
 
 static FATFS fs;
 
@@ -52,6 +55,7 @@ static char path_buf[PWD_SIZE + NAME_MAX + 2];
 static uint8_t io_buf[2048];
 
 static char current_game_name[NAME_MAX] = "";
+static int current_game_populous = 0;
 
 static FIL cd_image;
 static int cd_active = 0;
@@ -68,7 +72,11 @@ static int      cd_track_count = 0;
 static uint32_t cd_disc_total_lba = 0;
 static int      cd_stat_pending = 0;
 static int      cd_audio_playing = 0;
+static int      cd_audio_paused = 0;
 static uint32_t cd_audio_pos = 0;   // absolute byte offset into cd_image
+static uint32_t cd_audio_start = 0;
+static uint32_t cd_audio_end = 0;
+static int      cd_audio_loop = 0;
 static FIL      cd_audio_file;
 static int      cd_audio_file_open = 0;
 static int      cd_audio_cur_track = -1;
@@ -77,12 +85,44 @@ static uint8_t to_bcd(uint32_t v) {
     return (uint8_t)(((v / 10) << 4) | (v % 10));
 }
 
-// standard Red Book LBA -> MSF, with the 2 second lead-in offset
-static void lba_to_msf_bcd(uint32_t lba, uint8_t *m, uint8_t *s, uint8_t *f) {
-    uint32_t frame = lba + 150;
+static int from_bcd(uint8_t value) {
+    if ((value & 0x0f) > 9 || (value >> 4) > 9)
+        return -1;
+    return (value >> 4) * 10 + (value & 0x0f);
+}
+
+static int32_t cd_audio_command_lba(uint32_t cmd0, uint32_t cmd1, uint32_t cmd2) {
+    uint32_t mode = (cmd2 >> 8) & 0xc0;
+    if (mode == 0x80) {
+        int track = from_bcd((uint8_t)(cmd0 >> 16));
+        return track >= 1 && track <= cd_track_count
+            ? (int32_t)cd_track_table_lba[track - 1] : -1;
+    }
+    if (mode == 0x40) {
+        int minutes = from_bcd((uint8_t)(cmd0 >> 16));
+        int seconds = from_bcd((uint8_t)(cmd0 >> 24));
+        int frames = from_bcd((uint8_t)cmd1);
+        if (minutes < 0 || seconds < 0 || seconds >= 60 ||
+            frames < 0 || frames >= 75)
+            return -1;
+        int32_t absolute = (minutes * 60 + seconds) * 75 + frames;
+        return absolute >= 150 ? absolute - 150 : 0;
+    }
+    if (mode == 0)
+        return (int32_t)(((cmd0 >> 24) << 16) |
+                         ((cmd1 & 0xff) << 8) | ((cmd1 >> 8) & 0xff));
+    return -1;
+}
+
+static void frames_to_msf_bcd(uint32_t frame, uint8_t *m, uint8_t *s, uint8_t *f) {
     *m = to_bcd(frame / (60 * 75));
     *s = to_bcd((frame / 75) % 60);
     *f = to_bcd(frame % 75);
+}
+
+// standard Red Book LBA -> MSF, with the 2 second lead-in offset
+static void lba_to_msf_bcd(uint32_t lba, uint8_t *m, uint8_t *s, uint8_t *f) {
+    frames_to_msf_bcd(lba + 150, m, s, f);
 }
 
 // Extrait le nom du fichier sans le chemin
@@ -468,6 +508,129 @@ static void audio_config_save(void) {
     f_close(&file);
 }
 
+static void build_save_path(char *dst, size_t len, const char *game_name,
+                            const char *extension) {
+    const char *prefix = "/saves/";
+    size_t i = 0;
+
+    while (*prefix && i < len - 1)
+        dst[i++] = *prefix++;
+    while (*game_name && i < len - 1)
+        dst[i++] = *game_name++;
+    while (*extension && i < len - 1)
+        dst[i++] = *extension++;
+    dst[i] = '\0';
+}
+
+static void brm_transfer(uint8_t *buffer, uint32_t offset, UINT count, int to_bram) {
+    reg_brm_access = 1;
+    for (UINT i = 0; i < count; i++) {
+        reg_brm_addr = offset + i;
+        if (to_bram) {
+            reg_brm_data = buffer[i];
+        } else {
+            (void)reg_time;
+            buffer[i] = (uint8_t)reg_brm_data;
+        }
+    }
+    reg_brm_access = 0;
+}
+
+static void save_ram_transfer(uint8_t *buffer, uint32_t offset, UINT count,
+                              int is_populous, int to_ram) {
+    if (is_populous) {
+        volatile uint8_t *ram = POP_SAVE_BASE + offset;
+        for (UINT i = 0; i < count; i++) {
+            if (to_ram)
+                ram[i] = buffer[i];
+            else
+                buffer[i] = ram[i];
+        }
+    } else {
+        brm_transfer(buffer, offset, count, to_ram);
+    }
+}
+
+static int save_ram_file(const char *game_name, const char *extension,
+                         uint32_t size, int is_populous, int save_to_sd) {
+    FIL file;
+    UINT br = 0;
+    UINT bw = 0;
+    uint32_t total = 0;
+    char save_path[PWD_SIZE + NAME_MAX + 16];
+    int file_open = 0;
+
+    build_save_path(save_path, sizeof(save_path), game_name, extension);
+    if (save_to_sd) {
+        f_mkdir("/saves");
+        if (f_open(&file, save_path, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
+            return -1;
+        file_open = 1;
+    } else {
+        file_open = f_open(&file, save_path, FA_READ) == FR_OK;
+    }
+
+    while (total < size) {
+        UINT chunk = (UINT)((size - total) > sizeof(io_buf) ? sizeof(io_buf)
+                                                              : size - total);
+        if (save_to_sd) {
+            save_ram_transfer(io_buf, total, chunk, is_populous, 0);
+            if (f_write(&file, io_buf, chunk, &bw) != FR_OK || bw != chunk) {
+                f_close(&file);
+                return -1;
+            }
+        } else {
+            if (!file_open || f_read(&file, io_buf, chunk, &br) != FR_OK || br != chunk)
+                memset(io_buf, 0, chunk);
+            save_ram_transfer(io_buf, total, chunk, is_populous, 1);
+        }
+        total += chunk;
+    }
+
+    if (file_open)
+        f_close(&file);
+    return 0;
+}
+
+static int load_game_saves(const char *game_name, int is_populous) {
+    int ok = 0;
+
+    pce_pause(1);
+    if (save_ram_file(game_name, ".brm", BRM_SAVE_SIZE, 0, 0) != 0)
+        ok = -1;
+    if (is_populous && save_ram_file(game_name, ".pop", POP_SAVE_SIZE, 1, 0) != 0)
+        ok = -1;
+    pce_pause(0);
+
+    if (ok == 0)
+        uart_printf("save: restored %s%s\n", game_name,
+                     is_populous ? " + Populous SRAM" : "");
+    return ok;
+}
+
+static int save_game_saves(int resume_game) {
+    int ok = 0;
+
+    if (!current_game_name[0])
+        return 0;
+
+    pce_pause(1);
+    if (save_ram_file(current_game_name, ".brm", BRM_SAVE_SIZE, 0, 1) != 0)
+        ok = -1;
+    if (current_game_populous &&
+        save_ram_file(current_game_name, ".pop", POP_SAVE_SIZE, 1, 1) != 0)
+        ok = -1;
+    if (resume_game)
+        pce_pause(0);
+
+    if (ok == 0)
+        uart_printf("save: wrote %s%s\n", current_game_name,
+                     current_game_populous ? " + Populous SRAM" : "");
+    else
+        uart_printf("save: write failed for %s\n", current_game_name);
+    return ok;
+}
+
 // Cycle the display zoom mode (2x -> stretch -> ...) and flash the new
 // setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
 // (reg_video_zoom) and rtl/tang/video_scandoubler.v.
@@ -684,6 +847,7 @@ static int pause_menu(void) {
     audio_paused = 1;
     audio_apply();
     pce_pause(1);
+    save_game_saves(0);
     clear();
     print_field(5, 5, "Game paused", OSD_COLS - 2);
 
@@ -727,6 +891,15 @@ static int pause_menu(void) {
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && active == 1) {
+            if (cd_active) {
+                cd_audio_playing = 0;
+                cd_audio_paused = 0;
+                cd_audio_loop = 0;
+                cd_audio_pos = 0;
+                cd_audio_start = 0;
+                cd_audio_end = 0;
+                reg_cd_audio_hold = 1;
+            }
             pce_reset();
             delay(20);
             pce_pause(0);
@@ -777,6 +950,26 @@ static int is_cue(const char *name) {
 static int is_sgx(const char *name) {
     int n = (int)strlen(name);
     return n >= 5 && strcasecmp(name + n - 4, ".sgx") == 0;
+}
+
+static int is_populous_image(FIL *file, uint32_t size) {
+    static const uint32_t offsets[2] = { 0x1f26, 0x2126 };
+    static const char signature[8] = { 'P', 'O', 'P', 'U', 'L', 'O', 'U', 'S' };
+
+    for (int i = 0; i < 2; i++) {
+        UINT br;
+        if (size < offsets[i] + sizeof(signature) ||
+            f_lseek(file, offsets[i]) != FR_OK)
+            continue;
+        if (f_read(file, io_buf, sizeof(signature), &br) == FR_OK &&
+            br == sizeof(signature) &&
+            memcmp(io_buf, signature, sizeof(signature)) == 0) {
+            f_lseek(file, 0);
+            return 1;
+        }
+    }
+    f_lseek(file, 0);
+    return 0;
 }
 
 static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_len) {
@@ -1038,8 +1231,15 @@ static int open_cd_image(const char *cue_name) {
     cd_track_lba = index_frame;
     cd_track_start = index_frame * cd_sector_size;
     cd_active = 1;
+    cd_audio_playing = 0;
+    cd_audio_paused = 0;
+    cd_audio_loop = 0;
+    reg_cd_audio_hold = 1;
     extract_filename(current_game_name, cue_name);
+    current_game_populous = 0;
+    reg_rom_pop = 0;
     game_pad_mode_load(current_game_name);
+    load_game_saves(current_game_name, 0);
     uart_print("cd: sending start request\n");
     pce_cd_start();
     return 0;
@@ -1070,15 +1270,34 @@ static void cd_service(void) {
     // CD-DA streaming: audio sectors are raw interleaved 16-bit stereo PCM,
     // no header to skip. Feed a modest chunk every poll so the CDDA FIFO's
     // half-full flag stays true and the game's audio wait loop can proceed.
+    if (cd_audio_playing && cd_audio_pos >= cd_audio_end) {
+        if (cd_audio_loop && cd_audio_start < cd_audio_end) {
+            cd_audio_pos = cd_audio_start;
+            uart_printf("cd: audio loop pos=%d\n", (int)cd_audio_pos);
+        } else {
+            cd_audio_playing = 0;
+        }
+    }
+
     if (cd_audio_playing && cd_audio_file_open && !(events & 0x20)) {
         UINT br;
-        if (f_lseek(&cd_audio_file, cd_audio_pos) == FR_OK &&
-            f_read(&cd_audio_file, io_buf, sizeof(io_buf), &br) == FR_OK && br > 0) {
+        UINT want = (UINT)((cd_audio_end - cd_audio_pos) > sizeof(io_buf)
+                           ? sizeof(io_buf) : (cd_audio_end - cd_audio_pos));
+        FRESULT seek_result = f_tell(&cd_audio_file) == cd_audio_pos
+            ? FR_OK : f_lseek(&cd_audio_file, cd_audio_pos);
+        FRESULT read_result = seek_result == FR_OK
+            ? f_read(&cd_audio_file, io_buf, want, &br)
+            : seek_result;
+        if (read_result == FR_OK && br > 0) {
             for (UINT i = 0; i < br; i++)
                 reg_cd_feed = (uint32_t)io_buf[i];
             cd_audio_pos += br;
         } else {
+            uart_printf("cd: audio stopped read=%d pos=%d size=%d\n",
+                        (int)read_result, (int)cd_audio_pos,
+                        (int)f_size(&cd_audio_file));
             cd_audio_playing = 0;
+            cd_audio_paused = 0;
         }
     }
 
@@ -1151,6 +1370,32 @@ static void cd_service(void) {
                 }
             }
             pushed_data = ok;
+        } else if (opcode == 0xdd) {
+            uint8_t subq[10];
+            uint8_t rel_m, rel_s, rel_f, abs_m, abs_s, abs_f;
+            int track = cd_audio_cur_track >= 0 ? cd_audio_cur_track : 0;
+            uint32_t used = reg_cd_usedw;
+            uint32_t played = cd_audio_pos > used ? cd_audio_pos - used : 0;
+            uint32_t frame = played / 2352;
+            uint32_t track_lba = cd_track_table_lba[track];
+            if (frame < track_lba)
+                frame = track_lba;
+            frames_to_msf_bcd(frame - track_lba, &rel_m, &rel_s, &rel_f);
+            lba_to_msf_bcd(frame, &abs_m, &abs_s, &abs_f);
+            subq[0] = cd_audio_paused ? 2 : cd_audio_playing ? 0 : 3;
+            subq[1] = 0x01 | ((track + 1 < cd_track_count &&
+                                cd_track_is_data[track + 1]) ? 0x40 : 0);
+            subq[2] = to_bcd((uint32_t)track + 1);
+            subq[3] = 1;
+            subq[4] = rel_m;
+            subq[5] = rel_s;
+            subq[6] = rel_f;
+            subq[7] = abs_m;
+            subq[8] = abs_s;
+            subq[9] = abs_f;
+            for (int i = 0; i < 10; i++)
+                reg_cd_feed = (uint32_t)subq[i] | 0x100;
+            pushed_data = 1;
         } else if (opcode == 0xde) {
             // NEC GET_DIR_INFO: COMM(1) selects the sub-function.
             uint32_t sub = (cmd0 >> 8) & 0xff;
@@ -1181,16 +1426,33 @@ static void cd_service(void) {
         }
 
         if (opcode == 0xd8) {
-            // SAPSP: start audio playback. The exact requested position isn't
-            // decoded yet, so default to the disc's first audio track.
-            // The CDDA FIFO drains continuously in real time at 44.1kHz as
-            // soon as CD_EN is set, racing our push loop; keep feeding until
-            // it actually crosses half-full rather than a fixed byte count.
-            int t = 0;
-            while (t < cd_track_count && cd_track_is_data[t]) t++;
-            cd_audio_pos = (t < cd_track_count) ? cd_track_table_lba[t] * cd_sector_size : 0;
+            uint32_t cmd2 = reg_cd_cmd2;
+            int32_t requested_lba = cd_audio_command_lba(cmd0, cmd1, cmd2);
+            int t = -1;
 
-            if (t < cd_track_count && cd_audio_cur_track != t) {
+            if (((cmd2 >> 8) & 0xc0) == 0x80) {
+                int track = from_bcd((uint8_t)(cmd0 >> 16));
+                if (track >= 1 && track <= cd_track_count)
+                    t = track - 1;
+            } else if (requested_lba > 0) {
+                for (int i = 0; i < cd_track_count; i++) {
+                    if (cd_track_filename[i][0] &&
+                        cd_track_table_lba[i] <= (uint32_t)requested_lba)
+                        t = i;
+                }
+            } else if (requested_lba == 0) {
+                for (int i = 0; i < cd_track_count; i++) {
+                    if (!cd_track_is_data[i] && cd_track_filename[i][0]) {
+                        t = i;
+                        requested_lba = (int32_t)cd_track_table_lba[i];
+                        break;
+                    }
+                }
+            }
+
+            if (t >= 0 && cd_track_is_data[t])
+                t = -1;
+            if (t >= 0 && cd_audio_cur_track != t) {
                 if (cd_audio_file_open)
                     f_close(&cd_audio_file);
                 char apath[PWD_SIZE + NAME_MAX + 2];
@@ -1202,26 +1464,68 @@ static void cd_service(void) {
                 cd_audio_cur_track = cd_audio_file_open ? t : -1;
             }
 
-            cd_audio_playing = cd_audio_file_open;
+            cd_audio_playing = 0;
+            cd_audio_paused = 0;
+            cd_audio_loop = 0;
+            reg_cd_audio_hold = 1;
+            if (t >= 0 && cd_audio_file_open) {
+                cd_audio_pos = (uint32_t)requested_lba * cd_sector_size;
+                cd_audio_start = cd_audio_pos;
+                cd_audio_end = (uint32_t)f_size(&cd_audio_file);
+                if (t + 1 < cd_track_count &&
+                    strcmp(cd_track_filename[t], cd_track_filename[t + 1]) == 0 &&
+                    cd_track_table_lba[t + 1] > (uint32_t)requested_lba) {
+                    uint32_t next_track = cd_track_table_lba[t + 1] * cd_sector_size;
+                    if (next_track < cd_audio_end)
+                        cd_audio_end = next_track;
+                }
+                cd_audio_loop = (cmd0 >> 8 & 3) == 1;
+                cd_audio_playing = (cmd0 >> 8 & 3) != 0 && cd_audio_pos < cd_audio_end;
+                cd_audio_paused = !cd_audio_playing;
+            }
+            uart_printf("cd: sapsp track=%d lba=%d play=%d\n",
+                        t + 1, (int)requested_lba, cd_audio_playing);
             int iter = 0;
-            if (cd_audio_file_open) {
+            if (cd_audio_playing) {
                 f_lseek(&cd_audio_file, cd_audio_pos);
                 for (iter = 0; iter < 32; iter++) {
-                    if (reg_cd_events & 0x20)
+                    if ((reg_cd_events & 0x20) || cd_audio_pos >= cd_audio_end)
                         break;
                     UINT br;
-                    if (f_read(&cd_audio_file, io_buf, sizeof(io_buf), &br) != FR_OK || br == 0)
+                    UINT want = (UINT)((cd_audio_end - cd_audio_pos) > sizeof(io_buf)
+                                       ? sizeof(io_buf) : (cd_audio_end - cd_audio_pos));
+                    if (f_read(&cd_audio_file, io_buf, want, &br) != FR_OK || br == 0)
                         break;
                     for (UINT i = 0; i < br; i++)
                         reg_cd_feed = (uint32_t)io_buf[i];
                     cd_audio_pos += br;
                 }
             }
+            reg_cd_audio_hold = !cd_audio_playing;
             uart_printf("cd: sapsp fed iter=%d, halffull=%d usedw=%d adpcm=%x\n",
                         iter, (reg_cd_events & 0x20) ? 1 : 0, (int)reg_cd_usedw,
                         (unsigned)reg_cd_adpcm);
-        } else if (opcode == 0xd9 || opcode == 0xda) {
+        } else if (opcode == 0xd9) {
+            int32_t end_lba = cd_audio_command_lba(cmd0, cmd1, reg_cd_cmd2);
+            if (end_lba >= 0 && cd_audio_file_open) {
+                cd_audio_end = (uint32_t)end_lba * cd_sector_size;
+                if (cd_audio_end > (uint32_t)f_size(&cd_audio_file))
+                    cd_audio_end = (uint32_t)f_size(&cd_audio_file);
+            }
+            cd_audio_loop = (cmd0 >> 8 & 3) == 1;
+            cd_audio_playing = (cmd0 >> 8 & 3) != 0 && cd_audio_file_open &&
+                               (cd_audio_pos < cd_audio_end ||
+                                (cd_audio_loop && cd_audio_start < cd_audio_end));
+            cd_audio_paused = 0;
+            reg_cd_audio_hold = !cd_audio_playing;
+            uart_printf("cd: sapep end=%d play=%d\n", (int)end_lba, cd_audio_playing);
+        } else if (opcode == 0xda) {
+            uart_printf("cd: audio stopped opcode=%x pos=%d\n",
+                        (unsigned)opcode, (int)cd_audio_pos);
             cd_audio_playing = 0;
+            cd_audio_paused = 1;
+            cd_audio_loop = 0;
+            reg_cd_audio_hold = 1;
         }
 
         reg_cd_ack = 0x01;
@@ -1239,6 +1543,7 @@ static const char *hidden_dirs[] = {
     "cheats",
     "gamecfg",
     "config",
+    "saves",
     "screenshot",
     NULL
 };
@@ -1310,6 +1615,7 @@ static int load_rom(const char *fname, uint32_t size) {
     uint32_t total = 0;
     int last_pct = -1;
     int is_cue_image = 0;
+    int is_populous = 0;
 
     char cue_path[PWD_SIZE + NAME_MAX + 2];
     char bin_path[PWD_SIZE + NAME_MAX + 2];
@@ -1366,6 +1672,11 @@ static int load_rom(const char *fname, uint32_t size) {
         }
     }
 
+    if (!is_cue_image)
+        is_populous = is_populous_image(&f, size);
+    reg_rom_pop = is_populous;
+    current_game_populous = is_populous;
+
     uart_printf("loading %s, %d bytes\n", path_buf, (int)size);
 
     // holds the PC Engine in reset and publishes the image description
@@ -1408,6 +1719,7 @@ static int load_rom(const char *fname, uint32_t size) {
 
     // Charge le mode de manette spécifique au jeu
     game_pad_mode_load(current_game_name);
+    load_game_saves(current_game_name, current_game_populous);
 
     // releases the PC Engine once the last byte has reached the SDRAM
     pce_load_end();
@@ -1587,16 +1899,6 @@ static int mount_card(void) {
     return -1;
 }
 
-#define RET_BASE  ((volatile uint32_t *)0x00100000)  /* 64 Ko sous la pile */
-#define RET_WORDS 16384u
-static uint32_t ret_pat(uint32_t i) { return 0xA5A5A5A5u ^ (i << 7) ^ (i >> 3); }
-static void ret_fill(void) { for (uint32_t i = 0; i < RET_WORDS; i++) RET_BASE[i] = ret_pat(i); }
-static uint32_t ret_check(void) {
-    uint32_t bad = 0;
-    for (uint32_t i = 0; i < RET_WORDS; i++) if (RET_BASE[i] != ret_pat(i)) bad++;
-    return bad;
-}
-
 // ---------------------------------------------------------------------------
 int main(void) {
     // 43.2 MHz / 375 = 115200 baud
@@ -1629,9 +1931,6 @@ int main(void) {
 
     browse();
 
-    ret_fill(); 
-    uint32_t last_ret = time_millis();
-
     // The console is running now.  Stay alive so the user can bring the menu
     // back with Select+Start and pick another game without a power cycle,
     // Select+Up/Down cycles the display zoom mode and Select+Left/Right
@@ -1639,35 +1938,43 @@ int main(void) {
     // Select must be held for at least 500 ms before it can be used
     // as a modifier for the zoom/scanline shortcuts.
     int select_armed = 0;
-    int select_count = 0;
+    int select_held = 0;
+    uint32_t select_start = 0;
 
     uint32_t last_hb = time_millis();
     uint32_t last_raw = 0xffffffff;
+    uint32_t cd_min_usedw = 0xffffffffu;
+    uint32_t cd_empty_polls = 0;
 
     for (;;) {
         uint32_t raw = joy_raw();
         uint32_t e = joy_edge();
         static uint32_t loops = 0;
 
+        if (cd_audio_playing) {
+            uint32_t used = reg_cd_usedw;
+            if (used < cd_min_usedw)
+                cd_min_usedw = used;
+            if (used == 0)
+                cd_empty_polls++;
+        }
         cd_service();
 
         loops++;
         if (time_millis() - last_hb >= 1000) {
             last_hb += 1000;
-            uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d cd_ev=%x cd_active=%d cd_phase=%x cdda=%d cd_play=%d adpcm=%x\n",
+            uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d cd_ev=%x cd_active=%d cd_phase=%x cdda=%d cd_play=%d min_cdda=%d empty=%d adpcm=%x\n",
                         (int)loops, reg_joystick, reg_vid_dcc_dbg(),
                         reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
                         reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8,
                         (unsigned)reg_cd_events, cd_active, (unsigned)reg_cd_phase,
                         (unsigned)reg_cd_usedw, cd_audio_playing,
+                        cd_min_usedw == 0xffffffffu ? -1 : (int)cd_min_usedw,
+                        (int)cd_empty_polls,
                         (unsigned)reg_cd_adpcm);
             loops = 0;
-        }
-
-        if (time_millis() - last_ret >= 10000) {
-            last_ret += 10000;
-            uart_printf("retention bad=%d\n", (int)ret_check());
-            ret_fill();
+            cd_min_usedw = 0xffffffffu;
+            cd_empty_polls = 0;
         }
 
         if (raw != last_raw) {
@@ -1685,10 +1992,12 @@ int main(void) {
         if (!(raw & JOY_SELECT)) {
             // Select released: require another 500 ms hold next time.
             select_armed = 0;
-            select_count = 0;
+            select_held = 0;
+        } else if (!select_held) {
+            select_start = time_millis();
+            select_held = 1;
         } else if (!select_armed) {
-            // This loop runs every 20 ms, so 25 iterations = 500 ms.
-            if (++select_count >= 25)
+            if (time_millis() - select_start >= 500)
                 select_armed = 1;
         }
 
@@ -1713,7 +2022,7 @@ int main(void) {
                    (e & (JOY_LEFT | JOY_RIGHT))) {
             scanline_cycle((e & JOY_RIGHT) ? 1 : -1);
         }
-        delay(20);
+        delay(cd_audio_playing ? 2 : 20);
     }
 
     return 0;

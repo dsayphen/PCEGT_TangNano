@@ -29,10 +29,11 @@ headphone amplifier.
 | Audio | stereo PSG, I2S to the on-board amplifier / headphone jack |
 | Controller | one SNES-style pad on the GPIO header; S1 resets the console |
 | ROM loading | UART, see section 4 |
-| CD-ROM², Super CD, Arcade Card | **not built** (`CD_SUPPORT = 0`, `AC_SUPPORT = 0`) |
+| CD-ROM² / Super CD | experimental; CUE/BIN, System Card and CD audio are supported |
+| Arcade Card | **not built** (`AC_SUPPORT = 0`) |
 | SuperGrafx (second VDC / VPC) | yes (`SGX_SUPPORT = 1`) |
 | Game Genie / cheat engine | **not built** (`CHEAT_SUPPORT = 0`) |
-| Backup RAM (BRAM), Populous SRAM | not implemented, saves are lost on power-off |
+| Backup RAM (BRAM), Populous SRAM | persistent per-game saves on microSD (`/saves`) |
 | Multitap, 6-button pads, mouse, MB128 | not implemented |
 | OSD / menu | none, this is a standalone build |
 
@@ -149,6 +150,11 @@ python tools/pce_send.py COM7 game.pce
 
 The console is held in reset while the transfer runs and starts automatically
 when it finishes. Sending another image at any time replaces the current one.
+
+When using the microSD browser, backup RAM is stored in `/saves/<image>.brm`.
+Populous SRAM is stored in `/saves/<image>.pop`. Existing files are restored
+when the game is loaded; saves are written when the firmware pause menu opens.
+Keep the SD card inserted and open that menu before powering the console off.
 
 ### Wire protocol
 

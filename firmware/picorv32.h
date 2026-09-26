@@ -47,6 +47,11 @@
 #define reg_cd_phase       (*(volatile uint32_t*)0x02000098)
 #define reg_cd_usedw       (*(volatile uint32_t*)0x0200009c)
 #define reg_cd_adpcm       (*(volatile uint32_t*)0x020000a0)
+#define reg_rom_pop        (*(volatile uint32_t*)0x020000a4)
+#define reg_brm_addr       (*(volatile uint32_t*)0x020000a8)
+#define reg_brm_data       (*(volatile uint32_t*)0x020000ac)
+#define reg_brm_access     (*(volatile uint32_t*)0x020000b0)
+#define reg_cd_audio_hold  (*(volatile uint32_t*)0x020000b4)
 
 // VCE dot clock select (VIDEO_DCC), debug only: piggybacked onto reg_core_id
 // bits 17:16 (see iosys.v) instead of its own address decode.

@@ -61,6 +61,7 @@ entity pce_top is
 		JOY_IN      : in  std_logic_vector(3 downto 0);
 
 		CD_EN       : in  std_logic;
+		CD_AUDIO_HOLD : in std_logic := '0';
 		EXT_RAM_A   : out std_logic_vector(21 downto 0);
 		EXT_RAM_DO  : out std_logic_vector(7 downto 0);
 		EXT_RAM_DI  : in  std_logic_vector(7 downto 0);
@@ -126,7 +127,7 @@ entity pce_top is
 		VIDEO_HDW_DBG : out std_logic_vector(6 downto 0);
 		VIDEO_HDS_DBG : out std_logic_vector(6 downto 0);
 		CD_PHASE_DBG  : out std_logic_vector(7 downto 0);
-		CDDA_USEDW_DBG : out std_logic_vector(11 downto 0);
+		CDDA_USEDW_DBG : out std_logic_vector(12 downto 0);
 		ADPCM_DBG : out std_logic_vector(7 downto 0)
 	);
 end pce_top;
@@ -280,6 +281,7 @@ component cd is
 		RST_N			: in  std_logic;
 		CLK 			: in  std_logic;
 		EN 			: in  std_logic;
+		AUDIO_PAUSE	: in  std_logic := '0';
 
 		EXT_A 		: in  std_logic_vector(20 downto 0);
 		EXT_DI 		: in  std_logic_vector(7 downto 0);
@@ -736,6 +738,7 @@ port map(
 	CLK 			=> CLK,
 	RST_N			=> RESET_N,
 	EN				=> CD_EN,
+	AUDIO_PAUSE	=> CPU_PAUSE_EN or CD_AUDIO_HOLD,
 
 	EXT_A			=> CPU_A,
 	EXT_DI		=> CPU_DO,

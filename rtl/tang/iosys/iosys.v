@@ -97,6 +97,7 @@ module iosys #(
     output reg  [22:0] rom_offset,
     output reg         sgx_mode,
     output reg         cd_mode,
+    output reg         rom_pop,
 
     // ---- video scaler control ---------------------------------------------
     // 0 = 2x integer, 1 = stretch, 2 = bilinear stretch
@@ -109,6 +110,13 @@ module iosys #(
     output reg  [3:0]  audio_volume,
     output reg  [3:0]  audio_bass,
     output reg  [3:0]  audio_treble,
+
+    // Save-RAM service port. The CPU is paused while firmware accesses BRAM.
+    input  wire [7:0]  brm_host_q,
+    output reg  [10:0] brm_host_addr,
+    output reg  [7:0]  brm_host_data,
+    output reg         brm_host_we,
+    output reg         brm_host_access,
 
     // ---- CD host bridge --------------------------------------------------
     input  wire [95:0] cd_comm,
@@ -125,8 +133,9 @@ module iosys #(
     output reg         cd_wr,
     output reg         cd_dm,
     output reg         cd_ack,
+    output reg         cd_audio_hold,
     input  wire [7:0]  cd_phase_dbg,
-    input  wire [11:0] cdda_usedw_dbg,
+    input  wire [12:0] cdda_usedw_dbg,
     input  wire [7:0]  adpcm_dbg,
 
     // ---- read-only debug: VCE dot clock select (VIDEO_DCC), see huc6260;
@@ -315,6 +324,11 @@ wire cd_ack_sel    = mem_valid && (mem_addr == 32'h0200_0094);
 wire cd_phase_sel  = mem_valid && (mem_addr == 32'h0200_0098);
 wire cd_usedw_sel  = mem_valid && (mem_addr == 32'h0200_009c);
 wire cd_adpcm_sel  = mem_valid && (mem_addr == 32'h0200_00a0);
+wire rom_pop_sel   = mem_valid && (mem_addr == 32'h0200_00a4);
+wire brm_addr_sel  = mem_valid && (mem_addr == 32'h0200_00a8);
+wire brm_data_sel  = mem_valid && (mem_addr == 32'h0200_00ac);
+wire brm_access_sel= mem_valid && (mem_addr == 32'h0200_00b0);
+wire cd_hold_sel   = mem_valid && (mem_addr == 32'h0200_00b4);
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -368,6 +382,8 @@ assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    cd_phase_sel ||
                    cd_usedw_sel ||
                    cd_adpcm_sel ||
+                   rom_pop_sel || brm_addr_sel || brm_data_sel || brm_access_sel ||
+                   cd_hold_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -391,8 +407,10 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    cd_data1_sel ? cd_dout_reg[63:32] :
                    cd_data2_sel ? {16'b0, cd_dout_reg[79:64]} :
                    cd_phase_sel ? {24'b0, cd_phase_dbg} :
-                   cd_usedw_sel ? {20'b0, cdda_usedw_dbg} :
+                   cd_usedw_sel ? {19'b0, cdda_usedw_dbg} :
                    cd_adpcm_sel ? {24'b0, adpcm_dbg} :
+                   rom_pop_sel  ? {31'b0, rom_pop} :
+                   brm_data_sel ? {24'b0, brm_host_q} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;
 
@@ -480,6 +498,7 @@ always @(posedge clk) begin
     cd_dout_req <= 1'b0;
     cd_wr <= 1'b0;
     cd_ack <= 1'b0;
+    brm_host_we <= 1'b0;
 
     if (cd_comm_send) begin
         cd_events[0] <= 1'b1;
@@ -620,6 +639,23 @@ always @(posedge clk) begin
     if (color_mode_sel && (mem_wstrb != 4'b0))
         color_mode <= mem_wdata[0];
 
+    if (rom_pop_sel && (mem_wstrb != 4'b0))
+        rom_pop <= mem_wdata[0];
+
+    if (brm_addr_sel && (mem_wstrb != 4'b0))
+        brm_host_addr <= mem_wdata[10:0];
+
+    if (brm_data_sel && (mem_wstrb != 4'b0)) begin
+        brm_host_data <= mem_wdata[7:0];
+        brm_host_we <= 1'b1;
+    end
+
+    if (brm_access_sel && (mem_wstrb != 4'b0))
+        brm_host_access <= mem_wdata[0];
+
+    if (cd_hold_sel && (mem_wstrb != 4'b0))
+        cd_audio_hold <= mem_wdata[0];
+
     if (audio_sel && (mem_wstrb != 4'b0)) begin
         audio_volume <= mem_wdata[3:0];
         audio_bass   <= mem_wdata[7:4];
@@ -653,6 +689,7 @@ always @(posedge clk) begin
         rom_offset   <= 23'd0;
         sgx_mode     <= 1'b0;
         cd_mode      <= 1'b0;
+        rom_pop      <= 1'b0;
         video_zoom   <= 2'd1;      // stretch, matches the previous fixed behaviour
         scanline     <= 2'd0;      // off, matches the previous fixed behaviour
         game_pause   <= 1'b0;
@@ -663,12 +700,17 @@ always @(posedge clk) begin
         audio_volume <= 4'd10;     // unity gain
         audio_bass   <= 4'd5;      // flat (offset by +5)
         audio_treble <= 4'd5;      // flat (offset by +5)
+        brm_host_addr <= 11'd0;
+        brm_host_data <= 8'd0;
+        brm_host_we   <= 1'b0;
+        brm_host_access <= 1'b0;
         cd_stat      <= 16'd0;
         cd_stat_strobe <= 1'b0;
         cd_dout_req  <= 1'b0;
         cd_data      <= 8'd0;
         cd_wr        <= 1'b0;
         cd_dm        <= 1'b0;
+        cd_audio_hold <= 1'b0;
         cd_ack       <= 1'b0;
         cd_events    <= 8'd0;
         cd_comm_reg  <= 96'd0;
