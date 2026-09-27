@@ -114,8 +114,7 @@ initial begin
     read_byte(22'h1fffff, 8'h44);
     read_byte(22'h000000, 8'h11);
 
-    // Keep PicoRV32 requests continuous while a cold CD-RAM line is fetched.
-    // Both requesters must continue making progress under contention.
+    // Continuous PicoRV32 traffic must not starve a cold CD-RAM fetch.
     @(negedge clk);
     rv_addr = 23'h000100;
     rv_valid = 1;

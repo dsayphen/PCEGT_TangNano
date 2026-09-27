@@ -91,7 +91,30 @@ always @(posedge clk) begin
         init_done_mem_sync <= {init_done_mem_sync[0], init_done_mem};
 end
 
-wire [22:0] rom_addr_eff = {1'b0, rom_a} + rom_offset;
+// Console requests are registered first: the CPU address decode feeding them
+// is too long to also reach the cache compare within one clk_sys cycle, and
+// the CPU only samples WAIT_N five clocks after changing its address.
+reg         rom_rd_q;
+reg  [21:0] rom_a_q;
+reg         cdram_rd_q, cdram_wr_q;
+reg  [21:0] cdram_addr_q;
+reg  [7:0]  cdram_din_q;
+always @(posedge clk) begin
+    rom_a_q      <= rom_a;
+    cdram_addr_q <= cdram_addr;
+    cdram_din_q  <= cdram_din;
+    if (!resetn) begin
+        rom_rd_q   <= 1'b0;
+        cdram_rd_q <= 1'b0;
+        cdram_wr_q <= 1'b0;
+    end else begin
+        rom_rd_q   <= rom_rd;
+        cdram_rd_q <= cdram_rd;
+        cdram_wr_q <= cdram_wr;
+    end
+end
+
+wire [22:0] rom_addr_eff = {1'b0, rom_a_q} + rom_offset;
 
 reg         host_req;
 wire        host_ack;
@@ -178,7 +201,7 @@ always @(posedge clk) begin
             rom_pending <= 1'b0;
         end
 
-        if (rom_rd && !rom_pending && rom_addr_r != rom_addr_eff) begin
+        if (rom_rd_q && !rom_pending && rom_addr_r != rom_addr_eff) begin
             rom_addr_r <= rom_addr_eff;
             if (cache_hit)
                 rom_do_r <= cache_byte;
@@ -258,21 +281,21 @@ reg  [19:0] cdram_cache_tag   [0:CDRAM_WAYS-1];
 reg  [31:0] cdram_cache_data  [0:CDRAM_WAYS-1];
 reg  [1:0]  cdram_cache_next;   // round-robin fill pointer
 wire [1:0]  cdram_cache_hit_way =
-    (cdram_cache_valid[0] && cdram_cache_tag[0] == cdram_addr[21:2]) ? 2'd0 :
-    (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr[21:2]) ? 2'd1 :
-    (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr[21:2]) ? 2'd2 : 2'd3;
+    (cdram_cache_valid[0] && cdram_cache_tag[0] == cdram_addr_q[21:2]) ? 2'd0 :
+    (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr_q[21:2]) ? 2'd1 :
+    (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr_q[21:2]) ? 2'd2 : 2'd3;
 wire        cdram_cache_hit =
-    (cdram_cache_valid[0] && cdram_cache_tag[0] == cdram_addr[21:2]) ||
-    (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr[21:2]) ||
-    (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr[21:2]) ||
-    (cdram_cache_valid[3] && cdram_cache_tag[3] == cdram_addr[21:2]);
+    (cdram_cache_valid[0] && cdram_cache_tag[0] == cdram_addr_q[21:2]) ||
+    (cdram_cache_valid[1] && cdram_cache_tag[1] == cdram_addr_q[21:2]) ||
+    (cdram_cache_valid[2] && cdram_cache_tag[2] == cdram_addr_q[21:2]) ||
+    (cdram_cache_valid[3] && cdram_cache_tag[3] == cdram_addr_q[21:2]);
 reg [7:0] cdram_dout_r;
 wire [31:0] cdram_cache_word = cdram_cache_data[cdram_cache_hit_way];
-assign cdram_dout = cdram_rd && cdram_cache_hit ?
-                    (cdram_addr[1:0] == 2'b00 ? cdram_cache_word[7:0] :
-                     cdram_addr[1:0] == 2'b01 ? cdram_cache_word[15:8] :
-                     cdram_addr[1:0] == 2'b10 ? cdram_cache_word[23:16] :
-                                                cdram_cache_word[31:24]) :
+assign cdram_dout = cdram_rd_q && cdram_cache_hit ?
+                    (cdram_addr_q[1:0] == 2'b00 ? cdram_cache_word[7:0] :
+                     cdram_addr_q[1:0] == 2'b01 ? cdram_cache_word[15:8] :
+                     cdram_addr_q[1:0] == 2'b10 ? cdram_cache_word[23:16] :
+                                                  cdram_cache_word[31:24]) :
                     cdram_dout_r;
 
 assign cdram_rdy = ~cdram_pending;
@@ -370,8 +393,8 @@ always @(posedge clk) begin
             cdram_cache_data[w]  <= 32'd0;
         end
     end else begin
-        cdram_rd_d <= cdram_rd;
-        cdram_wr_d <= cdram_wr;
+        cdram_rd_d <= cdram_rd_q;
+        cdram_wr_d <= cdram_wr_q;
 
         // Firmware save-state transfers write the Populous SRAM backing
         // window directly through rv_valid; rv_addr already includes RV_BASE.
@@ -396,20 +419,20 @@ always @(posedge clk) begin
                 cdram_cache_next <= cdram_cache_next + 2'd1;
             end
         end else if (!cdram_pending) begin
-            if (cdram_wr && !cdram_wr_d) begin
+            if (cdram_wr_q && !cdram_wr_d) begin
                 // a write invalidates any cached copy, keeping later reads honest
                 for (w = 0; w < CDRAM_WAYS; w = w + 1)
-                    if (cdram_cache_valid[w] && cdram_cache_tag[w] == cdram_addr[21:2])
+                    if (cdram_cache_valid[w] && cdram_cache_tag[w] == cdram_addr_q[21:2])
                         cdram_cache_valid[w] <= 1'b0;
                 cdram_pending <= 1'b1;
-                cdram_addr_r  <= cdram_addr;
+                cdram_addr_r  <= cdram_addr_q;
                 cdram_we_r    <= 1'b1;
-            end else if (cdram_rd && (!cdram_rd_d || cdram_addr != cdram_addr_r)) begin
+            end else if (cdram_rd_q && (!cdram_rd_d || cdram_addr_q != cdram_addr_r)) begin
                 if (cdram_cache_hit) begin
-                    cdram_addr_r <= cdram_addr;
+                    cdram_addr_r <= cdram_addr_q;
                 end else begin
                     cdram_pending <= 1'b1;
-                    cdram_addr_r  <= cdram_addr;
+                    cdram_addr_r  <= cdram_addr_q;
                     cdram_we_r    <= 1'b0;
                 end
             end
@@ -428,13 +451,6 @@ reg  [1:0]  rv_mem_ack_sync;
 reg  [1:0]  rv_state;
 reg         rv_source_cd;  // latches which requester owns the in-flight transfer
 reg         rv_source_ad;
-reg  [1:0]  rv_arb_next;
-reg  [1:0]  rv_arb_grant;
-reg         rv_arb_grant_valid;
-
-wire [3:0] rv_arb_requests;
-assign rv_arb_requests = {adram_rd_pending, cdram_pending,
-                          rv_valid, adram_take_write};
 
 assign cdram_complete = rv_source_cd && (rv_state == RV_WAIT) &&
                         (rv_mem_ack_sync[1] == rv_mem_req);
@@ -444,37 +460,6 @@ assign cdram_complete_dout = rv_mem_dout;
 localparam RV_IDLE  = 2'd0;
 localparam RV_WAIT  = 2'd1;
 localparam RV_REPLY = 2'd2;
-
-always @* begin
-    rv_arb_grant = 2'd0;
-    rv_arb_grant_valid = 1'b0;
-    case (rv_arb_next)
-        2'd0: begin
-            if (rv_arb_requests[0]) begin rv_arb_grant = 2'd0; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[1]) begin rv_arb_grant = 2'd1; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[2]) begin rv_arb_grant = 2'd2; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[3]) begin rv_arb_grant = 2'd3; rv_arb_grant_valid = 1'b1; end
-        end
-        2'd1: begin
-            if (rv_arb_requests[1]) begin rv_arb_grant = 2'd1; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[2]) begin rv_arb_grant = 2'd2; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[3]) begin rv_arb_grant = 2'd3; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[0]) begin rv_arb_grant = 2'd0; rv_arb_grant_valid = 1'b1; end
-        end
-        2'd2: begin
-            if (rv_arb_requests[2]) begin rv_arb_grant = 2'd2; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[3]) begin rv_arb_grant = 2'd3; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[0]) begin rv_arb_grant = 2'd0; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[1]) begin rv_arb_grant = 2'd1; rv_arb_grant_valid = 1'b1; end
-        end
-        default: begin
-            if (rv_arb_requests[3]) begin rv_arb_grant = 2'd3; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[0]) begin rv_arb_grant = 2'd0; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[1]) begin rv_arb_grant = 2'd1; rv_arb_grant_valid = 1'b1; end
-            else if (rv_arb_requests[2]) begin rv_arb_grant = 2'd2; rv_arb_grant_valid = 1'b1; end
-        end
-    endcase
-end
 
 always @(posedge clk) begin
     if (!resetn) begin
@@ -489,57 +474,50 @@ always @(posedge clk) begin
         rv_state        <= RV_IDLE;
         rv_source_cd    <= 1'b0;
         rv_source_ad    <= 1'b0;
-        rv_arb_next     <= 2'd0;
     end else begin
         rv_mem_ack_sync <= {rv_mem_ack_sync[0], rv_mem_ack};
         rv_ready <= 1'b0;
 
         case (rv_state)
-            RV_IDLE: if (init_done && rv_arb_grant_valid) begin
-                rv_arb_next <= rv_arb_grant + 2'd1;
-                case (rv_arb_grant)
-                    2'd0: begin
-                        rv_mem_addr  <= ADRAM_BASE + {7'd0, adram_wr_addr};
-                        rv_mem_din   <= {4{adram_wr_byte}};
-                        rv_mem_ds    <= 4'b0001 << adram_wr_addr[1:0];
-                        rv_mem_we    <= 1'b1;
-                        rv_mem_req   <= ~rv_mem_req;
-                        rv_state     <= RV_WAIT;
-                        rv_source_ad <= 1'b1;
-                        rv_source_cd <= 1'b0;
-                    end
-                    2'd1: begin
-                        rv_mem_addr  <= {rv_addr[22:2], 2'b00};
-                        rv_mem_din   <= rv_wdata;
-                        rv_mem_ds    <= rv_wstrb;
-                        rv_mem_we    <= |rv_wstrb;
-                        rv_mem_req   <= ~rv_mem_req;
-                        rv_state     <= RV_WAIT;
-                        rv_source_cd <= 1'b0;
-                        rv_source_ad <= 1'b0;
-                    end
-                    2'd2: begin
-                        rv_mem_addr  <= cdram_addr_r[21] ?
-                                        CDRAM_BASE + {5'd0, cdram_addr_r[17:0]} :
-                                        {2'b01, cdram_addr_r[20:0]};
-                        rv_mem_din   <= {4{cdram_din}};
-                        rv_mem_ds    <= 4'b0001 << cdram_addr_r[1:0];
-                        rv_mem_we    <= cdram_we_r;
-                        rv_mem_req   <= ~rv_mem_req;
-                        rv_state     <= RV_WAIT;
-                        rv_source_cd <= 1'b1;
-                        rv_source_ad <= 1'b0;
-                    end
-                    2'd3: begin
-                        rv_mem_addr  <= ADRAM_BASE + {7'd0, adram_rd_tag, 2'b00};
-                        rv_mem_ds    <= 4'b1111;
-                        rv_mem_we    <= 1'b0;
-                        rv_mem_req   <= ~rv_mem_req;
-                        rv_state     <= RV_WAIT;
-                        rv_source_ad <= 1'b1;
-                        rv_source_cd <= 1'b0;
-                    end
-                endcase
+            RV_IDLE: if (adram_take_write) begin
+                rv_mem_addr  <= ADRAM_BASE + {7'd0, adram_wr_addr};
+                rv_mem_din   <= {4{adram_wr_byte}};
+                rv_mem_ds    <= 4'b0001 << adram_wr_addr[1:0];
+                rv_mem_we    <= 1'b1;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_ad <= 1'b1;
+                rv_source_cd <= 1'b0;
+            // The console CPU is held on EXT_RAM_RDY and leaves >= 5 clocks
+            // between accesses, so serving it first cannot starve PicoRV32.
+            end else if (init_done && cdram_pending) begin
+                rv_mem_addr  <= cdram_addr_r[21] ?
+                                CDRAM_BASE + {5'd0, cdram_addr_r[17:0]} :
+                                {2'b01, cdram_addr_r[20:0]};
+                rv_mem_din   <= {4{cdram_din_q}};
+                rv_mem_ds    <= 4'b0001 << cdram_addr_r[1:0];
+                rv_mem_we    <= cdram_we_r;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_cd <= 1'b1;
+                rv_source_ad <= 1'b0;
+            end else if (init_done && rv_valid) begin
+                rv_mem_addr  <= {rv_addr[22:2], 2'b00};
+                rv_mem_din   <= rv_wdata;
+                rv_mem_ds    <= rv_wstrb;
+                rv_mem_we    <= |rv_wstrb;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_cd <= 1'b0;
+                rv_source_ad <= 1'b0;
+            end else if (init_done && adram_rd_pending) begin
+                rv_mem_addr  <= ADRAM_BASE + {7'd0, adram_rd_tag, 2'b00};
+                rv_mem_ds    <= 4'b1111;
+                rv_mem_we    <= 1'b0;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_ad <= 1'b1;
+                rv_source_cd <= 1'b0;
             end
 
             RV_WAIT: if (rv_mem_ack_sync[1] == rv_mem_req) begin
