@@ -164,7 +164,7 @@ begin
 		SGX_SUPPORT      => SGX_SUPPORT,
 		CHEAT_SUPPORT    => 0,
 		PSG_O_WIDTH      => 20,
-		MAX_SPRITES      => 128,
+		MAX_SPRITES      => 16,
 		USE_INTERNAL_RAM => 1,
 		CD_SUPPORT       => 1,
 		AC_SUPPORT       => 1

@@ -53,6 +53,28 @@ static const char *zoom_names[3] = { "Integer", "Stretch", "Bilinear" };
 static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
 static const char *color_names[2] = { "RAW RGB", "Composite" };
 
+static void print_game_name(void) {
+    char label[OSD_COLS - 4];
+    const char *end = current_game_name;
+    const char *extension = 0;
+    int i = 0;
+
+    while (*end) {
+        if (*end == '.' && end != current_game_name)
+            extension = end;
+        end++;
+    }
+    if (extension)
+        end = extension;
+
+    while (current_game_name + i < end && i < OSD_COLS - 5) {
+        label[i] = current_game_name[i];
+        i++;
+    }
+    label[i] = '\0';
+    print_field(5, 6, label, OSD_COLS - 5);
+}
+
 static void make_menu_label(char *buf, int type) {
     const char *prefix;
     const char *value;
@@ -90,6 +112,7 @@ static void video_menu(void) {
 
     clear();
     print_field(5, 5, "Video Settings", OSD_COLS - 2);
+    print_game_name();
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
@@ -140,6 +163,7 @@ static void audio_menu(void) {
 
     clear();
     print_field(5, 5, "Audio Settings", OSD_COLS - 2);
+    print_game_name();
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
@@ -229,6 +253,7 @@ int pause_menu(void) {
     save_game_saves(0);
     clear();
     print_field(5, 5, "Game paused", OSD_COLS - 2);
+    print_game_name();
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
@@ -292,10 +317,12 @@ int pause_menu(void) {
             video_menu();
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
+            print_game_name();
         } else if ((e & JOY_A) && active == 5) {
             audio_menu();
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
+            print_game_name();
         }
         delay(20);
     }
