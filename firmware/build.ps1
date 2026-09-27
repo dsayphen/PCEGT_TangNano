@@ -40,7 +40,9 @@ $objs = @()
 if ($LASTEXITCODE) { throw 'assembling start.S failed' }
 $objs += 'start.o'
 
-foreach ($src in @('firmware.c', 'picorv32.c', 'spi_sd.c',
+foreach ($src in @('firmware.c', 'browser.c', 'rom.c', 'cd.c', 'menu.c',
+                   'settings.c', 'saves.c', 'osd.c', 'util.c',
+                   'picorv32.c', 'spi_sd.c',
                    'fatfs/diskio.c', 'fatfs/ff.c', 'fatfs/ffunicode.c')) {
     $obj = [System.IO.Path]::ChangeExtension($src, 'o')
     & "${CROSS}gcc" @CFLAGS -c -o $obj $src

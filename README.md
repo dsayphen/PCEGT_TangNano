@@ -347,7 +347,14 @@ tools/
   mif2vhd.py                  .mif -> VHDL constant tables
 firmware/
   build.ps1                   RV32I firmware build
-  firmware.c                  microSD browser, CD and save handling
+  firmware.c                  entry point, SD mount, in-game main loop
+  browser.c                   microSD file browser
+  rom.c                       HuCard (.PCE/.SGX) loading
+  cd.c                        CD-ROM emulation (CUE, System Card, CD-DA)
+  menu.c                      pause menu, video/audio sub-menus
+  settings.c                  video/audio/pad settings (/config)
+  saves.c                     backup RAM / Populous SRAM saves (/saves)
+  osd.c, util.c               OSD and string helpers
 sim/
   run.ps1                     Icarus simulation runner
 ```

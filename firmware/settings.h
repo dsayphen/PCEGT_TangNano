@@ -1,0 +1,26 @@
+//
+// Video, audio and per-game pad settings, persisted under /config on the SD.
+//
+
+#ifndef H_SETTINGS
+#define H_SETTINGS
+
+extern int video_zoom;
+extern int video_scanline;
+extern int game_pad_mode;
+extern int video_color;
+
+extern int audio_volume;
+extern int audio_bass;
+extern int audio_treble;
+extern int audio_paused;
+
+void game_pad_mode_load(const char *game_name);
+void game_pad_mode_save(const char *game_name);
+void video_config_load(void);
+void video_config_save(void);
+void audio_apply(void);
+void audio_config_load(void);
+void audio_config_save(void);
+
+#endif
