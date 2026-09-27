@@ -488,8 +488,17 @@ always @(posedge clk) begin
                 rv_state     <= RV_WAIT;
                 rv_source_ad <= 1'b1;
                 rv_source_cd <= 1'b0;
-            // The console CPU is held on EXT_RAM_RDY and leaves >= 5 clocks
-            // between accesses, so serving it first cannot starve PicoRV32.
+            // PicoRV32 drops mem_valid between requests, so it cannot starve
+            // the console; the reverse would stall SD reads and CD audio feed.
+            end else if (init_done && rv_valid) begin
+                rv_mem_addr  <= {rv_addr[22:2], 2'b00};
+                rv_mem_din   <= rv_wdata;
+                rv_mem_ds    <= rv_wstrb;
+                rv_mem_we    <= |rv_wstrb;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_cd <= 1'b0;
+                rv_source_ad <= 1'b0;
             end else if (init_done && cdram_pending) begin
                 rv_mem_addr  <= cdram_addr_r[21] ?
                                 CDRAM_BASE + {5'd0, cdram_addr_r[17:0]} :
@@ -500,15 +509,6 @@ always @(posedge clk) begin
                 rv_mem_req   <= ~rv_mem_req;
                 rv_state     <= RV_WAIT;
                 rv_source_cd <= 1'b1;
-                rv_source_ad <= 1'b0;
-            end else if (init_done && rv_valid) begin
-                rv_mem_addr  <= {rv_addr[22:2], 2'b00};
-                rv_mem_din   <= rv_wdata;
-                rv_mem_ds    <= rv_wstrb;
-                rv_mem_we    <= |rv_wstrb;
-                rv_mem_req   <= ~rv_mem_req;
-                rv_state     <= RV_WAIT;
-                rv_source_cd <= 1'b0;
                 rv_source_ad <= 1'b0;
             end else if (init_done && adram_rd_pending) begin
                 rv_mem_addr  <= ADRAM_BASE + {7'd0, adram_rd_tag, 2'b00};
