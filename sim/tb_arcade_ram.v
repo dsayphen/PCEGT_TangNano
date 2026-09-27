@@ -23,15 +23,18 @@ reg [7:0] cd_din = 0;
 wire [7:0] cd_dout;
 wire cd_rdy, init_done;
 reg rv_valid = 0;
+reg rv_stream = 0;
 reg [22:0] rv_addr = 0;
 wire rv_ready;
 integer rv_ready_count = 0;
 integer timeout;
 integer errors = 0;
 
+// PicoRV32 drops mem_valid for at least one clock after each mem_ready.
 always @(posedge clk) begin
     if (resetn && rv_ready)
         rv_ready_count <= rv_ready_count + 1;
+    rv_valid <= rv_stream && !rv_ready && !(rv_valid && rv_ready);
 end
 
 pce_sdram_ctrl_3ch mem (
@@ -114,10 +117,10 @@ initial begin
     read_byte(22'h1fffff, 8'h44);
     read_byte(22'h000000, 8'h11);
 
-    // Continuous PicoRV32 traffic must not starve a cold CD-RAM fetch.
+    // Back-to-back PicoRV32 traffic must not starve a cold CD-RAM fetch.
     @(negedge clk);
     rv_addr = 23'h000100;
-    rv_valid = 1;
+    rv_stream = 1;
     cd_addr = 22'h012345;
     cd_rd = 1;
     wait (!cd_rdy);
@@ -135,7 +138,7 @@ initial begin
         errors = errors + 1;
     end
     @(negedge clk);
-    rv_valid = 0;
+    rv_stream = 0;
     cd_rd = 0;
 
     $display("Arcade RAM: %0d errors", errors);
