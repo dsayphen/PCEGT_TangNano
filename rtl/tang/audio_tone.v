@@ -44,17 +44,25 @@ endfunction
 localparam BASS_SHIFT   = 3;  // each bass step is ~1/8 of the low band
 localparam TREBLE_SHIFT = 3;  // each treble step is ~1/8 of the high band
 
+// Registered first: the CD/ADPCM mixer feeding in_l/in_r fails timing
+// when chained straight into the multipliers below.
+reg signed [19:0] in_l_q, in_r_q;
+always @(posedge clk) begin
+    in_l_q <= in_l;
+    in_r_q <= in_r;
+end
+
 reg signed [19:0] lp_l, lp_r;
-wire signed [19:0] hp_l = in_l - lp_l;
-wire signed [19:0] hp_r = in_r - lp_r;
+wire signed [19:0] hp_l = in_l_q - lp_l;
+wire signed [19:0] hp_r = in_r_q - lp_r;
 
 wire signed [4:0] bass_trim   = {1'b0, bass}   - 5'sd5; // -5..+5
 wire signed [4:0] treble_trim = {1'b0, treble} - 5'sd5; // -5..+5
 
-wire signed [24:0] shaped_l = {{5{in_l[19]}}, in_l} +
+wire signed [24:0] shaped_l = {{5{in_l_q[19]}}, in_l_q} +
                               ((bass_trim   * lp_l) >>> BASS_SHIFT) +
                               ((treble_trim * hp_l) >>> TREBLE_SHIFT);
-wire signed [24:0] shaped_r = {{5{in_r[19]}}, in_r} +
+wire signed [24:0] shaped_r = {{5{in_r_q[19]}}, in_r_q} +
                               ((bass_trim   * lp_r) >>> BASS_SHIFT) +
                               ((treble_trim * hp_r) >>> TREBLE_SHIFT);
 
@@ -75,8 +83,8 @@ always @(posedge clk) begin
         out_l <= 20'sd0;
         out_r <= 20'sd0;
     end else begin
-        lp_l <= lp_l + ((in_l - lp_l) >>> 4);
-        lp_r <= lp_r + ((in_r - lp_r) >>> 4);
+        lp_l <= lp_l + (hp_l >>> 4);
+        lp_r <= lp_r + (hp_r >>> 4);
 
         out_l <= gained_l[27:8];
         out_r <= gained_r[27:8];
