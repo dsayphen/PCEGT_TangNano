@@ -9,7 +9,7 @@ entity pce_top is
 		SGX_SUPPORT   : integer := 0;
 		CHEAT_SUPPORT : integer := 0;
 		PSG_O_WIDTH: integer := 16;
-		MAX_SPRITES: integer := 128;
+		MAX_SPRITES: integer := 16;
 		USE_INTERNAL_RAM: integer := 0;
 		-- CD_SUPPORT = 0 removes the CD-ROM^2 / Super CD unit (work.cd and its
 		-- FIFOs) from the design, AC_SUPPORT = 0 removes the Arcade Card.
