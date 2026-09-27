@@ -22,7 +22,17 @@ reg [21:0] cd_addr = 0;
 reg [7:0] cd_din = 0;
 wire [7:0] cd_dout;
 wire cd_rdy, init_done;
+reg rv_valid = 0;
+reg [22:0] rv_addr = 0;
+wire rv_ready;
+integer rv_ready_count = 0;
+integer timeout;
 integer errors = 0;
+
+always @(posedge clk) begin
+    if (resetn && rv_ready)
+        rv_ready_count <= rv_ready_count + 1;
+end
 
 pce_sdram_ctrl_3ch mem (
     .clk(clk), .clk_mem(clk_mem), .clk_sdram(clk_sdram),
@@ -39,7 +49,7 @@ pce_sdram_ctrl_3ch mem (
     .vram_rd(1'b0), .vram_we(1'b0),
     .vram1_addr(16'd0), .vram1_din(16'd0), .vram1_dout(),
     .vram1_rd(1'b0), .vram1_we(1'b0),
-    .rv_valid(1'b0), .rv_ready(), .rv_addr(23'd0),
+    .rv_valid(rv_valid), .rv_ready(rv_ready), .rv_addr(rv_addr),
     .rv_wdata(32'd0), .rv_wstrb(4'd0), .rv_rdata(),
     .cdram_rd(cd_rd), .cdram_wr(cd_wr), .cdram_addr(cd_addr),
     .cdram_din(cd_din), .cdram_dout(cd_dout), .cdram_rdy(cd_rdy),
@@ -103,8 +113,35 @@ initial begin
     read_byte(22'h040000, 8'h33);
     read_byte(22'h1fffff, 8'h44);
     read_byte(22'h000000, 8'h11);
+
+    // Keep PicoRV32 requests continuous while a cold CD-RAM line is fetched.
+    // Both requesters must continue making progress under contention.
+    @(negedge clk);
+    rv_addr = 23'h000100;
+    rv_valid = 1;
+    cd_addr = 22'h012345;
+    cd_rd = 1;
+    wait (!cd_rdy);
+    timeout = 0;
+    while (!cd_rdy && timeout < 1000) begin
+        @(posedge clk);
+        timeout = timeout + 1;
+    end
+    if (!cd_rdy) begin
+        $display("FAIL CD-RAM request starved by RV traffic");
+        errors = errors + 1;
+    end
+    if (rv_ready_count == 0) begin
+        $display("FAIL RV traffic was not serviced during contention");
+        errors = errors + 1;
+    end
+    @(negedge clk);
+    rv_valid = 0;
+    cd_rd = 0;
+
     $display("Arcade RAM: %0d errors", errors);
     if (errors) $fatal(1, "Arcade RAM mismatch");
+    $display("\n*** tb_arcade_ram PASSED ***");
     $finish;
 end
 
