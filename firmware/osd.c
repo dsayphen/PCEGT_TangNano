@@ -11,6 +11,12 @@ void status(const char *msg) {
     print(msg);
 }
 
+void loading_status(const char *msg) {
+    clear();
+    selection_row(31);
+    status(msg);
+}
+
 void title(void) {
     clear_line(ROW_TITLE);
     cursor(1, ROW_TITLE);

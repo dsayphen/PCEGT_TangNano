@@ -200,6 +200,7 @@ static int load_system_card(void) {
         return -1;
     }
 
+    status("Loading System Card 3...");
     uart_print("syscard: starting SDRAM transfer\n");
     pce_load_start(size, 0);
     while (total < size) {
@@ -242,6 +243,7 @@ int open_cd_image(const char *cue_name) {
     uint32_t file_sector = 2352;    // sector size of current_file's tracks
     int cur_track_num = 0;
 
+    loading_status("Reading CD image...");
     strncpy(cue_path, pwd, sizeof(cue_path));
     if (cue_path[1] != '\0')
         strncat(cue_path, "/", sizeof(cue_path));
@@ -360,6 +362,7 @@ int open_cd_image(const char *cue_name) {
     }
     if (load_system_card() != 0)
         return -1;
+    // status("Preparing CD..."); // ne pas afficher, trop rapide
     if (cd_open_data_track(cd_first_data_track) != 0) {
         message("Cannot open CD image", cd_track_filename[cd_first_data_track]);
         return -1;

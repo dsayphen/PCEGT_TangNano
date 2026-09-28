@@ -54,6 +54,46 @@ static int is_populous_image(FIL *file, uint32_t size) {
     return 0;
 }
 
+static int decimal_width(uint32_t value) {
+    int width = 1;
+    while (value >= 10) {
+        value /= 10;
+        width++;
+    }
+    return width;
+}
+
+static void print_padded_decimal(uint32_t value, int width) {
+    uint32_t divisor = 1;
+
+    for (int i = 1; i < width; i++)
+        divisor *= 10;
+    while (divisor) {
+        putchar('0' + (int)(value / divisor) % 10);
+        divisor /= 10;
+    }
+}
+
+static void show_rom_progress(uint32_t loaded, uint32_t size) {
+    uint32_t loaded_kb = (loaded + 1023) >> 10;
+    uint32_t size_kb = (size + 1023) >> 10;
+    int width = decimal_width(size_kb);
+    int percent = (int)(loaded * 100 / size);
+
+    if (loaded_kb > size_kb)
+        loaded_kb = size_kb;
+    if (percent > 100)
+        percent = 100;
+
+    clear_line(ROW_STATUS);
+    cursor(1, ROW_STATUS);
+    print("Loading ROM ");
+    print_padded_decimal(loaded_kb, width);
+    putchar('/');
+    print_padded_decimal(size_kb, width);
+    printf(" KB %d%%", percent);
+}
+
 static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_len) {
     FIL f;
     char line[256];
@@ -177,6 +217,8 @@ int load_rom(const char *fname, uint32_t size) {
     uart_printf("loading %s, %d bytes\n", path_buf, (int)size);
 
     // holds the PC Engine in reset and publishes the image description
+    loading_status("");
+    show_rom_progress(0, size);
     pce_load_start(size, is_sgx(fname) || is_cue_image);
 
     while (total < size) {
@@ -189,6 +231,8 @@ int load_rom(const char *fname, uint32_t size) {
             return -1;
         }
 
+        UINT read = br;
+
         // pad the tail to a whole word, the hardware only takes 32-bit writes
         while (br & 3)
             io_buf[br++] = 0xff;
@@ -197,15 +241,12 @@ int load_rom(const char *fname, uint32_t size) {
         for (UINT i = 0; i < br; i += 4)
             pce_load_word(*w++);
 
-        total += br;
+        total += read;
 
-        int pct = (int)((total >> 8) * 100 / (size >> 8));
+        int pct = (int)(total * 100 / size);
         if (pct != last_pct) {
             last_pct = pct;
-            clear_line(ROW_STATUS);
-            cursor(1, ROW_STATUS);
-            printf("Loading %dK / %dK  %d%%",
-                   (int)(total >> 10), (int)(size >> 10), pct);
+            show_rom_progress(total, size);
         }
     }
 
