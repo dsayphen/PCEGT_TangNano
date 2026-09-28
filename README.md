@@ -187,16 +187,17 @@ The console is held in reset while the transfer runs and starts automatically
 when it finishes. Sending another image at any time replaces the current one.
 
 When using the microSD browser, the 2 KiB backup RAM is stored in
-`/saves/<filename>.brm`. Populous's 32 KiB SRAM uses
-`/saves/<filename>.pop`. `<filename>` includes the image extension: for
-`game.cue`, for example, the BRAM file is `game.cue.brm`. Existing saves are
-restored when that game is loaded; they are written when the **firmware pause
-menu** opens. In-game pause and power-off do not trigger a save. Keep the SD
-card inserted and open the firmware menu before switching power off.
+`/saves/<game>.brm`. Populous's 32 KiB SRAM uses `/saves/<game>.pop`. The game
+image extension is omitted: for `game.cue`, for example, the BRAM file is
+`game.brm`. Existing saves that include the image extension are still restored
+as a fallback. Saves are written when the **firmware pause menu** opens. In-game
+pause and power-off do not trigger a save. Keep the SD card inserted and open
+the firmware menu before switching power off.
 
 Global video and audio settings live in `/config/video.cfg` and
 `/config/audio.cfg`. The current game's 2/6-button mode lives in
-`/config/<filename>.cfg`.
+`/config/<game>.cfg`, without the image extension; the previous name remains a
+read fallback.
 
 ### Wire protocol
 
