@@ -176,6 +176,16 @@ wire [1:0]  scanline;
 wire        game_pause;
 wire        game_reset;
 wire        pad_mode;
+wire        snapshot_start;
+wire        snapshot_busy;
+wire        snapshot_valid;
+wire        snapshot_failed;
+wire [3:0]  snapshot_failure_reason;
+wire        snapshot_mem_valid;
+wire        snapshot_mem_write;
+wire [22:0] snapshot_mem_addr;
+wire [31:0] snapshot_mem_wdata;
+wire        snapshot_mem_ready;
 wire        color_mode;
 wire [3:0]  audio_volume;
 wire [3:0]  audio_bass;
@@ -290,6 +300,16 @@ iosys #(
     .game_reset       (game_reset),
     .system_reset     (system_reset),
     .pad_mode         (pad_mode),
+    .snapshot_start   (snapshot_start),
+    .snapshot_busy    (snapshot_busy),
+    .snapshot_valid   (snapshot_valid),
+    .snapshot_failed  (snapshot_failed),
+    .snapshot_failure_reason(snapshot_failure_reason),
+    .snapshot_mem_valid(snapshot_mem_valid),
+    .snapshot_mem_write(snapshot_mem_write),
+    .snapshot_mem_addr(snapshot_mem_addr),
+    .snapshot_mem_wdata(snapshot_mem_wdata),
+    .snapshot_mem_ready(snapshot_mem_ready),
     .color_mode       (color_mode),
     .audio_volume     (audio_volume),
     .audio_bass       (audio_bass),
@@ -426,6 +446,12 @@ wire [15:0] vram1_do;
 wire [15:0] vram1_di;
 wire        vram1_rd;
 wire        vram1_we;
+wire        snapshot_memory_active = snapshot_busy ||
+                                     (game_pause && snapshot_valid);
+wire        vram1_mem_enable = sgx_mode || rv_cd_mode ||
+                              !snapshot_memory_active;
+wire        vram1_mem_rd = vram1_mem_enable && vram1_rd;
+wire        vram1_mem_we = vram1_mem_enable && vram1_we;
 wire        vid_ce;
 wire        vid_vbl;
 wire        vram_refresh_window;
@@ -473,8 +499,8 @@ pce_sdram_ctrl_3ch #(
     .vram1_addr    (vram1_a),
     .vram1_din     (vram1_do),
     .vram1_dout    (vram1_di),
-    .vram1_rd      (vram1_rd),
-    .vram1_we      (vram1_we),
+    .vram1_rd      (vram1_mem_rd),
+    .vram1_we      (vram1_mem_we),
 
     .rv_valid      (rv_valid),
     .rv_ready      (rv_ready),
@@ -638,6 +664,42 @@ pce_core #(
     ,.ext_ram_rdy (ext_ram_rdy)
 );
 
+wire [8:0] snapshot_rgb;
+wire [17:0] snapshot_pixels;
+wire snapshot_video_override;
+wire snapshot_capture_supported = !sgx_mode && !rv_cd_mode;
+
+frame_snapshot #(
+    .BASE_ADDR (23'h57_0000),
+    .MAX_WORDS (16'd49152)
+) u_frame_snapshot (
+    .clk               (clk_sys),
+    .resetn            (sys_resetn),
+    .capture_start     (snapshot_start),
+    .capture_supported (snapshot_capture_supported),
+    .paused            (game_pause),
+    .video_ce          (vid_ce),
+    .video_vs          (vid_vs),
+    .video_vbl         (vid_vbl),
+    .video_hbl         (vid_hbl),
+    .video_rgb         ({vid_g, vid_r, vid_b}),
+    .video_mode        ({vid_dcc, vid_hdw_dbg, vid_hds_dbg}),
+    .busy              (snapshot_busy),
+    .frame_valid       (snapshot_valid),
+    .failed            (snapshot_failed),
+    .failure_reason    (snapshot_failure_reason),
+    .video_override    (snapshot_video_override),
+    .snapshot_rgb      (snapshot_rgb),
+    .frame_pixels      (snapshot_pixels),
+    .mem_valid         (snapshot_mem_valid),
+    .mem_write         (snapshot_mem_write),
+    .mem_addr          (snapshot_mem_addr),
+    .mem_wdata         (snapshot_mem_wdata),
+    .mem_wstrb         (),
+    .mem_ready         (snapshot_mem_ready),
+    .mem_rdata         (rv_rdata)
+);
+
 // ===========================================================================
 // Game pad
 //
@@ -687,9 +749,9 @@ wire       vga_hs, vga_vs, vga_de;
 video_scandoubler u_scandoubler (
     .clk_sys    (clk_sys),
     .ce_pix     (vid_ce),
-    .r_in       (vid_r),
-    .g_in       (vid_g),
-    .b_in       (vid_b),
+    .r_in       (game_pause ? (snapshot_video_override ? snapshot_rgb[5:3] : 3'b000) : vid_r),
+    .g_in       (game_pause ? (snapshot_video_override ? snapshot_rgb[8:6] : 3'b000) : vid_g),
+    .b_in       (game_pause ? (snapshot_video_override ? snapshot_rgb[2:0] : 3'b000) : vid_b),
     .hs_in      (vid_hs),
     .vs_in      (vid_vs),
     .hbl_in     (vid_hbl),

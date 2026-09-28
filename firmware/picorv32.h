@@ -53,6 +53,7 @@
 #define reg_brm_access     (*(volatile uint32_t*)0x020000b0)
 #define reg_cd_audio_hold  (*(volatile uint32_t*)0x020000b4)
 #define reg_cd_audio_word  (*(volatile uint32_t*)0x020000b8)
+#define reg_snapshot       (*(volatile uint32_t*)0x020000bc)
 
 // VCE dot clock select (VIDEO_DCC), debug only: piggybacked onto reg_core_id
 // bits 17:16 (see iosys.v) instead of its own address decode.
@@ -146,6 +147,10 @@ static inline void pce_load_end(void) {
 
 static inline void pce_pause(int pause) {
     reg_game_ctrl = pause ? 1 : 0;
+}
+
+static inline void pce_snapshot_request(void) {
+    reg_snapshot = 1;
 }
 
 static inline void pce_reset(void) {

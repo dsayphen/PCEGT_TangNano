@@ -2,7 +2,8 @@
  * Linker script for the PicoRV32 IO subsystem firmware of the Tang Nano 20K
  * PC Engine port.
  *
- * The softcore uses 1664 KiB at address 0, mapped onto SDRAM 0x400000..0x59FFFF.
+ * The softcore uses 1472 KiB at address 0, mapped onto SDRAM 0x400000..0x56FFFF.
+ * SDRAM 0x570000..0x59FFFF is reserved for the one-frame video snapshot.
  * The next 64 KiB is ADPCM RAM (0x5A0000..0x5AFFFF), then 256 KiB CD scratch
  * RAM and 64 KiB VDC1 VRAM.
  * _start (start.S) must sit at address 0 because that is where the core
@@ -16,7 +17,7 @@
  */
 MEMORY
 {
-    RAM (RWX) : ORIGIN = 0x00000, LENGTH = 0x1A0000
+    RAM (RWX) : ORIGIN = 0x00000, LENGTH = 0x170000
 }
 SECTIONS
 {

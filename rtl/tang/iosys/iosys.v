@@ -20,7 +20,8 @@
 //
 // Memory map seen by the softcore
 // -------------------------------
-//   0x0000_0000 .. 0x001A_FFFF   firmware RAM (physically SDRAM 0x400000 + a)
+//   0x0000_0000 .. 0x0016_FFFF   firmware RAM (physically SDRAM 0x400000 + a)
+//   SDRAM 0x570000 .. 0x59FFFF   temporary video snapshot (not CPU-addressable)
 //   0x001B_0000 .. 0x001E_FFFF   CD-ROM² scratch RAM (reserved from firmware)
 //   0x001F_0000 .. 0x001F_FFFF   VDC1 VRAM
 //   0x0200_0000                  OSD character / overlay control
@@ -37,6 +38,7 @@
 //   0x0200_0050                  milliseconds since reset, read only
 //   0x0200_005C                  color palette (0=raw RGB, 1=composite)
 //   0x0200_0060                  core id (bits 15:0), VCE dot clock debug (bits 17:16), VDC0 width debug (bits 24:18), read only
+//   0x0200_00BC                  snapshot (R: busy[0], valid[1], failed[2], reason[6:3]; W: capture)
 //
 // ROM description
 // ---------------
@@ -61,7 +63,7 @@ module iosys #(
     parameter        FREQ                = 43_200_000,
     parameter [23:0] FIRMWARE_FLASH_ADDR = 24'h50_0000,
     parameter        FIRMWARE_SIZE       = 128*1024,
-    // base of the softcore's 2 MiB RAM window inside the 8 MiB SDRAM
+    // base of the softcore RAM window inside the 8 MiB SDRAM
     parameter [22:0] RV_BASE             = 23'h40_0000,
     parameter [31:0] ROM_MAX_SIZE        = 32'h0040_0000,
     parameter [15:0] CORE_ID             = 16'd3          // 3 = pcetang
@@ -153,6 +155,16 @@ module iosys #(
     output reg         game_reset,
     output reg         system_reset,
     output reg         pad_mode,
+    output reg         snapshot_start,
+    input  wire        snapshot_busy,
+    input  wire        snapshot_valid,
+    input  wire        snapshot_failed,
+    input  wire [3:0]  snapshot_failure_reason,
+    input  wire        snapshot_mem_valid,
+    input  wire        snapshot_mem_write,
+    input  wire [22:0] snapshot_mem_addr,
+    input  wire [31:0] snapshot_mem_wdata,
+    output wire        snapshot_mem_ready,
 
     // ---- 32 bit SDRAM port for the softcore ------------------------------
     output wire        rv_valid,
@@ -330,6 +342,7 @@ wire brm_data_sel  = mem_valid && (mem_addr == 32'h0200_00ac);
 wire brm_access_sel= mem_valid && (mem_addr == 32'h0200_00b0);
 wire cd_hold_sel   = mem_valid && (mem_addr == 32'h0200_00b4);
 wire cd_audio_word_sel = mem_valid && (mem_addr == 32'h0200_00b8);
+wire snapshot_ctrl_sel = mem_valid && (mem_addr == 32'h0200_00bc);
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -377,9 +390,24 @@ localparam [22:0] VRAM_CLEAR_SPAN  = 23'h01_0000;
 // start of a new load
 wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
-assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
+reg snapshot_grant;
+wire snapshot_select = !flash_loading &&
+                       (snapshot_grant ||
+                        ((snapshot_mem_valid === 1'b1) && !ram_sel));
+assign snapshot_mem_ready = snapshot_select && rv_ready;
+
+always @(posedge clk) begin
+    if (!resetn)
+        snapshot_grant <= 1'b0;
+    else if (snapshot_mem_ready)
+        snapshot_grant <= 1'b0;
+    else if (snapshot_select)
+        snapshot_grant <= 1'b1;
+end
+
+assign mem_ready = (ram_sel && rv_ready && !snapshot_select) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
-                   game_ctrl_sel ||
+                   game_ctrl_sel || snapshot_ctrl_sel ||
                    time_sel || pad_mode_sel || color_mode_sel || id_sel || audio_sel ||
                    cd_event_sel || cd_stat_sel || cd_cmd0_sel || cd_cmd1_sel || cd_cmd2_sel ||
                    cd_data0_sel || cd_data1_sel || cd_data2_sel ||
@@ -405,6 +433,8 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    color_mode_sel ? {31'd0, color_mode} :
                    id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
                    audio_sel    ? {20'b0, audio_treble, audio_bass, audio_volume} :
+                   snapshot_ctrl_sel ? {25'd0, snapshot_failure_reason,
+                                        snapshot_failed, snapshot_valid, snapshot_busy} :
                    cd_event_sel ? {24'b0, cd_events} :
                    cd_cmd0_sel ? cd_comm_reg[31:0] :
                    cd_cmd1_sel ? cd_comm_reg[63:32] :
@@ -499,6 +529,7 @@ wire rl_size_ok = (rl_size != 32'd0) && (rl_size <= ROM_MAX_SIZE);
 
 always @(posedge clk) begin
     ld_wr <= 1'b0;
+    snapshot_start <= 1'b0;
     game_reset <= 1'b0;
     cd_stat_strobe <= 1'b0;
     cd_dout_req <= 1'b0;
@@ -655,6 +686,9 @@ always @(posedge clk) begin
         end
     end
 
+    if (snapshot_ctrl_sel && (mem_wstrb != 4'b0) && mem_wdata[0])
+        snapshot_start <= 1'b1;
+
     if (pad_mode_sel && (mem_wstrb != 4'b0))
         pad_mode <= mem_wdata[0];
 
@@ -718,6 +752,7 @@ always @(posedge clk) begin
         game_reset   <= 1'b0;
         system_reset <= 1'b0;
         pad_mode     <= 1'b0;
+        snapshot_start <= 1'b0;
         color_mode   <= 1'b0;
         audio_volume <= 4'd10;     // unity gain
         audio_bass   <= 4'd5;      // flat (offset by +5)
@@ -756,11 +791,16 @@ end
 // ===========================================================================
 // SDRAM port multiplexing: flash loader first, then the softcore
 // ===========================================================================
-assign rv_valid = flash_loading ? flash_wr : (mem_valid & ram_sel);
-assign rv_addr  = flash_loading ? (RV_BASE | {2'b00, flash_wr_addr})
-                                : (RV_BASE | {2'b00, mem_addr[20:0]});
-assign rv_wdata = flash_loading ? {flash_d, flash_d, flash_d, flash_d} : mem_wdata;
-assign rv_wstrb = flash_loading ? flash_wstrb : mem_wstrb;
+assign rv_valid = flash_loading ? flash_wr :
+                  snapshot_select ? snapshot_mem_valid : (mem_valid & ram_sel);
+assign rv_addr  = flash_loading ? (RV_BASE | {2'b00, flash_wr_addr}) :
+                  snapshot_select ? snapshot_mem_addr :
+                                    (RV_BASE | {2'b00, mem_addr[20:0]});
+assign rv_wdata = flash_loading ? {flash_d, flash_d, flash_d, flash_d} :
+                  snapshot_select ? snapshot_mem_wdata : mem_wdata;
+assign rv_wstrb = flash_loading ? flash_wstrb :
+                  snapshot_select ? (snapshot_mem_write ? 4'b1111 : 4'b0000) :
+                                    mem_wstrb;
 
 // ===========================================================================
 // Millisecond counter

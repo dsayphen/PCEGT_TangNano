@@ -7,7 +7,7 @@
 .global _start
 .type _start, @function
 
-.equ    STACK_TOP, 0x1A0000       # ADPCM RAM starts here; stack grows down into firmware RAM
+.equ    STACK_TOP, 0x170000       # snapshot SDRAM reservation starts at physical 0x570000
 
 _start:
     li  sp,STACK_TOP    # load stack pointer

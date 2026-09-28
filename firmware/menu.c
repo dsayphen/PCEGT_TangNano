@@ -256,8 +256,16 @@ int pause_menu(void) {
     int active = 0;
     const int n_items = 6;
 
+    uart_print("pause: entered\n");
     audio_paused = 1;
     audio_apply();
+    uart_print("snapshot: request\n");
+    pce_snapshot_request();
+    uint32_t snapshot_start_ms = time_millis();
+    while ((reg_snapshot & 1u) &&
+           (uint32_t)(time_millis() - snapshot_start_ms) < 1000u) {
+    }
+    uart_printf("snapshot: status=%x\n", reg_snapshot);
     pce_pause(1);
     save_game_saves(0);
     clear();

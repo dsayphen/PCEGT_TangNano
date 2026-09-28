@@ -38,6 +38,29 @@ SNES pad -> HuC6280 / VDC / VCE -> line doubler -> DVI over HDMI
 | Multitap, mouse, MB128 | not implemented |
 | OSD / menu | microSD browser, in-game pause, audio and video settings |
 
+The in-game pause menu captures one complete native VCE frame before pausing.
+The snapshot is stored temporarily in SDRAM at `0x570000..0x59FFFF` (192 KiB,
+reserved from the firmware RAM window) as packed 9-bit RGB pixels. The VCE has
+at most 540 useful samples per line and 242 active lines with `ReducedVBL`, so
+the largest frame is 130,680 pixels or 43,560 32-bit words (174,240 bytes);
+lower dot-clock modes use less. That is about 10.5 MB/s of sequential reads
+while replaying at 60 frames/s, and one frame's 174,240 bytes of writes when
+opening the menu. Capture/replay uses the existing PicoRV32 SDRAM channel only
+while opening or displaying the pause menu, so it adds no normal-game memory
+traffic. Capture is enabled for HuCard modes. SuperGrafx and CD capture are
+deliberately disabled: SGX does not expose a coherent single-VDC frame, and CD
+games share SDRAM bandwidth with live scratch-memory traffic. Those modes keep
+their existing pause behavior with a black background rather than risk a
+corrupt image or delay a real-time memory client. For HuCard mode only, unused
+VDC1 SDRAM requests are suppressed so they cannot starve snapshot writes; VDC1
+memory traffic is unchanged in SGX and CD modes. Unsupported or invalid
+captures keep the menu readable. Resume returns directly to live video without
+resetting the console. The UART `snapshot: status=` value reports busy in bit 0,
+valid in bit 1, failed in bit 2 and the failure reason in bits 6:3 (1 unsupported
+mode, 2 empty frame, 3 changing video mode, 4 incomplete final word, 5 SDRAM
+write overrun, 6 replay pixel-count mismatch, 7 replay mode mismatch, 8 missing
+read word, 9 excess replay pixel).
+
 The console runs at **43.2 MHz** instead of the nominal 42.954 MHz, i.e. **0.57 %
 fast**. 42.954 MHz cannot be synthesised from the board's 27 MHz crystal: the
 exact ratio is 35/22 and an input divider of 22 would put the PLL phase
