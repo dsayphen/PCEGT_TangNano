@@ -153,6 +153,9 @@ module iosys #(
     output reg         game_reset,
     output reg         system_reset,
     output reg         pad_mode,
+    output wire        cheat_apply,
+    output wire        cheat_reset,
+    output wire [128:0] cheat_code,
 
     // ---- 32 bit SDRAM port for the softcore ------------------------------
     output wire        rv_valid,
@@ -330,6 +333,10 @@ wire brm_data_sel  = mem_valid && (mem_addr == 32'h0200_00ac);
 wire brm_access_sel= mem_valid && (mem_addr == 32'h0200_00b0);
 wire cd_hold_sel   = mem_valid && (mem_addr == 32'h0200_00b4);
 wire cd_audio_word_sel = mem_valid && (mem_addr == 32'h0200_00b8);
+wire cheat_ctrl_sel = mem_valid && (mem_addr == 32'h0200_00c0);
+wire cheat_addr_sel = mem_valid && (mem_addr == 32'h0200_00c4);
+wire cheat_value_sel= mem_valid && (mem_addr == 32'h0200_00c8);
+wire cheat_push_sel = mem_valid && (mem_addr == 32'h0200_00cc);
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -390,6 +397,7 @@ assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rom_pop_sel || brm_addr_sel || brm_data_sel || brm_access_sel ||
                    cd_hold_sel ||
                    (cd_audio_word_sel && cd_audio_count == 0) ||
+                   cheat_ctrl_sel || cheat_addr_sel || cheat_value_sel || cheat_push_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -417,8 +425,25 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    cd_adpcm_sel ? {24'b0, adpcm_dbg} :
                    rom_pop_sel  ? {31'b0, rom_pop} :
                    brm_data_sel ? {24'b0, brm_host_q} :
+                   cheat_ctrl_sel ? {31'b0, cheat_apply} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :
                    32'h0000_0000;
+
+cheat_mmio u_cheat_mmio (
+    .clk          (clk),
+    .resetn       (resetn),
+    .ctrl_write   (cheat_ctrl_sel && (mem_wstrb != 4'b0)),
+    .ctrl_data    (mem_wdata),
+    .addr_write   (cheat_addr_sel && (mem_wstrb != 4'b0)),
+    .addr_data    (mem_wdata),
+    .value_write  (cheat_value_sel && (mem_wstrb != 4'b0)),
+    .value_data   (mem_wdata),
+    .push_write   (cheat_push_sel && (mem_wstrb != 4'b0)),
+    .push_data    (mem_wdata),
+    .apply_enable (cheat_apply),
+    .codes_reset  (cheat_reset),
+    .code_bus     (cheat_code)
+);
 
 picorv32 #(
     .ENABLE_COUNTERS   (0),
@@ -781,6 +806,51 @@ always @(posedge clk) begin
     end
 end
 
+endmodule
+
+module cheat_mmio (
+    input  wire         clk,
+    input  wire         resetn,
+    input  wire         ctrl_write,
+    input  wire [31:0]  ctrl_data,
+    input  wire         addr_write,
+    input  wire [31:0]  addr_data,
+    input  wire         value_write,
+    input  wire [31:0]  value_data,
+    input  wire         push_write,
+    input  wire [31:0]  push_data,
+    output reg          apply_enable,
+    output reg          codes_reset,
+    output wire [128:0] code_bus
+);
+    reg [20:0] address_reg;
+    reg [7:0] value_reg;
+    reg code_strobe;
+
+    assign code_bus = {code_strobe, 32'b0, 11'b0, address_reg,
+                       24'b0, 8'b0, 24'b0, value_reg};
+
+    always @(posedge clk) begin
+        codes_reset <= 1'b0;
+        code_strobe <= 1'b0;
+        if (!resetn) begin
+            apply_enable <= 1'b0;
+            codes_reset <= 1'b0;
+            address_reg <= 21'b0;
+            value_reg <= 8'b0;
+        end else begin
+            if (ctrl_write) begin
+                apply_enable <= ctrl_data[0];
+                codes_reset <= ctrl_data[1];
+            end
+            if (addr_write)
+                address_reg <= addr_data[20:0];
+            if (value_write)
+                value_reg <= value_data[7:0];
+            if (push_write && push_data[0])
+                code_strobe <= 1'b1;
+        end
+    end
 endmodule
 
 

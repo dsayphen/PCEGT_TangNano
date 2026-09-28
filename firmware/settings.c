@@ -18,80 +18,221 @@ int video_scanline = 0;   // hardware reset default: off
 int game_pad_mode = 0;    // hardware reset default: 2 buttons
 int video_color = 0;      // hardware reset default: raw RGB
 
-void game_pad_mode_load(const char *game_name) {
-    FIL file;
+static int open_game_config(FIL *file, const char *game_name) {
+    char path[PWD_SIZE + NAME_MAX + 16];
     FRESULT result;
-    char cfg_path[PWD_SIZE + NAME_MAX + 16];
-    char line[64];
-
-    // Valeur par défaut : 2 boutons
-    game_pad_mode = 0;
-    reg_pad_mode = 0;
-
-    if (!game_name || game_name[0] == '\0') return;
-
-    if (build_game_path(cfg_path, sizeof(cfg_path), "/config/", game_name,
+    if (build_game_path(path, sizeof(path), "/config/", game_name,
                         ".cfg", 1) != 0)
-        return;
-    result = f_open(&file, cfg_path, FA_READ);
-    if (result == FR_NO_FILE || result == FR_NO_PATH) {
-        if (build_game_path(cfg_path, sizeof(cfg_path), "/config/", game_name,
-                            ".cfg", 0) != 0)
-            return;
-        result = f_open(&file, cfg_path, FA_READ);
-    }
-    if (result != FR_OK) {
-        return; // Conserve la valeur par défaut si le fichier n'existe pas
-    }
+        return -1;
+    result = f_open(file, path, FA_READ);
+    if (result == FR_OK)
+        return 1;
+    if (result != FR_NO_FILE && result != FR_NO_PATH)
+        return -1;
+    if (build_game_path(path, sizeof(path), "/config/", game_name,
+                        ".cfg", 0) != 0)
+        return -1;
+    result = f_open(file, path, FA_READ);
+    return result == FR_OK ? 1 : result == FR_NO_FILE || result == FR_NO_PATH ? 0 : -1;
+}
 
-    while (f_gets(line, sizeof(line), &file)) {
-        if (line[0] == '#' || line[0] == '\r' || line[0] == '\n' || line[0] == '\0') {
+static int config_index_list(char *text, uint8_t *indices, int capacity,
+                             int *count) {
+    int used = 0;
+    char *cursor = text;
+    while (*cursor == ' ' || *cursor == '\t') cursor++;
+    if (*cursor++ != '[')
+        return -1;
+    for (;;) {
+        unsigned value = 0;
+        int digits = 0;
+        while (*cursor == ' ' || *cursor == '\t') cursor++;
+        if (*cursor == ']') {
+            cursor++;
+            break;
+        }
+        while (*cursor >= '0' && *cursor <= '9') {
+            digits = 1;
+            if (value <= 1000)
+                value = value * 10 + (unsigned)(*cursor - '0');
+            cursor++;
+        }
+        while (*cursor == ' ' || *cursor == '\t') cursor++;
+        if (*cursor != ',' && *cursor != ']') {
+            digits = 0;
+            while (*cursor && *cursor != ',' && *cursor != ']') cursor++;
+            uart_print("config: ignoring malformed cheat index\n");
+        }
+        if (digits) {
+            if (value < 64) {
+                int duplicate = 0;
+                for (int i = 0; i < used; i++)
+                    duplicate |= indices[i] == value;
+                if (!duplicate && used < capacity)
+                    indices[used++] = (uint8_t)value;
+            } else {
+                uart_printf("config: ignoring cheat index %d\n", (int)value);
+            }
+        } else if (*cursor != ',' && *cursor != ']') {
+            while (*cursor && *cursor != ',' && *cursor != ']') cursor++;
+        }
+        while (*cursor == ' ' || *cursor == '\t') cursor++;
+        if (*cursor == ',') {
+            cursor++;
             continue;
         }
+        if (*cursor == ']') {
+            cursor++;
+            break;
+        }
+        return -1;
+    }
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n')
+        cursor++;
+    if (*cursor)
+        return -1;
+    *count = used;
+    return 0;
+}
 
-        if (starts_with(line, "pad_mode=")) {
-            game_pad_mode = parse_u8(line + 9) ? 1 : 0;
-            reg_pad_mode = game_pad_mode;
+int game_cheats_activated_load(const char *game_name, uint8_t *indices,
+                               int max_indices, int *count) {
+    FIL file;
+    char line[256];
+    int opened;
+    int found = 0;
+    if (count)
+        *count = 0;
+    if (!game_name || !*game_name || !indices || !count || max_indices < 0)
+        return -1;
+    opened = open_game_config(&file, game_name);
+    if (opened <= 0)
+        return opened;
+    while (f_gets(line, sizeof(line), &file)) {
+        char *entry = line;
+        while (*entry == ' ' || *entry == '\t') entry++;
+        if (!starts_with(entry, "cheats_activated="))
+            continue;
+        if (found || config_index_list(entry + 17, indices, max_indices, count) != 0) {
+            f_close(&file);
+            uart_print("config: invalid cheats_activated list\n");
+            return -1;
+        }
+        found = 1;
+    }
+    f_close(&file);
+    return found ? 1 : 0;
+}
+
+static void read_config_values(const char *game_name, int *pad_mode,
+                               char *cheats_line, size_t cheats_size) {
+    FIL file;
+    char line[256];
+    int opened = open_game_config(&file, game_name);
+    if (opened != 1)
+        return;
+    while (f_gets(line, sizeof(line), &file)) {
+        char *entry = line;
+        while (*entry == ' ' || *entry == '\t') entry++;
+        if (starts_with(entry, "pad_mode=")) {
+            *pad_mode = parse_u8(entry + 9) ? 1 : 0;
+        } else if (starts_with(entry, "cheats_activated=") && cheats_size) {
+            strncpy(cheats_line, entry, cheats_size - 1);
+            cheats_line[cheats_size - 1] = '\0';
+            size_t length = strlen(cheats_line);
+            while (length && (cheats_line[length - 1] == '\n' ||
+                              cheats_line[length - 1] == '\r'))
+                cheats_line[--length] = '\0';
         }
     }
-
     f_close(&file);
 }
 
-void game_pad_mode_save(const char *game_name) {
+static int write_game_config(const char *game_name, int pad_mode,
+                             const char *cheats_line) {
     FIL file;
     UINT bw;
+    char path[PWD_SIZE + NAME_MAX + 16];
     char num[4];
     int len;
-    char cfg_path[PWD_SIZE + NAME_MAX + 16];
-
-    if (!game_name || game_name[0] == '\0') return;
-
-    // S'assurer que le dossier /config existe
-    f_mkdir("/config");
-
-    if (build_game_path(cfg_path, sizeof(cfg_path), "/config/", game_name,
+    static const char header[] =
+        "# PCEngine / SuperGrafx game settings\n"
+        "# pad_mode: 0 = 2 buttons, 1 = 6 buttons\n";
+    if (build_game_path(path, sizeof(path), "/config/", game_name,
                         ".cfg", 1) != 0)
-        return;
-
-    if (f_open(&file, cfg_path, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
-        return;
+        return -1;
+    f_mkdir("/config");
+    if (f_open(&file, path, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
+        return -1;
+    if (f_write(&file, header, sizeof(header) - 1, &bw) != FR_OK ||
+        bw != sizeof(header) - 1 ||
+        f_write(&file, "pad_mode=", 9, &bw) != FR_OK || bw != 9) {
+        f_close(&file);
+        return -1;
     }
+    len = u8_to_str(num, (uint8_t)pad_mode);
+    if (f_write(&file, num, (UINT)len, &bw) != FR_OK || bw != (UINT)len ||
+        f_write(&file, "\n", 1, &bw) != FR_OK || bw != 1) {
+        f_close(&file);
+        return -1;
+    }
+    if (cheats_line && *cheats_line) {
+        UINT length = (UINT)strlen(cheats_line);
+        if (f_write(&file, cheats_line, length, &bw) != FR_OK || bw != length ||
+            f_write(&file, "\n", 1, &bw) != FR_OK || bw != 1) {
+            f_close(&file);
+            return -1;
+        }
+    }
+    FRESULT result = f_close(&file);
+    return result == FR_OK ? 0 : -1;
+}
 
-    const char *header = 
-        "# PCEngine / SuperGrafx Game Pad Settings\n"
-        "# -----------------------------------\n"
-        "# pad_mode : 0 = 2 buttons, 1 = 6 buttons\n"
-        "# -----------------------------------\n";
+void game_pad_mode_load(const char *game_name) {
+    char ignored_cheats[256] = "";
+    game_pad_mode = 0;
+    reg_pad_mode = 0;
+    if (!game_name || !*game_name)
+        return;
+    read_config_values(game_name, &game_pad_mode, ignored_cheats,
+                       sizeof(ignored_cheats));
+    reg_pad_mode = game_pad_mode;
+}
 
-    f_write(&file, header, (UINT)strlen(header), &bw);
+void game_pad_mode_save(const char *game_name) {
+    int pad_mode = game_pad_mode;
+    char cheats_line[256] = "";
+    if (!game_name || !*game_name)
+        return;
+    read_config_values(game_name, &pad_mode, cheats_line, sizeof(cheats_line));
+    if (write_game_config(game_name, game_pad_mode, cheats_line) != 0)
+        uart_print("config: could not save game settings\n");
+}
 
-    f_write(&file, "pad_mode=", 9, &bw);
-    len = u8_to_str(num, game_pad_mode);
-    f_write(&file, num, len, &bw);
-    f_write(&file, "\n", 1, &bw);
-
-    f_close(&file);
+int game_cheats_activated_save(const char *game_name, const uint8_t *indices,
+                               int count) {
+    int pad_mode = game_pad_mode;
+    char previous[256] = "";
+    char list[256];
+    int used = 0;
+    if (!game_name || !*game_name || count < 0 || count > 64 ||
+        (count && !indices))
+        return -1;
+    read_config_values(game_name, &pad_mode, previous, sizeof(previous));
+    memcpy(list, "cheats_activated=[", 17);
+    used = 17;
+    for (int i = 0; i < count; i++) {
+        char num[4];
+        int len;
+        if (i)
+            list[used++] = ',';
+        len = u8_to_str(num, indices[i]);
+        memcpy(list + used, num, (size_t)len);
+        used += len;
+    }
+    list[used++] = ']';
+    list[used] = '\0';
+    return write_game_config(game_name, pad_mode, list);
 }
 
 void video_config_load(void) {

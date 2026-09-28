@@ -218,7 +218,8 @@ signal GENIE_DI   : std_logic_vector(7 downto 0);
 component CODES is
 	generic(
 		ADDR_WIDTH  : in integer := 16;
-		DATA_WIDTH  : in integer := 8
+		DATA_WIDTH  : in integer := 8;
+		COMPARE_SUPPORT : in integer := 1
 	);
 	port(
 		clk         : in  std_logic;
@@ -346,7 +347,8 @@ generate_CHEAT: if (CHEAT_SUPPORT /= 0) generate begin
 GAMEGENIE : component CODES
 generic map(
 	ADDR_WIDTH => 21,
-	DATA_WIDTH => 8
+	DATA_WIDTH => 8,
+	COMPARE_SUPPORT => 0
 )
 port map(
 	clk => CLK,

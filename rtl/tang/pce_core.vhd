@@ -2,8 +2,7 @@
 -- PCE/CD/SuperGrafx wrapper around pce_top (extram variant) for Tang Nano 20K.
 --
 -- Purpose:
---   * enable the SuperGrafx second VDC and CD-ROM unit while keeping the
---     Game Genie and Arcade Card disabled
+--   * enable the SuperGrafx second VDC, CD-ROM unit and Game Genie
 --   * use internal block RAM for the 8 KiB work RAM and backup RAM
 --   * expose both VDC video RAM ports to the interleaved SDRAM controller
 --   * expose a small, all-lowercase port list to the Verilog top level
@@ -27,6 +26,9 @@ entity pce_core is
 		reset      : in  std_logic;
 		cold_reset : in  std_logic;
 		cpu_pause  : in  std_logic;
+		cheat_apply : in std_logic;
+		cheat_reset : in std_logic;
+		cheat_code : in std_logic_vector(128 downto 0);
 
 		-- HuCard ROM (external, SDRAM)
 		rom_rd     : out std_logic;
@@ -119,7 +121,6 @@ architecture rtl of pce_core is
 
     signal sgx_i    : std_logic;
 
-	signal gg_code_z : std_logic_vector(128 downto 0) := (others => '0');
 	signal ff_byte   : std_logic_vector(7 downto 0) := x"FF";
 	signal zero_byte : std_logic_vector(7 downto 0) := x"00";
 
@@ -162,7 +163,7 @@ begin
 	CORE : entity work.pce_top
 	generic map (
 		SGX_SUPPORT      => SGX_SUPPORT,
-		CHEAT_SUPPORT    => 0,
+		CHEAT_SUPPORT    => 1,
 		PSG_O_WIDTH      => 20,
 		MAX_SPRITES      => 16,
 		USE_INTERNAL_RAM => 1,
@@ -199,9 +200,9 @@ begin
         VRAM1_WE    => vram1_we,
         VRAM1_DI    => vram1_di,
 
-		GG_EN       => '0',
-		GG_CODE     => gg_code_z,
-		GG_RESET    => '0',
+		GG_EN       => not cheat_apply,
+		GG_CODE     => cheat_code,
+		GG_RESET    => cheat_reset,
 		GG_AVAIL    => open,
 
 		SP64        => '0',

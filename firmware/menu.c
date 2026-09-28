@@ -9,6 +9,7 @@
 #include "saves.h"
 #include "cd.h"
 #include "menu.h"
+#include "cheats.h"
 
 // Cycle the display zoom mode (2x -> stretch -> ...) and flash the new
 // setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
@@ -110,6 +111,86 @@ static void make_menu_label(char *buf, int type) {
         buf[i++] = *value++;
 
     buf[i] = '\0';
+}
+
+static void make_cheats_label(char *buf) {
+    char number[4];
+    int pos = 0;
+    int len;
+    const char *prefix = "Cheats (";
+    while (*prefix)
+        buf[pos++] = *prefix++;
+    len = u8_to_str(number, (uint8_t)cheats_active_count());
+    for (int i = 0; i < len; i++)
+        buf[pos++] = number[i];
+    buf[pos++] = '/';
+    len = u8_to_str(number, (uint8_t)cheats_count());
+    for (int i = 0; i < len; i++)
+        buf[pos++] = number[i];
+    buf[pos++] = ')';
+    buf[pos] = '\0';
+}
+
+static void cheats_menu(void) {
+    int active = 0;
+    int first = 0;
+    const int visible_rows = 10;
+    clear();
+    print_field(5, 5, "Cheats", OSD_COLS - 2);
+    print_game_name();
+
+    for (;;) {
+        int count = cheats_count();
+        int status = 0;
+        if (count > 0) {
+            if (active >= count)
+                active = count - 1;
+            if (active < first)
+                first = active;
+            if (active >= first + visible_rows)
+                first = active - visible_rows + 1;
+            for (int row = 0; row < visible_rows; row++) {
+                int index = first + row;
+                cursor(4, 8 + row);
+                putchar(index < count && index == active ? '>' : ' ');
+                if (index < count) {
+                    char label[25];
+                    const char *description = cheats_description(index);
+                    int pos = 0;
+                    const char *enabled = cheats_is_active(index) ? "[ON] " : "[OFF] ";
+                    while (*enabled)
+                        label[pos++] = *enabled++;
+                    while (*description && pos < (int)sizeof(label) - 1)
+                        label[pos++] = *description++;
+                    label[pos] = '\0';
+                    print_field(6, 8 + row, label, 25);
+                } else {
+                    print_field(6, 8 + row, "", 25);
+                }
+            }
+            selection_row(8 + active - first);
+            status = *cheats_status() != '\0';
+            print_field(1, 19, status ? cheats_status() : "A=Toggle  B=Back",
+                        OSD_COLS - 2);
+        } else {
+            for (int row = 0; row < visible_rows; row++)
+                clear_line(8 + row);
+            print_field(2, 10, *cheats_status() ? cheats_status() : "No cheats found",
+                        OSD_COLS - 4);
+            print_field(1, 19, "B=Back", OSD_COLS - 2);
+        }
+
+        uint32_t e = joy_edge();
+        if ((e & JOY_B) || (e & JOY_MENU))
+            return;
+        if (count > 0 && (e & JOY_UP))
+            active = active ? active - 1 : count - 1;
+        else if (count > 0 && (e & JOY_DOWN))
+            active = active < count - 1 ? active + 1 : 0;
+        else if (count > 0 && (e & JOY_A))
+            cheats_toggle(active);
+        delay(20);
+    }
 }
 
 // Color/Zoom/Scanlines sub-menu, reached from "Video Settings >" in
@@ -254,7 +335,7 @@ int pause_menu(void) {
         "Resume Game", "Reset Game", "Return to browser"
     };
     int active = 0;
-    const int n_items = 6;
+    const int n_items = 7;
 
     audio_paused = 1;
     audio_apply();
@@ -286,6 +367,12 @@ int pause_menu(void) {
                 continue;
             }
 
+            if (i == 6) {
+                make_cheats_label(label);
+                print_field(6, 8 + i, label, 20);
+                continue;
+            }
+
             make_menu_label(label, 3);
             print_field(6, 8 + i, label, 20);
         }
@@ -314,6 +401,7 @@ int pause_menu(void) {
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && active == 2) {
+            cheats_clear();
             pce_stop();
             audio_paused = 0;
             audio_apply();
@@ -329,6 +417,11 @@ int pause_menu(void) {
             print_game_name();
         } else if ((e & JOY_A) && active == 5) {
             audio_menu();
+            clear();
+            print_field(5, 5, "Game paused", OSD_COLS - 2);
+            print_game_name();
+        } else if ((e & JOY_A) && active == 6) {
+            cheats_menu();
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
             print_game_name();

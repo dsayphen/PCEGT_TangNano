@@ -9,6 +9,7 @@
 #include "saves.h"
 #include "rom.h"
 #include "cd.h"
+#include "cheats.h"
 
 static FIL cd_image;
 static int cd_image_track = -1;     // data track whose file is open in cd_image
@@ -203,6 +204,7 @@ static int load_system_card(void) {
     status("Loading System Card 3...");
     uart_print("syscard: starting SDRAM transfer\n");
     pce_load_start(size, 0);
+    cheats_load(current_game_name, CHEAT_GAME_CD);
     while (total < size) {
         UINT want = (UINT)((size - total) > sizeof(io_buf) ? sizeof(io_buf)
                                                                : (size - total));
@@ -347,6 +349,8 @@ int open_cd_image(const char *cue_name) {
         return -1;
     }
 
+    extract_filename(current_game_name, cue_name);
+
     uart_printf("cd: %d tracks, %d sectors\n", cd_track_count, (int)cd_disc_total_lba);
     for (int i = 0; i < cd_track_count; i++)
         uart_printf("cd: track %d %s lba=%d file_lba=%d file=%s\n", i + 1,
@@ -364,6 +368,7 @@ int open_cd_image(const char *cue_name) {
         return -1;
     // status("Preparing CD..."); // ne pas afficher, trop rapide
     if (cd_open_data_track(cd_first_data_track) != 0) {
+        cheats_clear();
         message("Cannot open CD image", cd_track_filename[cd_first_data_track]);
         return -1;
     }
@@ -374,7 +379,6 @@ int open_cd_image(const char *cue_name) {
     cd_audio_paused = 0;
     cd_audio_loop = 0;
     reg_cd_audio_hold = 1;
-    extract_filename(current_game_name, cue_name);
     current_game_populous = 0;
     reg_rom_pop = 0;
     game_pad_mode_load(current_game_name);
