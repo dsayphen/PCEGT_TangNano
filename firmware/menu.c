@@ -67,6 +67,15 @@ static void print_game_name(void) {
     if (extension)
         end = extension;
 
+    for (const char *part = current_game_name; part < end; part++) {
+        if (*part == '(' || (*part == '-' && end - current_game_name > OSD_COLS - 5)) {
+            end = part;
+            break;
+        }
+    }
+    while (end > current_game_name && end[-1] == ' ')
+        end--;
+
     while (current_game_name + i < end && i < OSD_COLS - 5) {
         label[i] = current_game_name[i];
         i++;

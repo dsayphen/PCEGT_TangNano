@@ -34,49 +34,133 @@ static int is_hidden_dir(const char *name) {
     return 0;
 }
 
+typedef struct {
+    char name[FF_LFN_BUF + 1];
+    uint32_t size;
+    uint8_t is_dir;
+} BrowserEntry;
+
+static int is_visible_entry(const FILINFO *fno) {
+    if (fno->fattrib & (AM_HID | AM_SYS))
+        return 0;
+    if ((fno->fattrib & AM_DIR) && is_hidden_dir(fno->fname))
+        return 0;
+    if (!(fno->fattrib & AM_DIR) && !is_rom(fno->fname) && !is_cue(fno->fname))
+        return 0;
+    return 1;
+}
+
+static int compare_entry(const BrowserEntry *a, const BrowserEntry *b) {
+    int result;
+
+    if (a->is_dir != b->is_dir)
+        return a->is_dir ? -1 : 1;
+    result = strcasecmp(a->name, b->name);
+    if (result != 0)
+        return result;
+    return strcmp(a->name, b->name);
+}
+
+static void copy_entry(BrowserEntry *entry, const FILINFO *fno) {
+    strcpy(entry->name, fno->fname);
+    entry->size = (uint32_t)fno->fsize;
+    entry->is_dir = (fno->fattrib & AM_DIR) ? 1 : 0;
+}
+
+static int select_next_entries(const char *dir, const BrowserEntry *after,
+                               BrowserEntry *entries, int max_entries,
+                               int *visible_count) {
+    DIR d;
+    FILINFO fno;
+    FRESULT result;
+    int selected = 0;
+
+    if (visible_count)
+        *visible_count = 0;
+    if (f_opendir(&d, dir) != FR_OK)
+        return -1;
+
+    for (;;) {
+        BrowserEntry entry;
+        int pos;
+
+        result = f_readdir(&d, &fno);
+        if (result != FR_OK) {
+            f_closedir(&d);
+            return -1;
+        }
+        if (fno.fname[0] == 0)
+            break;
+        if (!is_visible_entry(&fno))
+            continue;
+        if (visible_count)
+            (*visible_count)++;
+
+        copy_entry(&entry, &fno);
+        if (after && compare_entry(&entry, after) <= 0)
+            continue;
+
+        for (pos = 0; pos < selected; pos++) {
+            if (compare_entry(&entry, &entries[pos]) < 0)
+                break;
+        }
+        if (pos >= max_entries)
+            continue;
+        if (selected < max_entries)
+            selected++;
+        for (int i = selected - 1; i > pos; i--)
+            entries[i] = entries[i - 1];
+        entries[pos] = entry;
+    }
+
+    f_closedir(&d);
+    return selected;
+}
+
 // ---------------------------------------------------------------------------
 // Directory listing
 //
 // Fills names[] / is_dir[] / sizes[] with up to `len` entries starting at
-// `start`, counting only the entries the menu shows (directories and .PCE or
-// .SGX files).  *count receives the total number of such entries.
+// `start` in the global sorted order. *count receives the total number of
+// entries shown by the menu.
 // Returns 0 on success.
 // ---------------------------------------------------------------------------
 static int load_dir(const char *dir, int start, int len, int *count) {
-    DIR d;
-    FILINFO fno;
+    BrowserEntry selected[PAGESIZE];
+    BrowserEntry after;
+    int have_after = 0;
     int idx = 0;
 
     page_len = 0;
     *count = 0;
 
-    if (f_opendir(&d, dir) != FR_OK)
-        return -1;
-
-    for (;;) {
-        if (f_readdir(&d, &fno) != FR_OK)
+    while (page_len < len) {
+        int selected_count = select_next_entries(
+            dir, have_after ? &after : NULL, selected, PAGESIZE,
+            have_after ? NULL : count);
+        if (selected_count < 0)
+            return -1;
+        if (selected_count == 0)
             break;
-        if (fno.fname[0] == 0)
-            break;
-        if (fno.fattrib & (AM_HID | AM_SYS))
-            continue;
-        if ((fno.fattrib & AM_DIR) && is_hidden_dir(fno.fname))
-            continue;
-        if (!(fno.fattrib & AM_DIR) && !is_rom(fno.fname) && !is_cue(fno.fname))
-            continue;
 
-        if (idx >= start && page_len < len) {
-            strncpy(names[page_len], fno.fname, NAME_MAX - 1);
+        for (int i = 0; i < selected_count; i++, idx++) {
+            if (idx < start)
+                continue;
+            strncpy(names[page_len], selected[i].name, NAME_MAX - 1);
             names[page_len][NAME_MAX - 1] = '\0';
-            is_dir[page_len] = (fno.fattrib & AM_DIR) ? 1 : 0;
-            sizes[page_len] = (uint32_t)fno.fsize;
+            is_dir[page_len] = selected[i].is_dir;
+            sizes[page_len] = selected[i].size;
             page_len++;
+            if (page_len == len)
+                break;
         }
-        idx++;
+
+        after = selected[selected_count - 1];
+        have_after = 1;
+        if (selected_count < PAGESIZE)
+            break;
     }
 
-    f_closedir(&d);
-    *count = idx;
     return 0;
 }
 
