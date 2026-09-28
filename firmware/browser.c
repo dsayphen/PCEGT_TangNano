@@ -167,6 +167,11 @@ static int load_dir(const char *dir, int start, int len, int *count) {
 // ---------------------------------------------------------------------------
 // The browser
 // ---------------------------------------------------------------------------
+#define ENTRY_NAME_COLS  (OSD_COLS - 2)
+#define SCROLL_DELAY_MS  5000
+#define SCROLL_STEP_MS   150
+#define SCROLL_PAUSE_MS  800
+
 static void go_parent(void) {
     char *slash = strrchr(pwd, '/');
     if (!slash)
@@ -175,6 +180,25 @@ static void go_parent(void) {
         pwd[1] = '\0';          // already at the root
     else
         *slash = '\0';
+}
+
+static int entry_display_len(int index) {
+    return (int)strlen(names[index]) + (is_dir[index] ? 1 : 0);
+}
+
+static void draw_entry_name(int index, int offset) {
+    int name_len = (int)strlen(names[index]);
+
+    cursor(2, ROW_FIRST + index);
+    for (int column = 0; column < ENTRY_NAME_COLS; column++) {
+        int pos = offset + column;
+        if (pos < name_len)
+            putchar(names[index][pos]);
+        else if (is_dir[index] && pos == name_len)
+            putchar('/');
+        else
+            putchar(' ');
+    }
 }
 
 static void draw_page(int page, int total, int active) {
@@ -191,9 +215,7 @@ static void draw_page(int page, int total, int active) {
         putchar(i == active ? '>' : ' ');
         cursor(1, y);
         putchar(' ');
-        print(names[i]);
-        if (is_dir[i])
-            putchar('/');
+        draw_entry_name(i, 0);
     }
 
     selection_row(page_len ? ROW_FIRST + active : 31);
@@ -223,6 +245,10 @@ void browse(void) {
     int active = 0;
     int total = 0;
     int need_redraw = 1;
+    uint32_t last_activity = 0;
+    uint32_t scroll_tick = 0;
+    int scroll_offset = 0;
+    int scroll_phase = 0;
 
     for (;;) {
         if (need_redraw) {
@@ -239,13 +265,54 @@ void browse(void) {
             draw_page(page, total, active);
             need_redraw = 0;
             delay(150);
+            last_activity = time_millis();
+            scroll_offset = 0;
+            scroll_phase = 0;
         }
 
         uint32_t e = joy_edge();
         if (!e) {
+            uint32_t now = time_millis();
+            int max_offset = page_len
+                ? entry_display_len(active) - ENTRY_NAME_COLS : 0;
+
+            if (max_offset > 0) {
+                if (scroll_phase == 0 &&
+                    (uint32_t)(now - last_activity) >= SCROLL_DELAY_MS) {
+                    scroll_phase = 1;
+                    scroll_tick = now;
+                } else if (scroll_phase == 1 &&
+                           (uint32_t)(now - scroll_tick) >= SCROLL_STEP_MS) {
+                    scroll_offset++;
+                    draw_entry_name(active, scroll_offset);
+                    scroll_tick = now;
+                    if (scroll_offset >= max_offset)
+                        scroll_phase = 2;
+                } else if (scroll_phase == 2 &&
+                           (uint32_t)(now - scroll_tick) >= SCROLL_PAUSE_MS) {
+                    scroll_phase = 3;
+                    scroll_tick = now;
+                } else if (scroll_phase == 3 &&
+                           (uint32_t)(now - scroll_tick) >= SCROLL_STEP_MS) {
+                    scroll_offset--;
+                    draw_entry_name(active, scroll_offset);
+                    scroll_tick = now;
+                    if (scroll_offset == 0) {
+                        scroll_phase = 0;
+                        last_activity = now;
+                    }
+                }
+            }
             delay(8);
             continue;
         }
+
+        if (scroll_offset) {
+            draw_entry_name(active, 0);
+            scroll_offset = 0;
+        }
+        scroll_phase = 0;
+        last_activity = time_millis();
 
         if ((e & JOY_UP) && page_len) {
             int prev = active;
