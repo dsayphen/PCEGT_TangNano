@@ -33,7 +33,7 @@ SNES pad -> HuC6280 / VDC / VCE -> line doubler -> DVI over HDMI
 | CD-ROM² / Super CD | experimental CUE/BIN, System Card, CDDA, SCSI data and ADPCM |
 | Arcade Card | enabled in CD mode; 2 MiB SDRAM tested in simulation, game compatibility not yet tested on hardware |
 | SuperGrafx (second VDC / VPC) | yes (`SGX_SUPPORT = 1`) |
-| Game Genie / cheat engine | **not built** (`CHEAT_SUPPORT = 0`) |
+| Game Genie / cheat engine | user `.cht` files; up to 32 active address patches |
 | Backup RAM (BRAM), Populous SRAM | saved per game on microSD at firmware-menu entry (not on power loss) |
 | Multitap, mouse, MB128 | not implemented |
 | OSD / menu | microSD browser, in-game pause, audio and video settings |
@@ -198,6 +198,62 @@ Global video and audio settings live in `/config/video.cfg` and
 `/config/audio.cfg`. The current game's 2/6-button mode lives in
 `/config/<game>.cfg`, without the image extension; the previous name remains a
 read fallback.
+
+### User cheat files
+
+Place a cheat file beside the SD card's hidden `cheats` directory, using the
+loaded image type and the image basename without its final extension:
+
+| Image | Cheat file |
+| --- | --- |
+| HuCard `.pce` | `/cheats/pce/<game>.cht` |
+| SuperGrafx `.sgx` | `/cheats/sgx/<game>.cht` |
+| CD `.cue` | `/cheats/cd/<game>.cht` |
+
+Only the following `.cht` form is supported: a decimal `cheats` count,
+zero-based `cheatN_desc`, `cheatN_code` and `cheatN_enable` entries. Descriptions
+must be double-quoted. Codes contain one or more hexadecimal `address:value`
+pairs separated by `+`, for example:
+
+```ini
+cheats = 2
+cheat0_desc = "Infinite Time"
+cheat0_code = "1f0dbc:99"
+cheat0_enable = false
+cheat1_desc = "P1 Infinite Health"
+cheat1_code = "1f1410:b0+1f1424:b0"
+cheat1_enable = false
+```
+
+Addresses must fit 21 bits (`0x000000`–`0x1fffff`) and replacement values 8
+bits (`0x00`–`0xff`). This syntax has no compare byte; other cheat formats or
+encodings are not claimed to work. Blank lines and `#` comments are ignored.
+Missing required fields or invalid code values make the file invalid; invalid
+or out-of-range saved indices are ignored with a UART diagnostic. Up to 64
+groups can be listed, but the total patches in enabled groups must not exceed
+the hardware limit of 32. A selection above that limit is rejected as a whole.
+
+The pause menu's `Cheats (x/y)` entry opens a scrollable list; A toggles a group
+and B returns. `.cht` `cheatN_enable` values seed the state unless
+`cheats_activated=[0,2]` exists in `/config/<game>.cfg`. Toggling writes that
+list while preserving `pad_mode`. Existing `/config/<game>.<rom-extension>.cfg`
+files are read if the extensionless config is absent; writes use only the
+extensionless path and leave legacy files untouched.
+
+Codes are loaded while the new game is held in reset. The Tang MMIO sequence
+disables and resets the engine, writes each 21-bit address and 8-bit value,
+pulses the add strobe, then enables application. The hardware compares CPU
+read addresses and replaces matching read data; codes are not general RAM
+writes, and address/bank mapping compatibility is game-dependent. Switching
+games and returning to the browser clears hardware codes; a warm reset of the
+same game keeps them.
+
+The Tang build synthesizes `16,917` LUT+ALU resources of `20,736`, `404` SSRAM
+and `43/46` BSRAM in Gowin V1.9.12.03. The protocol simulation
+`sim/tb_cheat_protocol.sv` covers clear, two patch transfers, matching-address
+replacement and enable polarity. SD-card parsing and game/address compatibility
+still require on-board validation; no claim is made that arbitrary codes work
+with every ROM mapping.
 
 ### Wire protocol
 

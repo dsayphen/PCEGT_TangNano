@@ -22,11 +22,12 @@ module CODES(
 parameter ADDR_WIDTH   = 16; // Not more than 32
 parameter DATA_WIDTH   = 8;  // Not more than 32
 parameter MAX_CODES    = 32;
+parameter COMPARE_SUPPORT = 1;
 
 localparam INDEX_SIZE  = $clog2(MAX_CODES-1); // Number of bits for index, must accomodate MAX_CODES
 
 localparam DATA_S      = DATA_WIDTH - 1;
-localparam COMP_S      = DATA_S + DATA_WIDTH;
+localparam COMP_S      = DATA_S + (COMPARE_SUPPORT ? DATA_WIDTH : 0);
 localparam ADDR_S      = COMP_S + ADDR_WIDTH;
 localparam COMP_F_S    = ADDR_S + 1;
 localparam ENA_F_S     = COMP_F_S + 1;
@@ -38,7 +39,15 @@ wire [DATA_WIDTH-1: 0] code_compare = code[32+:DATA_WIDTH];
 wire [DATA_WIDTH-1: 0] code_data    = code[0+:DATA_WIDTH];
 wire code_comp_f = code[96];
 
-wire [COMP_F_S:0] code_trimmed = {code_comp_f, code_addr, code_compare, code_data};
+wire [COMP_F_S:0] code_trimmed;
+
+generate
+if (COMPARE_SUPPORT) begin : generate_compare_codes
+	assign code_trimmed = {code_comp_f, code_addr, code_compare, code_data};
+end else begin : generate_unconditional_codes
+	assign code_trimmed = {1'b0, code_addr, code_data};
+end
+endgenerate
 
 reg [INDEX_SIZE:0] index = '0;
 

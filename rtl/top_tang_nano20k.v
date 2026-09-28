@@ -13,7 +13,7 @@
 //   * PSG -> I2S -> on-board audio amplifier / headphone jack
 //   * one SNES style pad on the GPIO header, plus the two on-board buttons
 //
-// Not built: Arcade Card, multitap, 6-button pads, Game Genie.
+// Not built: multitap, mouse and MB128. User .cht files are supported.
 //
 // See README.md for the build, flash, load and wiring instructions.
 //
@@ -176,6 +176,9 @@ wire [1:0]  scanline;
 wire        game_pause;
 wire        game_reset;
 wire        pad_mode;
+wire        cheat_apply;
+wire        cheat_reset;
+wire [128:0] cheat_code;
 wire        color_mode;
 wire [3:0]  audio_volume;
 wire [3:0]  audio_bass;
@@ -290,6 +293,9 @@ iosys #(
     .game_reset       (game_reset),
     .system_reset     (system_reset),
     .pad_mode         (pad_mode),
+    .cheat_apply      (cheat_apply),
+    .cheat_reset      (cheat_reset),
+    .cheat_code       (cheat_code),
     .color_mode       (color_mode),
     .audio_volume     (audio_volume),
     .audio_bass       (audio_bass),
@@ -562,6 +568,9 @@ pce_core #(
     .reset      (core_reset),
     .cold_reset (core_reset),
     .cpu_pause  (game_pause),
+    .cheat_apply (cheat_apply),
+    .cheat_reset (cheat_reset),
+    .cheat_code  (cheat_code),
 
     .rom_rd     (rom_rd),
     .rom_rdy    (rom_rdy),

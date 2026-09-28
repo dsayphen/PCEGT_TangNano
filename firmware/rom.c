@@ -8,6 +8,7 @@
 #include "saves.h"
 #include "cd.h"
 #include "rom.h"
+#include "cheats.h"
 
 static char path_buf[PWD_SIZE + NAME_MAX + 2];
 
@@ -156,6 +157,8 @@ int load_rom(const char *fname, uint32_t size) {
     int last_pct = -1;
     int is_cue_image = 0;
     int is_populous = 0;
+    int load_sgx;
+    enum cheat_game_type cheat_type;
 
     char cue_path[PWD_SIZE + NAME_MAX + 2];
     char bin_path[PWD_SIZE + NAME_MAX + 2];
@@ -214,12 +217,18 @@ int load_rom(const char *fname, uint32_t size) {
     reg_rom_pop = is_populous;
     current_game_populous = is_populous;
 
+    load_sgx = is_sgx(fname) || is_cue_image;
+    cheat_type = is_cue_image ? CHEAT_GAME_CD :
+                 load_sgx ? CHEAT_GAME_SGX : CHEAT_GAME_PCE;
+
     uart_printf("loading %s, %d bytes\n", path_buf, (int)size);
 
     // holds the PC Engine in reset and publishes the image description
     loading_status("");
     show_rom_progress(0, size);
-    pce_load_start(size, is_sgx(fname) || is_cue_image);
+    pce_load_start(size, load_sgx);
+    extract_filename(current_game_name, fname);
+    cheats_load(current_game_name, cheat_type);
 
     while (total < size) {
         UINT want = (UINT)((size - total) > sizeof(io_buf) ? sizeof(io_buf)
@@ -251,9 +260,6 @@ int load_rom(const char *fname, uint32_t size) {
     }
 
     f_close(&f);
-
-    // Enregistre le nom du jeu actuel
-    extract_filename(current_game_name, fname);
 
     // Charge le mode de manette spécifique au jeu
     game_pad_mode_load(current_game_name);

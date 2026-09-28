@@ -17,6 +17,10 @@ extern int audio_paused;
 
 void game_pad_mode_load(const char *game_name);
 void game_pad_mode_save(const char *game_name);
+int game_cheats_activated_load(const char *game_name, uint8_t *indices,
+							   int max_indices, int *count);
+int game_cheats_activated_save(const char *game_name, const uint8_t *indices,
+							   int count);
 void video_config_load(void);
 void video_config_save(void);
 void audio_apply(void);
