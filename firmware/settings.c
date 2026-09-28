@@ -20,6 +20,7 @@ int video_color = 0;      // hardware reset default: raw RGB
 
 void game_pad_mode_load(const char *game_name) {
     FIL file;
+    FRESULT result;
     char cfg_path[PWD_SIZE + NAME_MAX + 16];
     char line[64];
 
@@ -29,10 +30,17 @@ void game_pad_mode_load(const char *game_name) {
 
     if (!game_name || game_name[0] == '\0') return;
 
-    // Construction du chemin : /config/[nomdujeu].cfg
-    build_cfg_path(cfg_path, sizeof(cfg_path), game_name);
-
-    if (f_open(&file, cfg_path, FA_READ) != FR_OK) {
+    if (build_game_path(cfg_path, sizeof(cfg_path), "/config/", game_name,
+                        ".cfg", 1) != 0)
+        return;
+    result = f_open(&file, cfg_path, FA_READ);
+    if (result == FR_NO_FILE || result == FR_NO_PATH) {
+        if (build_game_path(cfg_path, sizeof(cfg_path), "/config/", game_name,
+                            ".cfg", 0) != 0)
+            return;
+        result = f_open(&file, cfg_path, FA_READ);
+    }
+    if (result != FR_OK) {
         return; // Conserve la valeur par défaut si le fichier n'existe pas
     }
 
@@ -62,8 +70,9 @@ void game_pad_mode_save(const char *game_name) {
     // S'assurer que le dossier /config existe
     f_mkdir("/config");
 
-    // Construction du chemin : /config/[nomdujeu].cfg
-    build_cfg_path(cfg_path, sizeof(cfg_path), game_name);
+    if (build_game_path(cfg_path, sizeof(cfg_path), "/config/", game_name,
+                        ".cfg", 1) != 0)
+        return;
 
     if (f_open(&file, cfg_path, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
         return;

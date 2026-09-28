@@ -24,7 +24,9 @@ extern int current_game_populous;           // firmware.c
 uint8_t to_bcd(uint32_t v);
 int     from_bcd(uint8_t value);
 void    extract_filename(char *dst, const char *path);
-void    build_cfg_path(char *dst, size_t max_len, const char *game_name);
+int     build_game_path(char *dst, size_t max_len, const char *directory,
+                        const char *game_name, const char *suffix,
+                        int strip_extension);
 int     u8_to_str(char *buf, uint8_t val);
 int     starts_with(const char *line, const char *prefix);
 int     starts_with_ci_n(const char *line, const char *prefix, int n);

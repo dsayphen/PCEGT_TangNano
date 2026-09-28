@@ -9,20 +9,6 @@
 #define POP_SAVE_SIZE 32768
 #define POP_SAVE_BASE ((volatile uint8_t *)0x001b0000)
 
-static void build_save_path(char *dst, size_t len, const char *game_name,
-                            const char *extension) {
-    const char *prefix = "/saves/";
-    size_t i = 0;
-
-    while (*prefix && i < len - 1)
-        dst[i++] = *prefix++;
-    while (*game_name && i < len - 1)
-        dst[i++] = *game_name++;
-    while (*extension && i < len - 1)
-        dst[i++] = *extension++;
-    dst[i] = '\0';
-}
-
 static void brm_transfer(uint8_t *buffer, uint32_t offset, UINT count, int to_bram) {
     reg_brm_access = 1;
     for (UINT i = 0; i < count; i++) {
@@ -61,14 +47,23 @@ static int save_ram_file(const char *game_name, const char *extension,
     char save_path[PWD_SIZE + NAME_MAX + 16];
     int file_open = 0;
 
-    build_save_path(save_path, sizeof(save_path), game_name, extension);
+    if (build_game_path(save_path, sizeof(save_path), "/saves/", game_name,
+                        extension, 1) != 0)
+        return -1;
     if (save_to_sd) {
         f_mkdir("/saves");
         if (f_open(&file, save_path, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
             return -1;
         file_open = 1;
     } else {
-        file_open = f_open(&file, save_path, FA_READ) == FR_OK;
+        FRESULT result = f_open(&file, save_path, FA_READ);
+        if (result == FR_NO_FILE || result == FR_NO_PATH) {
+            if (build_game_path(save_path, sizeof(save_path), "/saves/",
+                                game_name, extension, 0) != 0)
+                return -1;
+            result = f_open(&file, save_path, FA_READ);
+        }
+        file_open = result == FR_OK;
     }
 
     while (total < size) {

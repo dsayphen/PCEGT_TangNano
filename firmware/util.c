@@ -22,25 +22,37 @@ void extract_filename(char *dst, const char *path) {
     dst[NAME_MAX - 1] = '\0';
 }
 
-// Construit le chemin /config/[game_name].cfg sans snprintf
-void build_cfg_path(char *dst, size_t max_len, const char *game_name) {
-    const char *dir = "/config/";
-    const char *ext = ".cfg";
-    size_t i = 0;
+int build_game_path(char *dst, size_t max_len, const char *directory,
+                    const char *game_name, const char *suffix,
+                    int strip_extension) {
+    size_t directory_len;
+    size_t game_len;
+    size_t suffix_len;
+    const char *extension;
 
-    // Copie "/config/"
-    while (*dir && i < max_len - 1) {
-        dst[i++] = *dir++;
-    }
-    // Copie le nom du jeu
-    while (*game_name && i < max_len - 1) {
-        dst[i++] = *game_name++;
-    }
-    // Copie ".cfg"
-    while (*ext && i < max_len - 1) {
-        dst[i++] = *ext++;
-    }
-    dst[i] = '\0';
+    if (max_len == 0)
+        return -1;
+    dst[0] = '\0';
+    if (!directory || !game_name || !suffix)
+        return -1;
+
+    directory_len = strlen(directory);
+    game_len = strlen(game_name);
+    suffix_len = strlen(suffix);
+    extension = strrchr(game_name, '.');
+    if (strip_extension && extension && extension != game_name)
+        game_len = (size_t)(extension - game_name);
+
+    if (directory_len >= max_len ||
+        game_len > max_len - directory_len - 1 ||
+        suffix_len > max_len - directory_len - game_len - 1)
+        return -1;
+
+    memcpy(dst, directory, directory_len);
+    memcpy(dst + directory_len, game_name, game_len);
+    memcpy(dst + directory_len + game_len, suffix, suffix_len);
+    dst[directory_len + game_len + suffix_len] = '\0';
+    return 0;
 }
 
 // Conversion d'un entier 8-bit en chaîne de caractères texte
