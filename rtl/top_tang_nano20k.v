@@ -94,7 +94,7 @@ localparam        FIRMWARE_SIZE       = 128*1024;
 // ===========================================================================
 wire clk_sys;        // 43.2 MHz
 wire clk_mem;        // 86.4 MHz SDRAM controller
-wire clk_sdram;      // 86.4 MHz, 180 degrees
+wire clk_sdram;      // 86.4 MHz, 135 degrees
 wire clk_pix5;       // 129.6 MHz
 wire clk_pix;        // 25.92 MHz
 wire lock_main;
@@ -338,6 +338,10 @@ iosys #(
     .cdda_usedw_dbg   (cdda_usedw_dbg),
     .adpcm_dbg        (adpcm_dbg),
     .refresh_gap_dbg  (refresh_gap_dbg),
+    .rv_starve_dbg    (rv_starve_dbg),
+    .rv_stuck         (rv_stuck),
+    .rv_stuck_ram     (rv_stuck_ram),
+    .rv_trap          (rv_trap),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -516,10 +520,15 @@ pce_sdram_ctrl_3ch #(
     .adram_clken   (adram_clken),
 
     .init_done     (sdram_init_done),
-    .refresh_gap_dbg (refresh_gap_dbg)
+    .refresh_gap_dbg (refresh_gap_dbg),
+    .rv_starve_dbg   (rv_starve_dbg)
 );
 
 wire [7:0] refresh_gap_dbg;
+wire [7:0] rv_starve_dbg;
+wire       rv_stuck;
+wire       rv_stuck_ram;
+wire       rv_trap;
 
 // ===========================================================================
 // Core reset
@@ -855,12 +864,21 @@ assign pa_en = ~audio_hdmi;
 // ===========================================================================
 // Status LEDs (active low)
 //
-//   led[0]  PLLs locked and SDRAM initialised
+//   led[0]  PLLs locked and SDRAM initialised.  Also goes out for good if the
+//           softcore ever waits ~1.5 ms on a memory access that never
+//           completes.
 //   led[1]  a ROM image is loaded and the console is running.  It stays off
 //           while the menu is up before a game has been picked and for the
-//           whole of any ROM transfer.
+//           whole of any ROM transfer.  Also goes out for good if the
+//           softcore ever waits that long on an address nothing decodes,
+//           i.e. after a jump through a corrupted return address.
+//
+// The two flags survive the softcore itself, which is the point: when it
+// stops dead there is no firmware left to report anything.
 // ===========================================================================
-assign led[0] = ~(lock_main & lock_hdmi & sdram_init_done);
-assign led[1] = ~(image_valid & ~loading & ~core_reset);
+assign led[0] = ~(lock_main & lock_hdmi & sdram_init_done) |
+                (rv_stuck & rv_stuck_ram) | rv_trap;
+assign led[1] = ~(image_valid & ~loading & ~core_reset) |
+                (rv_stuck & ~rv_stuck_ram) | rv_trap;
 
 endmodule

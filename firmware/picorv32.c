@@ -69,6 +69,7 @@ void clear(void) {
 // UART
 // ===========================================================================
 int debug_uart = 0;
+uint32_t uart_div_clobbered = 0;
 
 void uart_init(int clkdiv) {
     reg_uart_clkdiv = clkdiv;
@@ -78,6 +79,13 @@ void uart_init(int clkdiv) {
 int uart_putchar(int c) {
     if (!debug_uart)
         return c;
+    // Diagnostic: reg_uart_clkdiv sits one address bit away from
+    // reg_uart_data, so a stray character reaching the divider garbles every
+    // following byte. Counted here and reported by the main loop.
+    if (reg_uart_clkdiv != 375) {
+        uart_div_clobbered = reg_uart_clkdiv;
+        reg_uart_clkdiv = 375;
+    }
     if (c == '\n')
         reg_uart_data = '\r';
     reg_uart_data = c;

@@ -141,6 +141,16 @@ module iosys #(
     // Maximum number of pending SDRAM refreshes since reset.
     // Piggybacked onto reg_cd_adpcm bits 15:8, no new address decode.
     input  wire [7:0]  refresh_gap_dbg,
+    // Longest run of dot slots the SDRAM denied the softcore, in units of 8.
+    // Piggybacked onto reg_cd_adpcm bits 23:16, no new address decode.
+    input  wire [7:0]  rv_starve_dbg,
+    // Latched when the softcore has held a bus request for ~1.5 ms without
+    // mem_ready. rv_stuck_ram tells the two cases apart: a memory access that
+    // never completes, or an address nothing decodes - which is what a jump
+    // through a corrupted stack looks like.
+    output reg         rv_stuck,
+    output reg         rv_stuck_ram,
+    output wire        rv_trap,
 
     // ---- read-only debug: VCE dot clock select (VIDEO_DCC), see huc6260;
     // piggybacked onto reg_core_id's unused bits 17:16, no new address decode
@@ -370,6 +380,17 @@ reg  [31:0] time_reg;
 // mem_rdata already feeds the softcore's register file through a long
 // priority mux, so give the cross-chip route a clock period of its own.
 // Without this stage the reads come back unstable.
+//
+// This must cover every tap, not just the ones on reg_color_mode /
+// reg_pad_mode / reg_rom_pop. vid_hdw_dbg in particular is the raw output of
+// a subtractor inside the VDC (VIDEO_HDW_DBG <= HDISP_END_POS - HDS_END_POS
+// in rtl/pce_top_extram.vhd): a game that reprograms HDS/HDW mid-frame for a
+// raster split made that bus switch straight into the mux and the softcore
+// latched corrupted words, i.e. garbage instructions, and hung for good on an
+// address nothing decodes (R-Type USA, Daimakaimura, Granzort).
+reg  [1:0]  dcc_q;
+reg  [6:0]  hdw_q;
+reg  [6:0]  hds_q;
 reg  [4:0]  hsw_q;
 reg  [6:0]  hde_q;
 reg  [4:0]  vsw_q;
@@ -379,8 +400,16 @@ reg  [7:0]  vcr_q;
 reg  [7:0]  vce_cr_q;
 reg  [15:0] vce_wr_q;
 reg  [9:0]  vid_px_q;
+reg  [7:0]  cd_phase_q;
+reg  [12:0] cdda_usedw_q;
+reg  [7:0]  adpcm_q;
+reg  [7:0]  refresh_gap_q;
+reg  [7:0]  rv_starve_q;
 
 always @(posedge clk) begin
+    dcc_q    <= vid_dcc_dbg;
+    hdw_q    <= vid_hdw_dbg;
+    hds_q    <= vid_hds_dbg;
     hsw_q    <= vid_hsw_dbg;
     hde_q    <= vid_hde_dbg;
     vsw_q    <= vid_vsw_dbg;
@@ -390,6 +419,11 @@ always @(posedge clk) begin
     vce_cr_q <= vid_vce_cr_dbg;
     vce_wr_q <= vid_vce_wr_dbg;
     vid_px_q <= vid_px_dbg;
+    cd_phase_q    <= cd_phase_dbg;
+    cdda_usedw_q  <= cdda_usedw_dbg;
+    adpcm_q       <= adpcm_dbg;
+    refresh_gap_q <= refresh_gap_dbg;
+    rv_starve_q   <= rv_starve_dbg;
 end
 reg  [7:0]  cd_events;
 reg  [95:0] cd_comm_reg;
@@ -448,6 +482,28 @@ assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
 
+reg [16:0] rv_stall_cnt;
+always @(posedge clk) begin
+    if (!resetn) begin
+        rv_stall_cnt <= 17'd0;
+        rv_stuck     <= 1'b0;
+        rv_stuck_ram <= 1'b0;
+    end else begin
+        // ROM clearing deliberately holds rl_data without mem_ready for far
+        // longer than the diagnostic threshold. Only arm after the image is
+        // valid and loading has ended, otherwise every normal load is
+        // misreported as a dead softcore at 0x02000034.
+        if (!image_valid || loading || !mem_valid || mem_ready)
+            rv_stall_cnt <= 17'd0;
+        else if (!rv_stall_cnt[16])
+            rv_stall_cnt <= rv_stall_cnt + 17'd1;
+        if (image_valid && !loading && rv_stall_cnt[16] && !rv_stuck) begin
+            rv_stuck     <= 1'b1;
+            rv_stuck_ram <= ram_sel;
+        end
+    end
+end
+
 assign mem_rdata = ram_sel      ? rv_rdata :
                    joy_sel      ? {20'b0, joy1} :
                    zoom_sel     ? {30'b0, video_zoom} :
@@ -457,7 +513,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    time_sel     ? time_reg :
                    pad_mode_sel ? {6'd0, vce_cr_q, vcr_q, vdw_q, pad_mode} :
                    color_mode_sel ? {6'd0, vds_q, vsw_q, hde_q, hsw_q, color_mode} :
-                   id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
+                   id_sel       ? {hds_q, hdw_q, dcc_q, CORE_ID} :
                    audio_sel    ? {19'b0, audio_hdmi, audio_treble, audio_bass, audio_volume} :
                    cd_event_sel ? {24'b0, cd_events} :
                    cd_cmd0_sel ? cd_comm_reg[31:0] :
@@ -466,9 +522,9 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    cd_data0_sel ? cd_dout_reg[31:0] :
                    cd_data1_sel ? cd_dout_reg[63:32] :
                    cd_data2_sel ? {16'b0, cd_dout_reg[79:64]} :
-                   cd_phase_sel ? {24'b0, cd_phase_dbg} :
-                   cd_usedw_sel ? {19'b0, cdda_usedw_dbg} :
-                   cd_adpcm_sel ? {16'b0, refresh_gap_dbg, adpcm_dbg} :
+                   cd_phase_sel ? {24'b0, cd_phase_q} :
+                   cd_usedw_sel ? {19'b0, cdda_usedw_q} :
+                   cd_adpcm_sel ? {6'b0, rv_stuck_ram, rv_stuck, rv_starve_q, refresh_gap_q, adpcm_q} :
                    rom_pop_sel  ? {5'b0, vce_wr_q, vid_px_q, rom_pop} :
                    brm_data_sel ? {24'b0, brm_host_q} :
                    cheat_ctrl_sel ? {31'b0, cheat_apply} :
@@ -504,6 +560,7 @@ picorv32 #(
 ) u_rv32 (
     .clk       (clk),
     .resetn    (resetn & flash_loaded),
+    .trap      (rv_trap),
     .mem_valid (mem_valid),
     .mem_ready (mem_ready),
     .mem_addr  (mem_addr),

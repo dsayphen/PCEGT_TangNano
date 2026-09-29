@@ -50,6 +50,9 @@
 // Largest pending SDRAM refresh debt since reset. Values >= 12 trigger
 // emergency preemption of a VDC slot.
 #define reg_refresh_debt() ((reg_cd_adpcm >> 8) & 0xff)
+// Longest run of SDRAM dot slots denied to the softcore, in units of 8 slots.
+// A value near 128 means channel 1 was locking the softcore out.
+#define reg_rv_starve()    ((reg_cd_adpcm >> 16) & 0xff)
 #define reg_rom_pop        (*(volatile uint32_t*)0x020000a4)
 #define reg_brm_addr       (*(volatile uint32_t*)0x020000a8)
 #define reg_brm_data       (*(volatile uint32_t*)0x020000ac)
@@ -135,8 +138,9 @@ void selection_row(int y);
 
 // ---- debug UART -----------------------------------------------------------
 extern int debug_uart;
-void uart_init(int clkdiv);
-int  uart_putchar(int c);
+// Last bad value seen in reg_uart_clkdiv by uart_putchar, 0 when never hit.
+extern uint32_t uart_div_clobbered;
+void uart_init(int clkdiv);int  uart_putchar(int c);
 int  uart_print(const char *s);
 int  uart_printf(const char *fmt, ...);
 void uart_print_hex(uint32_t v);

@@ -240,7 +240,7 @@ initial begin
         repeat (37) @(posedge clk);
         if (bg_run && bg_ref) begin
             refresh_window <= 1'b1;
-            repeat (6) @(posedge clk);
+            repeat (5) @(posedge clk);
             refresh_window <= 1'b0;
         end
     end
@@ -310,7 +310,7 @@ task stream_both_vdcs;
             @(posedge clk);
             @(negedge clk);
             clkref <= 1'b0;
-            repeat (5) @(posedge clk);
+            repeat (6) @(posedge clk);
             if (vram_dout !== expect_word[p]) begin
                 $display("FAIL %0s: VDC0 tile word %0d (vram_addr=%h) = %h, expected %h",
                           label, p, p*64, vram_dout, expect_word[p]);

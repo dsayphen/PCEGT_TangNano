@@ -79,17 +79,26 @@ module pce_sdram_ctrl_3ch #(
     output reg         init_done,
 
     // Largest pending refresh debt since reset.
-    output wire [7:0]  refresh_gap_dbg
+    output wire [7:0]  refresh_gap_dbg,
+
+    // Longest run of dot slots channel 1 denied the softcore, in units of 8.
+    output wire [7:0]  rv_starve_dbg
 );
 
 wire [7:0] refresh_gap_mem;
 reg  [7:0] refresh_gap_sync0;
 reg  [7:0] refresh_gap_sync1;
+wire [7:0] rv_starve_mem;
+reg  [7:0] rv_starve_sync0;
+reg  [7:0] rv_starve_sync1;
 always @(posedge clk) begin
     refresh_gap_sync0 <= refresh_gap_mem;
     refresh_gap_sync1 <= refresh_gap_sync0;
+    rv_starve_sync0   <= rv_starve_mem;
+    rv_starve_sync1   <= rv_starve_sync0;
 end
 assign refresh_gap_dbg = refresh_gap_sync1;
+assign rv_starve_dbg   = rv_starve_sync1;
 
 // -------------------------------------------------------------------------
 // 16-bit host port: loader writes and cached HuCard reads
@@ -491,18 +500,15 @@ always @(posedge clk) begin
         rv_ready <= 1'b0;
 
         case (rv_state)
-            RV_IDLE: if (adram_take_write) begin
-                rv_mem_addr  <= ADRAM_BASE + {7'd0, adram_wr_addr};
-                rv_mem_din   <= {4{adram_wr_byte}};
-                rv_mem_ds    <= 4'b0001 << adram_wr_addr[1:0];
-                rv_mem_we    <= 1'b1;
-                rv_mem_req   <= ~rv_mem_req;
-                rv_state     <= RV_WAIT;
-                rv_source_ad <= 1'b1;
-                rv_source_cd <= 1'b0;
-            // PicoRV32 drops mem_valid between requests, so it cannot starve
-            // the console; the reverse would stall SD reads and CD audio feed.
-            end else if (init_done && rv_valid) begin
+            // PicoRV32 first. It drops mem_valid between requests, so it
+            // cannot starve the console, while the reverse is fatal: ADPCM
+            // writes arriving faster than one per 8 clk lock the softcore out
+            // of the memory completely and for good, with no counter showing
+            // it (sim/tb_rv_vdc_storm.v, "ADPCM nibble every 4 clk": 0
+            // softcore reads). The write queue below absorbs the extra
+            // latency, and overflowing it costs one ADPCM sample, not a dead
+            // softcore.
+            RV_IDLE: if (init_done && rv_valid) begin
                 rv_mem_addr  <= {rv_addr[22:2], 2'b00};
                 rv_mem_din   <= rv_wdata;
                 rv_mem_ds    <= rv_wstrb;
@@ -511,6 +517,15 @@ always @(posedge clk) begin
                 rv_state     <= RV_WAIT;
                 rv_source_cd <= 1'b0;
                 rv_source_ad <= 1'b0;
+            end else if (adram_take_write) begin
+                rv_mem_addr  <= ADRAM_BASE + {7'd0, adram_wr_addr};
+                rv_mem_din   <= {4{adram_wr_byte}};
+                rv_mem_ds    <= 4'b0001 << adram_wr_addr[1:0];
+                rv_mem_we    <= 1'b1;
+                rv_mem_req   <= ~rv_mem_req;
+                rv_state     <= RV_WAIT;
+                rv_source_ad <= 1'b1;
+                rv_source_cd <= 1'b0;
             end else if (init_done && cdram_pending) begin
                 rv_mem_addr  <= cdram_addr_r[21] ?
                                 CDRAM_BASE + {5'd0, cdram_addr_r[17:0]} :
@@ -698,7 +713,8 @@ pce_sdram_interleaved #(
     .vram1_we(vram1_we_r),
     .vram1_active(vram1_act_r),
     .init_done(init_done_mem),
-    .refresh_gap_max_o(refresh_gap_mem)
+    .refresh_gap_max_o(refresh_gap_mem),
+    .rv_starve_peak_o(rv_starve_mem)
 );
 
 endmodule
@@ -755,6 +771,7 @@ module pce_sdram_interleaved #(
     input  wire        vram1_we,
     input  wire        vram1_active,
     output wire [7:0]  refresh_gap_max_o,
+    output wire [7:0]  rv_starve_peak_o,
     output reg         init_done
 );
 
@@ -795,6 +812,7 @@ wire       need_refresh = (refresh_due != 4'd0);
 wire       refresh_urgent = (refresh_due >= 4'd12);
 reg  [7:0] refresh_gap_max;
 assign refresh_gap_max_o = refresh_gap_max;
+assign rv_starve_peak_o  = rv_starve_peak;
 reg [1:0]  rw_sync = 2'b00; // refresh_window (core in reset) into clk_mem
 wire       in_reset_window = rw_sync[1];
 
@@ -817,6 +835,23 @@ reg [2:0]  we_latch;
 reg [2:0]  active;
 reg [1:0]  channel1_port;
 reg        host_cas_done;
+
+// Consecutive dot slots channel 1 handed to VDC1 while a softcore request was
+// waiting. VDC1 wins by design, but it must not be able to win forever: it is
+// re-acked at cycle 3 and puts its next address up before the next slot's
+// cycle 1, so a VDC that fetches on every dot locks the softcore out for good
+// (sim/tb_rv_vdc_storm.v: 0 softcore reads in 3000 dots, a hard hang).
+//
+// The threshold is deliberately far above anything a real fetch pattern
+// produces - 1024 dots is about 143 us, a third of a scan line at 7.16 MHz -
+// so a working game never reaches it and VDC1 never loses a slot. Breaking
+// the tie early is what costs picture quality: at a threshold of 16,
+// tb_sprite_stream went from 38 to 52 corrupted VDC words, because VDC1
+// served one dot late reads the previous word.
+localparam [10:0] RV_STARVE_MAX = 11'd1024;
+reg [10:0] rv_starve;
+wire       rv_starved = (rv_starve >= RV_STARVE_MAX);
+reg [7:0]  rv_starve_peak;   // worst run seen since reset, in units of 8 slots
 
 localparam CHANNEL1_NONE  = 2'd0;
 localparam CHANNEL1_RV    = 2'd1;
@@ -899,6 +934,8 @@ always @(posedge clk) begin
         we_latch      <= 3'b000;
         active        <= 3'b000;
         channel1_port <= CHANNEL1_NONE;
+        rv_starve     <= 11'd0;
+        rv_starve_peak <= 8'd0;
         host_cas_done <= 1'b0;
     end else begin
         cmd       <= CMD_NOP;
@@ -985,6 +1022,9 @@ always @(posedge clk) begin
             if (refresh_due > refresh_gap_max)
                 refresh_gap_max <= {4'd0, refresh_due};
 
+            if (rv_starve[10:3] > rv_starve_peak)
+                rv_starve_peak <= rv_starve[10:3];
+
             // Complete the host read from its cycle-5 CAS.
             if (cycle == 3'd0) begin
                 if (active[0] && host_cas_done) begin
@@ -1005,8 +1045,19 @@ always @(posedge clk) begin
             end
 
             // Channel 1: VDC1 has priority over PicoRV32.
+            //
+            // Beware: this priority is absolute and the channel carries one
+            // transaction per dot slot, while VDC1 is re-acked at cycle 3,
+            // well before the next slot's cycle 1. A VDC1 that fetches on
+            // every single dot therefore wins every arbitration and the
+            // softcore never gets a cycle again - a hard hang, not a slowdown
+            // (sim/tb_rv_vdc_storm.v: 0 softcore reads in 3000 dots). Breaking
+            // the tie after N lost slots does unblock it, but serving VDC1 one
+            // dot late hands the VDC stale data: tb_sprite_stream goes from 38
+            // to 52 corrupted VDC words. A real fix needs a second channel-1
+            // transaction per dot, not a stolen one.
             if (cycle == 3'd1 && !refresh_block && !refresh_now) begin
-                if (vram1_req != vram1_ack && slot_first) begin
+                if (vram1_req != vram1_ack && slot_first && !rv_starved) begin
                     active[1]       <= 1'b1;
                     channel1_port   <= CHANNEL1_VRAM1;
                     addr_latch[1]   <= {7'b1011111, vram1_addr, 1'b0};
@@ -1017,6 +1068,8 @@ always @(posedge clk) begin
                     addr_out        <= {5'b11111, vram1_addr[14:9]};
                     SDRAM_BA        <= 2'b10;
                     cmd             <= CMD_ACTIVATE;
+                    if (rv_req != rv_ack && !rv_starved)
+                        rv_starve <= rv_starve + 11'd1;
                 end else if (rv_req != rv_ack && slot_first) begin
                     active[1]     <= 1'b1;
                     channel1_port <= CHANNEL1_RV;
@@ -1028,6 +1081,7 @@ always @(posedge clk) begin
                     addr_out      <= rv_addr[20:10];
                     SDRAM_BA      <= rv_addr[22:21];
                     cmd           <= CMD_ACTIVATE;
+                    rv_starve     <= 11'd0;
                 end else begin
                     active[1]     <= 1'b0;
                     channel1_port <= CHANNEL1_NONE;
