@@ -116,6 +116,13 @@ static void print_game_name(void) {
     print_field(5, 6, label, OSD_COLS - 5);
 }
 
+static void menu_header(const char *heading, int in_game) {
+    clear();
+    print_field(5, 5, heading, OSD_COLS - 2);
+    if (in_game)
+        print_game_name();
+}
+
 static void make_menu_label(char *buf, int type) {
     const char *prefix;
     const char *value;
@@ -226,14 +233,12 @@ static void cheats_menu(void) {
 
 // Color/Zoom/Scanlines sub-menu, reached from "Video Settings >" in
 // pause_menu.  Gamepad mode lives directly in pause_menu, not here.
-static void video_menu(void) {
+static void video_menu(int in_game) {
     static const char *back_label = "Back";
     int active = 0;
     const int n_items = 4;
 
-    clear();
-    print_field(5, 5, "Video Settings", OSD_COLS - 2);
-    print_game_name();
+    menu_header("Video Settings", in_game);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
@@ -277,14 +282,12 @@ static void video_menu(void) {
 }
 
 // Volume/Bass/Treble sub-menu, reached from "Audio Settings >" in pause_menu.
-static void audio_menu(void) {
+static void audio_menu(int in_game) {
     static const char *labels[4] = { "Volume", "Bass", "Treble", "Back" };
     int active = 0;
     const int n_items = 4;
 
-    clear();
-    print_field(5, 5, "Audio Settings", OSD_COLS - 2);
-    print_game_name();
+    menu_header("Audio Settings", in_game);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
@@ -443,12 +446,12 @@ int pause_menu(void) {
             reg_pad_mode = game_pad_mode;
             game_pad_mode_save(current_game_name); // <--- Sauvegarde dans /config/[nomdujeu].cfg
         } else if ((e & JOY_A) && active == 4) {
-            video_menu();
+            video_menu(1);
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
             print_game_name();
         } else if ((e & JOY_A) && active == 5) {
-            audio_menu();
+            audio_menu(1);
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
             print_game_name();
@@ -457,6 +460,59 @@ int pause_menu(void) {
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
             print_game_name();
+        }
+        delay(20);
+    }
+}
+
+// Global options reached with Select from the ROM browser.
+void options_menu(void) {
+    static const char *items[4] = {
+        "Video Settings >", "Audio Settings >", "Debug UART: ", "Back"
+    };
+    const int n_items = 4;
+    int active = 0;
+
+    menu_header("Options", 0);
+
+    for (;;) {
+        for (int i = 0; i < n_items; i++) {
+            cursor(4, 8 + i);
+            putchar(i == active ? '>' : ' ');
+
+            if (i == 2) {
+                char label[24];
+                const char *value = debug_uart ? "On" : "Off";
+                int j = 0;
+                for (const char *s = items[i]; *s; s++)
+                    label[j++] = *s;
+                while (*value)
+                    label[j++] = *value++;
+                label[j] = '\0';
+                print_field(6, 8 + i, label, 20);
+            } else {
+                print_field(6, 8 + i, items[i], 20);
+            }
+        }
+        selection_row(8 + active);
+        print_field(1, ROW_STATUS, "A=Select  B=Back", OSD_COLS - 2);
+
+        uint32_t e = joy_edge();
+        if (e & JOY_UP) {
+            active = active ? active - 1 : n_items - 1;
+        } else if (e & JOY_DOWN) {
+            active = active < n_items - 1 ? active + 1 : 0;
+        } else if ((e & (JOY_B | JOY_SELECT)) || ((e & JOY_A) && active == 3)) {
+            return;
+        } else if ((e & JOY_A) && active == 0) {
+            video_menu(0);
+            menu_header("Options", 0);
+        } else if ((e & JOY_A) && active == 1) {
+            audio_menu(0);
+            menu_header("Options", 0);
+        } else if ((e & JOY_A) && active == 2) {
+            debug_uart = !debug_uart;
+            system_config_save();
         }
         delay(20);
     }

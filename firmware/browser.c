@@ -7,6 +7,7 @@
 #include "rom.h"
 #include "cd.h"
 #include "browser.h"
+#include "menu.h"
 
 char pwd[PWD_SIZE] = "/";
 static char names[PAGESIZE][NAME_MAX];
@@ -228,7 +229,7 @@ static void draw_page(int page, int total, int active) {
     if (total == 0)
         print("No .PCE/.SGX/.CUE files here");
     else
-        printf("Page %d/%d  A=open B=back", page + 1, pages);
+        printf("P%d/%d A=open B=back SEL=opt", page + 1, pages);
 }
 
 static void move_cursor(int old_i, int new_i) {
@@ -259,9 +260,8 @@ void browse(void) {
                 active = 0;
                 continue;
             }
-            int max_active = page_len + 1;   // dernier index = Scanlines
-            if (active > max_active)
-                active = max_active;
+            if (active >= page_len)
+                active = page_len ? page_len - 1 : 0;
             draw_page(page, total, active);
             need_redraw = 0;
             delay(150);
@@ -334,6 +334,9 @@ void browse(void) {
                 active = 0;
                 need_redraw = 1;
             }
+        } else if (e & JOY_SELECT) {
+            options_menu();
+            need_redraw = 1;
         } else if (e & JOY_B) {
             if (pwd[1] != '\0') {
                 go_parent();

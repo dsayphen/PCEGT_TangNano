@@ -68,11 +68,16 @@ void clear(void) {
 // ===========================================================================
 // UART
 // ===========================================================================
+int debug_uart = 0;
+
 void uart_init(int clkdiv) {
     reg_uart_clkdiv = clkdiv;
 }
 
+// simpleuart stalls the CPU while a byte is sent, so skip it entirely when off.
 int uart_putchar(int c) {
+    if (!debug_uart)
+        return c;
     if (c == '\n')
         reg_uart_data = '\r';
     reg_uart_data = c;
@@ -154,6 +159,8 @@ int printf(const char *fmt, ...) {
 
 int uart_printf(const char *fmt, ...) {
     va_list ap;
+    if (!debug_uart)
+        return 0;
     va_start(ap, fmt);
     _printf(fmt, ap, 1);
     va_end(ap);

@@ -26,6 +26,7 @@
 //   Left / Right  previous / next page
 //   A             open a directory or load the highlighted .PCE/.SGX file
 //   B             go back to the parent directory
+//   Select        open the options menu (video, audio, debug UART)
 //   Select+Start  bring the menu back over a running game
 //   Select+Up/Down    cycle the display zoom (2x / stretch) over a running game
 //   Select+Left/Right cycle the scanline strength (0/25/50/100%) over a running game
@@ -87,7 +88,8 @@ int main(void) {
         break;
     }
 
-    // Restore the last video and audio settings saved on the SD card.
+    // Restore the last system, video and audio settings saved on the SD card.
+    system_config_load();
     video_config_load();
     audio_config_load();
 
