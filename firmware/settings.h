@@ -9,6 +9,7 @@ extern int video_zoom;
 extern int video_scanline;
 extern int game_pad_mode;
 extern int video_color;
+extern int cheat_cd_enabled;
 
 extern int audio_volume;
 extern int audio_bass;

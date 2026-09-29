@@ -4,7 +4,7 @@
 
 #define CHEAT_GROUP_MAX 64
 #define CHEAT_PATCH_MAX 32
-#define CHEAT_DESC_SIZE 64
+#define CHEAT_DESC_SIZE 96
 
 typedef struct {
     uint32_t address;
@@ -250,6 +250,8 @@ void cheats_load(const char *game_name, enum cheat_game_type type) {
     cheats_clear();
     if (!game_name || !*game_name || type < CHEAT_GAME_PCE || type > CHEAT_GAME_CD)
         return;
+    if (type == CHEAT_GAME_CD && !cheat_cd_enabled)
+        return;
     if (build_game_path(path, sizeof(path), directories[type], game_name,
                         ".cht", 1) != 0) {
         strcpy(status_text, "Cheat path too long");
@@ -300,7 +302,7 @@ void cheats_load(const char *game_name, enum cheat_game_type type) {
         uart_print("cheats: active selection exceeds 32 patches\n");
         return;
     }
-    if (hardware_reload() != 0) {
+    if (active_patch_count() != 0 && hardware_reload() != 0) {
         strcpy(status_text, "Too many active patches");
         group_count = 0;
         enabled_groups = 0;

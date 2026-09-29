@@ -483,10 +483,11 @@ int pause_menu(void) {
 
 // Global options reached with Select from the ROM browser.
 void options_menu(void) {
-    static const char *items[4] = {
-        "Video Settings >", "Audio Settings >", "Debug UART: ", "Back"
+    static const char *items[5] = {
+        "Video Settings >", "Audio Settings >", "Debug UART: ",
+        "Cheat CD (exp.): ", "Back"
     };
-    const int n_items = 4;
+    const int n_items = 5;
     int active = 0;
 
     menu_header("Options", 0);
@@ -496,9 +497,11 @@ void options_menu(void) {
             cursor(4, 8 + i);
             putchar(i == active ? '>' : ' ');
 
-            if (i == 2) {
-                char label[24];
-                const char *value = debug_uart ? "On" : "Off";
+            if (i == 2 || i == 3) {
+                char label[32];
+                const char *value = i == 2
+                    ? (debug_uart ? "On" : "Off")
+                    : (cheat_cd_enabled ? "On" : "Off");
                 int j = 0;
                 for (const char *s = items[i]; *s; s++)
                     label[j++] = *s;
@@ -518,7 +521,7 @@ void options_menu(void) {
             active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {
             active = active < n_items - 1 ? active + 1 : 0;
-        } else if ((e & (JOY_B | JOY_SELECT)) || ((e & JOY_A) && active == 3)) {
+        } else if ((e & (JOY_B | JOY_SELECT)) || ((e & JOY_A) && active == 4)) {
             return;
         } else if ((e & JOY_A) && active == 0) {
             video_menu(0);
@@ -528,6 +531,9 @@ void options_menu(void) {
             menu_header("Options", 0);
         } else if ((e & JOY_A) && active == 2) {
             debug_uart = !debug_uart;
+            system_config_save();
+        } else if ((e & JOY_A) && active == 3) {
+            cheat_cd_enabled = !cheat_cd_enabled;
             system_config_save();
         }
         delay(20);
