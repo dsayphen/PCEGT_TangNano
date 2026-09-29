@@ -283,9 +283,11 @@ static void video_menu(int in_game) {
 
 // Volume/Bass/Treble sub-menu, reached from "Audio Settings >" in pause_menu.
 static void audio_menu(int in_game) {
-    static const char *labels[4] = { "Volume", "Bass", "Treble", "Back" };
+    static const char *labels[5] = {
+        "Volume", "Bass", "Treble", "Output", "Back"
+    };
     int active = 0;
-    const int n_items = 4;
+    const int n_items = 5;
 
     menu_header("Audio Settings", in_game);
 
@@ -316,6 +318,12 @@ static void audio_menu(int in_game) {
                 len = u8_to_str(num, (uint8_t)val);
                 for (int k = 0; k < len; k++)
                     label[j++] = num[k];
+            } else if (i == 3) {
+                const char *value = audio_output_hdmi ? "HDMI" : "Speaker";
+                label[j++] = ':';
+                label[j++] = ' ';
+                while (*value)
+                    label[j++] = *value++;
             }
             label[j] = '\0';
 
@@ -341,6 +349,10 @@ static void audio_menu(int in_game) {
                 audio_treble--;
                 audio_apply();
                 audio_config_save();
+            } else if (active == 3) {
+                audio_output_hdmi = !audio_output_hdmi;
+                audio_apply();
+                audio_config_save();
             }
         } else if (e & JOY_RIGHT) {
             if (active == 0 && audio_volume < 10) {
@@ -355,8 +367,12 @@ static void audio_menu(int in_game) {
                 audio_treble++;
                 audio_apply();
                 audio_config_save();
+            } else if (active == 3) {
+                audio_output_hdmi = !audio_output_hdmi;
+                audio_apply();
+                audio_config_save();
             }
-        } else if ((e & JOY_B) || ((e & JOY_A) && active == 3)) {
+        } else if ((e & JOY_B) || ((e & JOY_A) && active == 4)) {
             return;
         }
         delay(20);

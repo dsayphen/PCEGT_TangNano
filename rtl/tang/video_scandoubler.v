@@ -80,6 +80,8 @@ module video_scandoubler (
     output reg         vga_hs,        // active high
     output reg         vga_vs,        // active high
     output reg         vga_de,
+    output reg  [10:0]  vga_x,
+    output reg  [9:0]   vga_y,
 
     // ---- OSD timing (combinational, leads vga_* by exactly 3 clocks) ----
     // textdisp.v needs three clk_pix stages to turn a coordinate into a
@@ -240,6 +242,8 @@ reg [1:0]  hs_p;
 reg [1:0]  vs_p;
 reg [1:0]  half_p;      // pipeline for "half" (0 = first copy, 1 = duplicate)
 
+reg [10:0] x_p0, x_p1;
+reg [9:0]  y_p0, y_p1;
 reg [7:0]  frac_p1;
 reg [7:0]  frac_p2;
 reg        bilinear_p1;
@@ -434,10 +438,16 @@ always @(posedge clk_pix) begin
     hs_p <= {hs_p[0], hs_c};
     vs_p <= {vs_p[0], vs_c};
     half_p <= {half_p[0], half};
+    x_p0 <= hcnt;
+    x_p1 <= x_p0;
+    y_p0 <= hdmi_line;
+    y_p1 <= y_p0;
 
     vga_de <= de_p[1];
     vga_hs <= hs_p[1];
     vga_vs <= vs_p[1];
+    vga_x <= x_p1;
+    vga_y <= y_p1;
 
     if (deg_p[1]) begin
         if (bilinear_p2) begin
@@ -466,6 +476,12 @@ always @(posedge clk_pix) begin
         hs_p       <= 2'b00;
         vs_p       <= 2'b00;
         half_p     <= 2'b00;
+        x_p0       <= 11'd0;
+        x_p1       <= 11'd0;
+        y_p0       <= 10'd0;
+        y_p1       <= 10'd0;
+        vga_x      <= 11'd0;
+        vga_y      <= 10'd0;
         frac_p1    <= 8'd0;
         frac_p2    <= 8'd0;
         bilinear_p1 <= 1'b0;

@@ -7,12 +7,16 @@
 // words.
 //
 
-module tmds_encoder (
+module tmds_encoder #(
+    parameter CHANNEL = 0
+) (
     input  wire       clk,
     input  wire       resetn,
     input  wire [7:0] din,      // pixel data
     input  wire [1:0] ctrl,     // {c1, c0} during blanking
     input  wire       de,       // 1 = pixel data, 0 = control
+    input  wire [2:0] mode,     // control, video, video guard, island, island guard
+    input  wire [3:0] data_island,
     output reg  [9:0] dout
 );
 
@@ -76,6 +80,43 @@ always @(posedge clk) begin
     end else begin
         dout <= {1'b0, q_m[8], q_m[7:0]};
         cnt  <= cnt - two_nqm8 + diff_1m0;
+    end
+
+    if (mode == 3'd2) begin
+        cnt  <= 5'sd0;
+        dout <= (CHANNEL == 1) ? 10'b0100110011 : 10'b1011001100;
+    end else if (mode == 3'd3) begin
+        cnt <= 5'sd0;
+        case (data_island)
+            4'h0: dout <= 10'b1010011100;
+            4'h1: dout <= 10'b1001100011;
+            4'h2: dout <= 10'b1011100100;
+            4'h3: dout <= 10'b1011100010;
+            4'h4: dout <= 10'b0101110001;
+            4'h5: dout <= 10'b0100011110;
+            4'h6: dout <= 10'b0110001110;
+            4'h7: dout <= 10'b0100111100;
+            4'h8: dout <= 10'b1011001100;
+            4'h9: dout <= 10'b0100111001;
+            4'hA: dout <= 10'b0110011100;
+            4'hB: dout <= 10'b1011000110;
+            4'hC: dout <= 10'b1010001110;
+            4'hD: dout <= 10'b1001110001;
+            4'hE: dout <= 10'b0101100011;
+            4'hF: dout <= 10'b1011000011;
+        endcase
+    end else if (mode == 3'd4) begin
+        cnt <= 5'sd0;
+        if (CHANNEL != 0) begin
+            dout <= 10'b0100110011;
+        end else begin
+            case (ctrl)
+                2'b00: dout <= 10'b1010001110;
+                2'b01: dout <= 10'b1001110001;
+                2'b10: dout <= 10'b0101100011;
+                default: dout <= 10'b1011000011;
+            endcase
+        end
     end
 
     if (!resetn) begin

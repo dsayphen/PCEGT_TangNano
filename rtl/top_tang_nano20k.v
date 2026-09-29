@@ -183,6 +183,7 @@ wire        color_mode;
 wire [3:0]  audio_volume;
 wire [3:0]  audio_bass;
 wire [3:0]  audio_treble;
+wire        audio_hdmi;
 
 // ---- softcore / menu ------------------------------------------------------
 wire        rv_ld_wr;
@@ -300,6 +301,7 @@ iosys #(
     .audio_volume     (audio_volume),
     .audio_bass       (audio_bass),
     .audio_treble     (audio_treble),
+    .audio_hdmi       (audio_hdmi),
     .brm_host_q       (brm_host_q),
     .brm_host_addr    (brm_host_addr),
     .brm_host_data    (brm_host_data),
@@ -568,6 +570,9 @@ wire [19:0] aud_l_raw;
 wire [19:0] aud_r_raw;
 wire [19:0] aud_l;
 wire [19:0] aud_r;
+wire        clk_audio_48k;
+wire signed [15:0] audio_left_48k;
+wire signed [15:0] audio_right_48k;
 wire [2:0]  vid_r, vid_g, vid_b;
 wire        vid_hs, vid_vs, vid_hbl;
 wire [1:0]  vid_dcc;
@@ -722,6 +727,8 @@ wire [7:0] vga_r_raw, vga_g_raw, vga_b_raw;
 wire       vga_hs_raw, vga_vs_raw, vga_de_raw;
 wire [7:0] vga_r, vga_g, vga_b;
 wire       vga_hs, vga_vs, vga_de;
+wire [10:0] vga_x;
+wire [9:0]  vga_y;
 
 video_scandoubler u_scandoubler (
     .clk_sys    (clk_sys),
@@ -747,6 +754,8 @@ video_scandoubler u_scandoubler (
     .vga_hs     (vga_hs_raw),
     .vga_vs     (vga_vs_raw),
     .vga_de     (vga_de_raw),
+    .vga_x      (vga_x),
+    .vga_y      (vga_y),
     .osd_x      (osd_x),
     .osd_y      (osd_y),
     .osd_de     (osd_de)
@@ -794,6 +803,12 @@ dvi_tx u_dvi (
     .de         (vga_de),
     .hsync      (vga_hs),
     .vsync      (vga_vs),
+    .pix_x      (vga_x),
+    .pix_y      (vga_y),
+    .audio_enable (audio_hdmi),
+    .clk_audio  (clk_audio_48k),
+    .audio_left (audio_left_48k),
+    .audio_right (audio_right_48k),
     .tmds_clk_p (tmds_clk_p),
     .tmds_clk_n (tmds_clk_n),
     .tmds_d_p   (tmds_d_p),
@@ -815,6 +830,16 @@ audio_tone u_audio_tone (
     .out_r   (aud_r)
 );
 
+audio_sampler_48k u_audio_sampler (
+    .clk_sys     (clk_sys),
+    .resetn      (sys_resetn),
+    .audio_left  (aud_l),
+    .audio_right (aud_r),
+    .clk_audio   (clk_audio_48k),
+    .sample_left (audio_left_48k),
+    .sample_right(audio_right_48k)
+);
+
 i2s_tx #(.BCK_DIV(14)) u_i2s (
     .clk    (clk_sys),
     .resetn (sys_resetn),
@@ -825,7 +850,7 @@ i2s_tx #(.BCK_DIV(14)) u_i2s (
     .sd     (hp_din)
 );
 
-assign pa_en = 1'b1;
+assign pa_en = ~audio_hdmi;
 
 // ===========================================================================
 // Status LEDs (active low)
