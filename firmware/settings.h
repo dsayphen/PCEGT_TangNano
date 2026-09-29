@@ -26,5 +26,7 @@ void video_config_save(void);
 void audio_apply(void);
 void audio_config_load(void);
 void audio_config_save(void);
+void system_config_load(void);
+void system_config_save(void);
 
 #endif

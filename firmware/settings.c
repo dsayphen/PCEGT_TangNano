@@ -270,12 +270,11 @@ void video_config_save(void) {
     char num[4];
     int len;
 
+    f_mkdir("/config");
+
     if (f_open(&file, VIDEO_CFG_FILE, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
         return;
     }
-
-    // S'assurer que le dossier /config existe
-    f_mkdir("/config");
 
     const char *header = 
         "# PCEngine / SuperGrafx Video Settings\n"
@@ -398,5 +397,44 @@ void audio_config_save(void) {
     f_write(&file, num, len, &bw);
     f_write(&file, "\n", 1, &bw);
 
+    f_close(&file);
+}
+
+// ---------------------------------------------------------------------------
+// System configuration & Persistence
+// ---------------------------------------------------------------------------
+
+#define SYSTEM_CFG_FILE   "/config/system.cfg"
+
+void system_config_load(void) {
+    FIL file;
+    char line[64];
+
+    if (f_open(&file, SYSTEM_CFG_FILE, FA_READ) != FR_OK)
+        return;
+
+    while (f_gets(line, sizeof(line), &file)) {
+        if (starts_with(line, "debug_uart="))
+            debug_uart = parse_u8(line + 11) ? 1 : 0;
+    }
+
+    f_close(&file);
+}
+
+void system_config_save(void) {
+    FIL file;
+    UINT bw;
+    static const char text[] =
+        "# PCEngine / SuperGrafx System Settings\n"
+        "# debug_uart : 0 = off, 1 = debug traces on the UART\n"
+        "debug_uart=";
+
+    f_mkdir("/config");
+
+    if (f_open(&file, SYSTEM_CFG_FILE, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
+        return;
+
+    f_write(&file, text, sizeof(text) - 1, &bw);
+    f_write(&file, debug_uart ? "1\n" : "0\n", 2, &bw);
     f_close(&file);
 }

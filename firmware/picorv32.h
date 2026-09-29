@@ -134,6 +134,7 @@ int  overlay_status(void);
 void selection_row(int y);
 
 // ---- debug UART -----------------------------------------------------------
+extern int debug_uart;
 void uart_init(int clkdiv);
 int  uart_putchar(int c);
 int  uart_print(const char *s);
