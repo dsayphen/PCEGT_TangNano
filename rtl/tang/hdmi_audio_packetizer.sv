@@ -36,7 +36,7 @@ reg [1:0]  sample_ready;
 reg [7:0]  audio_frame_counter;
 
 reg [5:0]  acr_audio_count;
-reg [14:0] acr_cycle_count;
+reg [19:0] acr_cycle_count;
 reg [19:0] acr_cycle_stamp;
 reg        acr_pending;
 reg        audio_info_sent;
@@ -127,15 +127,11 @@ always @* begin
             sample_starts = 4'b0000;
             for (i = 0; i < 4; i = i + 1) begin
                 frame_bit = audio_frame_counter + i;
-                if (frame_bit >= 8'd192)
-                    frame_bit = frame_bit - 8'd192;
                 sample_starts[i] = (frame_bit == 8'd0);
             end
             header = {sample_starts, 8'b00000000, 4'b1111, 8'd2};
             for (i = 0; i < 4; i = i + 1) begin
                 frame_bit = audio_frame_counter + i;
-                if (frame_bit >= 8'd192)
-                    frame_bit = frame_bit - 8'd192;
                 left_word = {sample_l[sample_read_bank][i], 8'd0};
                 right_word = {sample_r[sample_read_bank][i], 8'd0};
                 left_status = status_bit(frame_bit, 1'b0);
@@ -176,14 +172,14 @@ always @(posedge clk_pixel) begin
         sample_ready       <= 2'b00;
         audio_frame_counter <= 8'd0;
         acr_audio_count    <= 6'd0;
-        acr_cycle_count    <= 15'd0;
+        acr_cycle_count    <= 20'd0;
         acr_cycle_stamp    <= 20'd0;
         acr_pending        <= 1'b0;
         audio_info_sent    <= 1'b0;
         avi_info_sent      <= 1'b0;
         packet_type        <= PACKET_NULL;
     end else begin
-        acr_cycle_count <= acr_cycle_count + 15'd1;
+        acr_cycle_count <= acr_cycle_count + 20'd1;
 
         if (audio_rising) begin
             if (!sample_ready[sample_write_bank]) begin
@@ -200,8 +196,8 @@ always @(posedge clk_pixel) begin
 
             if (acr_audio_count == 6'd47) begin
                 acr_audio_count <= 6'd0;
-                acr_cycle_stamp <= {5'd0, acr_cycle_count + 15'd1};
-                acr_cycle_count <= 15'd0;
+                acr_cycle_stamp <= acr_cycle_count + 20'd1;
+                acr_cycle_count <= 20'd0;
                 acr_pending <= 1'b1;
             end else begin
                 acr_audio_count <= acr_audio_count + 6'd1;
@@ -215,9 +211,8 @@ always @(posedge clk_pixel) begin
 
         if (packet_period && packet_counter == 5'd31 &&
             packet_type == PACKET_AUDIO)
-            audio_frame_counter <= audio_frame_counter + 8'd4 >= 8'd192 ?
-                                   audio_frame_counter - 8'd188 :
-                                   audio_frame_counter + 8'd4;
+            audio_frame_counter <= audio_frame_counter == 8'd188 ?
+                                   8'd0 : audio_frame_counter + 8'd4;
 
         if (packet_start) begin
             if (acr_pending) begin
