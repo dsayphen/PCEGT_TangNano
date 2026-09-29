@@ -94,7 +94,7 @@ localparam        FIRMWARE_SIZE       = 128*1024;
 // ===========================================================================
 wire clk_sys;        // 43.2 MHz
 wire clk_mem;        // 86.4 MHz SDRAM controller
-wire clk_sdram;      // 86.4 MHz, 135 degrees
+wire clk_sdram;      // 86.4 MHz, 180 degrees
 wire clk_pix5;       // 129.6 MHz
 wire clk_pix;        // 25.92 MHz
 wire lock_main;

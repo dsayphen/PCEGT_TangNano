@@ -5,7 +5,7 @@
 // CLKDIV are used:
 //
 //   pll_main : 27 MHz * 16 / 5            = 86.400 MHz  SDRAM logic clock
-//              clkoutp is the same clock shifted by 135 degrees and is fed to
+//              clkoutp is the same clock shifted by 180 degrees and is fed to
 //              the SDRAM clock pin so that the memory samples in the middle of
 //              the data eye.
 //              clkoutd divides it by two for the 43.2 MHz console clock.
@@ -33,7 +33,7 @@
 module pll_main (
     input  wire clkin,      // 27 MHz
     output wire clkout,     // 86.4 MHz
-    output wire clkoutp,    // 86.4 MHz, 135 degrees
+    output wire clkoutp,    // 86.4 MHz, 180 degrees
     output wire clkoutd,    // 43.2 MHz
     output wire lock
 );
@@ -66,7 +66,7 @@ defparam rpll_inst.ODIV_SEL = 8;        // VCO = 691.2 MHz
 defparam rpll_inst.DYN_IDIV_SEL = "false";
 defparam rpll_inst.DYN_FBDIV_SEL = "false";
 defparam rpll_inst.DYN_ODIV_SEL = "false";
-defparam rpll_inst.PSDA_SEL = "0110";   // 6/16 = 135 deg; more DQ setup margin
+defparam rpll_inst.PSDA_SEL = "1000";   // CLKOUTP shifted by 8/16 = 180 deg
 defparam rpll_inst.DYN_DA_EN = "false";
 defparam rpll_inst.DUTYDA_SEL = "1000";
 defparam rpll_inst.CLKOUT_FT_DIR = 1'b1;

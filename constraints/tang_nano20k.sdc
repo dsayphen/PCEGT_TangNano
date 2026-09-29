@@ -4,7 +4,7 @@
 //   sys_clk    27.00 MHz  board crystal
 //   clk_mem    86.40 MHz  SDRAM controller        (pll_main CLKOUT)
 //   clk_sys    43.20 MHz  console logic           (pll_main CLKOUTD /2)
-//   clk_sdram  86.40 MHz  SDRAM pin clock, 135 deg (pll_main CLKOUTP)
+//   clk_sdram  86.40 MHz  SDRAM pin clock, 180 deg (pll_main CLKOUTP)
 //   clk_pix5  129.60 MHz  TMDS serial clock       (pll_hdmi CLKOUT)
 //   clk_pix    25.92 MHz  HDMI pixel clock        (CLKDIV /5)
 //
