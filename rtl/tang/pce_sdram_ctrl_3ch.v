@@ -76,8 +76,20 @@ module pce_sdram_ctrl_3ch #(
     input  wire        adram_rd,
     input  wire        adram_clken,
 
-    output reg         init_done
+    output reg         init_done,
+
+    // Largest pending refresh debt since reset.
+    output wire [7:0]  refresh_gap_dbg
 );
+
+wire [7:0] refresh_gap_mem;
+reg  [7:0] refresh_gap_sync0;
+reg  [7:0] refresh_gap_sync1;
+always @(posedge clk) begin
+    refresh_gap_sync0 <= refresh_gap_mem;
+    refresh_gap_sync1 <= refresh_gap_sync0;
+end
+assign refresh_gap_dbg = refresh_gap_sync1;
 
 // -------------------------------------------------------------------------
 // 16-bit host port: loader writes and cached HuCard reads
@@ -685,7 +697,8 @@ pce_sdram_interleaved #(
     .vram1_ack(vram1_ack),
     .vram1_we(vram1_we_r),
     .vram1_active(vram1_act_r),
-    .init_done(init_done_mem)
+    .init_done(init_done_mem),
+    .refresh_gap_max_o(refresh_gap_mem)
 );
 
 endmodule
@@ -741,6 +754,7 @@ module pce_sdram_interleaved #(
     output reg         vram1_ack,
     input  wire        vram1_we,
     input  wire        vram1_active,
+    output wire [7:0]  refresh_gap_max_o,
     output reg         init_done
 );
 
@@ -776,8 +790,11 @@ reg        refresh_block;
 reg [3:0]  refresh_hold;   // clk_mem edges the bus stays blocked after a refresh
 reg        slot_first;     // first pass of a dot slot: only here may an ACT be issued
 reg [15:0] refresh_cnt;
-reg        need_refresh;    // registered: refresh_cnt >= RFRSH_CYCLES
-reg        refresh_urgent;  // registered: refresh 50% overdue
+reg [3:0]  refresh_due;
+wire       need_refresh = (refresh_due != 4'd0);
+wire       refresh_urgent = (refresh_due >= 4'd12);
+reg  [7:0] refresh_gap_max;
+assign refresh_gap_max_o = refresh_gap_max;
 reg [1:0]  rw_sync = 2'b00; // refresh_window (core in reset) into clk_mem
 wire       in_reset_window = rw_sync[1];
 
@@ -836,11 +853,19 @@ always @(posedge clk)
 // snow-like VRAM corruption during play that instantly resolves when the CPU
 // is halted and traffic stops).
 wire       chan1_busy_vdc1 = active[1] && (channel1_port == CHANNEL1_VRAM1);
+// vram_active/vram1_active are just RAM_RD, which the HuC6270 leaves asserted
+// through its CPU slots as well, so requiring them low never let a refresh
+// through during active display and the SDRAM decayed. vram_pending is the
+// exact question: a request is queued for this dot or it is not. Sampled at
+// cycle 1, where the bridge has already registered the address the VDC put up
+// on this dot's clkref edge, so a refresh taken here delays nothing.
+//
+// refresh_urgent stays as a last resort. It does steal a dot from the VDC
+// (visible as sprite/tile glitches), so it must remain the exception.
 wire       refresh_now   = need_refresh && !refresh_block && slot_first &&
                             !active[0] && !chan1_busy_vdc1 && !active[2] &&
-                            (in_reset_window ||
-                             (!vram_pending && !vram1_pending &&
-                              !vram_active && !vram1_active));
+                            (in_reset_window || refresh_urgent ||
+                             (!vram_pending && !vram1_pending));
 
 always @(posedge clk) begin
     if (!resetn) begin
@@ -860,8 +885,8 @@ always @(posedge clk) begin
         refresh_hold  <= 4'd0;
         slot_first    <= 1'b0;
         refresh_cnt   <= 16'd0;
-        need_refresh   <= 1'b0;
-        refresh_urgent <= 1'b0;
+        refresh_due   <= 4'd0;
+        refresh_gap_max <= 8'd0;
         host_ack      <= 1'b0;
         rv_ack        <= 1'b0;
         vram_ack      <= 1'b0;
@@ -946,17 +971,19 @@ always @(posedge clk) begin
                     refresh_block <= 1'b0;
             end
 
-            // Free-running refresh timer: reset only when a refresh is
-            // actually issued below, otherwise keep counting so need_refresh
-            // stays asserted (and refresh_now keeps trying) until the bus is
-            // idle enough to take it.
-            if (cycle == 3'd1 && refresh_now)
+            if (refresh_cnt == RFRSH_CYCLES - 1)
                 refresh_cnt <= 16'd0;
             else
                 refresh_cnt <= refresh_cnt + 16'd1;
 
-            need_refresh   <= (refresh_cnt >= RFRSH_CYCLES[15:0]);
-            refresh_urgent <= (refresh_cnt >= (RFRSH_CYCLES[15:0] + (RFRSH_CYCLES[15:0] >> 1)));
+            if (refresh_cnt == RFRSH_CYCLES - 1) begin
+                if (!(cycle == 3'd1 && refresh_now) && refresh_due != 4'd15)
+                    refresh_due <= refresh_due + 4'd1;
+            end else if (cycle == 3'd1 && refresh_now)
+                refresh_due <= refresh_due - 4'd1;
+
+            if (refresh_due > refresh_gap_max)
+                refresh_gap_max <= {4'd0, refresh_due};
 
             // Complete the host read from its cycle-5 CAS.
             if (cycle == 3'd0) begin

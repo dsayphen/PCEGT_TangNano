@@ -29,6 +29,10 @@ entity huc6260 is
 		CLKEN_FS	: out std_logic;
 		RVBL		: in std_logic;
 		DCC		: out std_logic_vector(1 downto 0);
+		-- Raw control register ($0400), debug/diagnosis only
+		CR_DBG	: out std_logic_vector(7 downto 0);
+		-- {last value written to $0400, $0400 write count, last VCE reg written}
+		WR_DBG	: out std_logic_vector(15 downto 0);
 
 		GRID_EN	: in std_logic_vector(1 downto 0);
 		BORDER_EN: in std_logic;
@@ -62,6 +66,10 @@ signal PREV_A	: std_logic_vector(2 downto 0);
 type ctrl_t is ( CTRL_IDLE, CTRL_WAIT, CTRL_INCR );
 signal CTRL		: ctrl_t;
 signal CR		: std_logic_vector(7 downto 0);
+
+signal DBG_LAST_A	: std_logic_vector(2 downto 0);
+signal DBG_CR_LAST	: std_logic_vector(7 downto 0);
+signal DBG_CR_WR	: unsigned(4 downto 0);
 
 -- VCE Registers
 signal DOTCLOCK	: std_logic_vector(1 downto 0);
@@ -149,6 +157,9 @@ begin
 			RAM_DI <= (others => '0');
 			RAM_WE <= '0';
 			CR <= x"00";
+			DBG_LAST_A <= (others => '0');
+			DBG_CR_LAST <= (others => '0');
+			DBG_CR_WR <= (others => '0');
 			
 			PREV_A <= (others => '0');
 			CTRL <= CTRL_IDLE;
@@ -156,9 +167,9 @@ begin
 			CLR_CNT  <= (others => '0');
 
 		elsif CLEARING = '1' then
-			-- Sweep all 512 entries to zero, ~512 cycles (~12 us @ 43.2 MHz),
-			-- always well inside the >=1.5 ms reset hold enforced at the top
-			-- level, so it finishes long before the CPU is released.
+			-- Sweep all 512 entries to zero, ~512 cycles (~12 us @ 43.2 MHz).
+			-- The CPU leaves reset at the same time as the VCE, so this runs
+			-- while the game is already executing its init code.
 			RAM_A  <= CLR_CNT;
 			RAM_DI <= (others => '0');
 			RAM_WE <= '1';
@@ -167,6 +178,17 @@ begin
 				RAM_WE   <= '0';
 			else
 				CLR_CNT <= CLR_CNT + 1;
+			end if;
+
+			-- $0400 selects the dot clock and is the first register a game
+			-- programs, well inside those 12 us, so it must not be swallowed
+			-- here. The palette registers may be: the sweep overwrites them
+			-- anyway and games reload them every frame.
+			if CE_N = '0' and WR_N = '0' and A = "000" then
+				CR <= DI;
+				DBG_LAST_A <= A;
+				DBG_CR_LAST <= DI;
+				DBG_CR_WR <= DBG_CR_WR + 1;
 			end if;
 
 		else
@@ -178,9 +200,12 @@ begin
 					-- CPU Write
 					PREV_A <= A;
 					CTRL <= CTRL_WAIT;
+					DBG_LAST_A <= A;
 					case A is
 					when "000" =>
 						CR <= DI;
+						DBG_CR_LAST <= DI;
+						DBG_CR_WR <= DBG_CR_WR + 1;
 					when "010" =>
 						RAM_A(7 downto 0) <= DI;
 					when "011" =>
@@ -450,5 +475,7 @@ end process;
 
 CLKEN <= CLKEN_FF;
 DCC <= DOTCLOCK;
+CR_DBG <= CR;
+WR_DBG <= DBG_CR_LAST & std_logic_vector(DBG_CR_WR) & DBG_LAST_A;
 
 end rtl;

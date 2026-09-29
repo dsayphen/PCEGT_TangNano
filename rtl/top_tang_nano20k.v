@@ -323,9 +323,19 @@ iosys #(
     .vid_dcc_dbg      (vid_dcc),
     .vid_hdw_dbg      (vid_hdw_dbg),
     .vid_hds_dbg      (vid_hds_dbg),
+    .vid_hsw_dbg      (vid_hsw_dbg),
+    .vid_hde_dbg      (vid_hde_dbg),
+    .vid_vsw_dbg      (vid_vsw_dbg),
+    .vid_vds_dbg      (vid_vds_dbg),
+    .vid_vdw_dbg      (vid_vdw_dbg),
+    .vid_vcr_dbg      (vid_vcr_dbg),
+    .vid_vce_cr_dbg   (vid_vce_cr_dbg),
+    .vid_vce_wr_dbg   (vid_vce_wr_dbg),
+    .vid_px_dbg       (vid_px_dbg),
     .cd_phase_dbg     (cd_phase_dbg),
     .cdda_usedw_dbg   (cdda_usedw_dbg),
     .adpcm_dbg        (adpcm_dbg),
+    .refresh_gap_dbg  (refresh_gap_dbg),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -503,8 +513,11 @@ pce_sdram_ctrl_3ch #(
     .adram_rd      (adram_rd),
     .adram_clken   (adram_clken),
 
-    .init_done     (sdram_init_done)
+    .init_done     (sdram_init_done),
+    .refresh_gap_dbg (refresh_gap_dbg)
 );
+
+wire [7:0] refresh_gap_dbg;
 
 // ===========================================================================
 // Core reset
@@ -560,6 +573,15 @@ wire        vid_hs, vid_vs, vid_hbl;
 wire [1:0]  vid_dcc;
 wire [6:0]  vid_hdw_dbg;
 wire [6:0]  vid_hds_dbg;
+wire [4:0]  vid_hsw_dbg;
+wire [6:0]  vid_hde_dbg;
+wire [4:0]  vid_vsw_dbg;
+wire [7:0]  vid_vds_dbg;
+wire [8:0]  vid_vdw_dbg;
+wire [7:0]  vid_vcr_dbg;
+wire [7:0]  vid_vce_cr_dbg;
+wire [15:0] vid_vce_wr_dbg;
+wire [9:0]  vid_px_dbg;
 
 pce_core #(
     .SGX_SUPPORT (1)
@@ -615,7 +637,15 @@ pce_core #(
     .vid_vbl    (vid_vbl),
     .vid_dcc    (vid_dcc),
     .vid_hdw_dbg (vid_hdw_dbg),
-    .vid_hds_dbg (vid_hds_dbg)
+    .vid_hds_dbg (vid_hds_dbg),
+    .vid_hsw_dbg (vid_hsw_dbg),
+    .vid_hde_dbg (vid_hde_dbg),
+    .vid_vsw_dbg (vid_vsw_dbg),
+    .vid_vds_dbg (vid_vds_dbg),
+    .vid_vdw_dbg (vid_vdw_dbg),
+    .vid_vcr_dbg (vid_vcr_dbg),
+    .vid_vce_cr_dbg (vid_vce_cr_dbg),
+    .vid_vce_wr_dbg (vid_vce_wr_dbg)
     ,.cd_stat       (cd_stat)
     ,.cd_stat_get   (cd_stat_get)
     ,.cd_comm       (cd_comm)
@@ -707,6 +737,7 @@ video_scandoubler u_scandoubler (
     .hds_in     (vid_hds_dbg),
     .zoom_in    (video_zoom),
     .scan_in    (scanline),
+    .px_per_line_dbg (vid_px_dbg),
 
     .clk_pix    (clk_pix),
     .pix_resetn (pix_resetn),

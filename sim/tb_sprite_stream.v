@@ -172,6 +172,19 @@ integer errors = 0;
 integer p;
 reg [15:0] a;
 reg [31:0] word32;
+integer urgent_refreshes = 0;
+integer normal_refreshes = 0;
+time last_urgent_refresh = 0;
+
+always @(posedge clk_mem) begin
+    if (mem.memory.cycle == 3'd1 && mem.memory.refresh_now) begin
+        if (mem.memory.refresh_urgent) begin
+            urgent_refreshes = urgent_refreshes + 1;
+            last_urgent_refresh = $time;
+        end else
+            normal_refreshes = normal_refreshes + 1;
+    end
+end
 
 task preload_all;
     begin
@@ -251,8 +264,10 @@ task stream_all_tiles;
             @(posedge clk);
             @(negedge clk);
             clkref <= 1'b0;
-            repeat (4) @(posedge clk); // matches tb_iosys's read_vram_timed window
+            repeat (5) @(posedge clk);
             if (vram_dout !== expect_word[p]) begin
+                if (errors == 0)
+                    $display("refresh at first failure: urgent=%0d normal=%0d since_urgent=%0t", urgent_refreshes, normal_refreshes, $time - last_urgent_refresh);
                 $display("FAIL %0s: tile word %0d (vram_addr=%h) = %h, expected %h",
                           label, p, p*64, vram_dout, expect_word[p]);
                 errors = errors + 1;
@@ -295,7 +310,7 @@ task stream_both_vdcs;
             @(posedge clk);
             @(negedge clk);
             clkref <= 1'b0;
-            repeat (4) @(posedge clk);
+            repeat (5) @(posedge clk);
             if (vram_dout !== expect_word[p]) begin
                 $display("FAIL %0s: VDC0 tile word %0d (vram_addr=%h) = %h, expected %h",
                           label, p, p*64, vram_dout, expect_word[p]);
@@ -314,6 +329,47 @@ task stream_both_vdcs;
     end
 endtask
 
+task stream_blanked_lines;
+    integer line_index;
+    integer dot_index;
+    integer word_index;
+    integer errors_before;
+    integer urgent_before;
+    integer normal_before;
+    begin
+        errors_before = errors;
+        urgent_before = urgent_refreshes;
+        normal_before = normal_refreshes;
+        for (line_index = 0; line_index < 3; line_index = line_index + 1) begin
+            for (dot_index = 0; dot_index < 455; dot_index = dot_index + 1) begin
+                @(negedge clk);
+                word_index = (line_index * 360 + dot_index) % (NUM_TILES * 4);
+                vram_rd <= dot_index < 360;
+                vram_addr <= word_index * 64;
+                if ($test$plusargs("blanked_both")) begin
+                    vram1_rd <= dot_index < 360;
+                    vram1_addr <= word_index * 64;
+                end
+                clkref <= 1'b1;
+                @(posedge clk);
+                @(negedge clk);
+                clkref <= 1'b0;
+                repeat (5) @(posedge clk);
+                if (dot_index < 360 && vram_dout !== expect_word[word_index])
+                    errors = errors + 1;
+                if ($test$plusargs("blanked_both") && dot_index < 360 &&
+                    vram1_dout !== expect_word1[word_index])
+                    errors = errors + 1;
+            end
+        end
+        $display("blanked: errors=%0d urgent=%0d normal=%0d debt_max=%0d",
+                 errors - errors_before, urgent_refreshes - urgent_before,
+                 normal_refreshes - normal_before, mem.memory.refresh_gap_max);
+        vram_rd <= 1'b0;
+        vram1_rd <= 1'b0;
+    end
+endtask
+
 initial begin
     $dumpfile("sim/tb_sprite_stream.vcd");
     $dumpvars(0, tb_sprite_stream);
@@ -326,8 +382,29 @@ initial begin
     preload_all;
     repeat (5) @(posedge clk);
 
+    if ($test$plusargs("blanked")) begin
+        if ($test$plusargs("blanked_both")) begin
+            preload_all1;
+            bg_run = 1'b1;
+            bg_rv = 1'b1;
+        end
+        stream_blanked_lines;
+        $finish;
+    end
+
+    if ($test$plusargs("no_urgent"))
+        force mem.memory.refresh_urgent = 1'b0;
+
     $display("--- streaming %0d tiles, VRAM0 only, quiet bus ---", NUM_TILES);
     stream_all_tiles("quiet");
+
+    if ($test$plusargs("no_urgent")) begin
+        if (errors == 0 && urgent_refreshes == 0)
+            $display("PASS no_urgent: 160 words, no refresh preemption");
+        else
+            $display("FAIL no_urgent: errors=%0d urgent=%0d", errors, urgent_refreshes);
+        $finish;
+    end
 
     $display("--- streaming %0d tiles, refresh_window contention only ---", NUM_TILES);
     bg_run = 1'b1; bg_ref = 1'b1; bg_rv = 1'b0;

@@ -67,6 +67,10 @@ module video_scandoubler (
     input  wire [1:0]  zoom_in,       // 0 = integer, 1 = stretch, 2 = bilinear
     input  wire [1:0]  scan_in,       // 0/1/2/3 = 0/25/50/100% scanlines
 
+    // Highest line buffer write address of the last core scan line, i.e. the
+    // number of pixels actually written minus one.  Debug/diagnosis only.
+    output wire [9:0]  px_per_line_dbg,
+
     // ---- HDMI side (clk_pix, 25.92 MHz) --------------------------------
     input  wire        clk_pix,
     input  wire        pix_resetn,
@@ -117,6 +121,8 @@ reg [1:0]  zoom_lat;
 reg [1:0]  scan_lat;
 
 wire [8:0] pix_in = {g_in, r_in, b_in};
+
+assign px_per_line_dbg = wr_addr_max_lat;
 
 reg        lb_we;
 reg [10:0] lb_waddr;

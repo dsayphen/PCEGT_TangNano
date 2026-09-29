@@ -330,7 +330,7 @@ task stream_all_tiles;
             @(posedge clk);
             @(negedge clk);
             clkref <= 1'b0;
-            repeat (4) @(posedge clk);
+            repeat (5) @(posedge clk);
             if (use_vram1) begin
                 if (vram1_dout !== expect_word1[p]) begin
                     $display("FAIL %0s: VRAM1 tile word %0d (addr=%h) = %h, expected %h",

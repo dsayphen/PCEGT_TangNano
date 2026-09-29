@@ -201,7 +201,7 @@ static int load_system_card(void) {
         return -1;
     }
 
-    status("Loading System Card 3...");
+    status("Loading System Card...");
     uart_print("syscard: starting SDRAM transfer\n");
     pce_load_start(size, 0);
     cheats_load(current_game_name, CHEAT_GAME_CD);
