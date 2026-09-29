@@ -204,7 +204,7 @@ static int load_system_card(void) {
     status("Loading System Card...");
     uart_print("syscard: starting SDRAM transfer\n");
     pce_load_start(size, 0);
-    cheats_load(current_game_name, CHEAT_GAME_CD);
+    cheats_clear();
     while (total < size) {
         UINT want = (UINT)((size - total) > sizeof(io_buf) ? sizeof(io_buf)
                                                                : (size - total));
@@ -366,6 +366,8 @@ int open_cd_image(const char *cue_name) {
     }
     if (load_system_card() != 0)
         return -1;
+    if (cheat_cd_enabled)
+        cheats_load(current_game_name, CHEAT_GAME_CD);
     // status("Preparing CD..."); // ne pas afficher, trop rapide
     if (cd_open_data_track(cd_first_data_track) != 0) {
         cheats_clear();
