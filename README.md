@@ -26,8 +26,8 @@ SNES pad -> HuC6280 / VDC / VCE -> line doubler -> DVI over HDMI
 | HuCard games up to 4 MiB (incl. the SF2 mapper) | yes |
 | HuC6280 CPU, HuC6270 VDC, HuC6260 VCE, PSG | yes |
 | 8 KiB work RAM, dual 64 KiB VRAMs, palette RAM | yes; VRAMs in SDRAM, work/palette RAM in block RAM |
-| Video output | 640x480-class DVI over HDMI, genlocked line doubler |
-| Audio | PSG + CDDA mixed to stereo I2S; ADPCM path connected to SDRAM, hardware audio test pending |
+| Video output | 640x480-class HDMI/DVI, genlocked line doubler |
+| Audio | PSG/CDDA/ADPCM mixed; onboard I2S speaker or HDMI stereo LPCM (HDMI hardware test pending) |
 | Controller | one SNES-style pad, 2/6-button modes; S1 resets the console |
 | ROM loading | microSD browser; USB-UART fallback, see section 4 |
 | CD-ROM² / Super CD | experimental CUE/BIN, System Card, CDDA, SCSI data and ADPCM |
@@ -195,7 +195,8 @@ pause and power-off do not trigger a save. Keep the SD card inserted and open
 the firmware menu before switching power off.
 
 Global video and audio settings live in `/config/video.cfg` and
-`/config/audio.cfg`. The current game's 2/6-button mode lives in
+`/config/audio.cfg`; its `output` value selects the onboard speaker (`0`, default)
+or HDMI (`1`). The current game's 2/6-button mode lives in
 `/config/<game>.cfg`, without the image extension; the previous name remains a
 read fallback.
 
@@ -312,8 +313,11 @@ to the full 640 pixels with a nearest-neighbour DDA whose step is exact
 (108 / 144 / 216 in 1/256 units), so the picture always fills the screen with
 the correct 4:3 aspect ratio.
 
-Signalling is **DVI** (no HDMI data islands), which every HDMI sink accepts.
-There is therefore **no HDMI audio**; sound comes out of the headphone jack.
+With the browser open, choose **Options > Audio Settings > Output** to switch
+between the onboard speaker and HDMI. Speaker is the default. Speaker mode uses
+the existing I2S amplifier; HDMI mode sends 16-bit stereo LPCM at 48 kHz in
+HDMI data islands and disables the onboard amplifier. The video timing is
+unchanged, and HDMI playback still needs verification on a physical display.
 
 The HuC6280 PSG, CDDA and decoded ADPCM are mixed before the board's 16-bit
 stereo I2S output (about 48.2 kHz); the CDDA sample clock is approximately
@@ -361,9 +365,10 @@ bank-2 channel with the firmware and CD memories.
 The Arcade Card uses bank 1 only in CD mode; 4 MiB HuCards continue to use
 banks 0 and 1 when CD mode is off. The CD/Arcade read cache shares the bank-2
 PicoRV32/CD/ADPCM channel, so Arcade accesses contend with those clients.
-The latest Gowin place-and-route uses 46/46 BSRAM blocks and 9983/10368 CLS
-(97%), leaving little logic headroom. `rtl/tang/pce_sdram_ctrl_3ch.v` runs the
-SDRAM at 86.4 MHz and assigns fixed slots to (1) HuCard ROM/loader, (2)
+The latest Gowin place-and-route uses 43/46 BSRAM blocks (94%) and 10351/10368
+CLS (100%, 17 sites free), leaving almost no logic headroom.
+`rtl/tang/pce_sdram_ctrl_3ch.v` runs the SDRAM at 86.4 MHz and assigns fixed
+slots to (1) HuCard ROM/loader, (2)
 PicoRV32/CD/Arcade/ADPCM or VDC1 and (3) VDC0.
 Its eight-cycle schedule returns VRAM data within one fastest PCE pixel period.
 Refresh is distributed across available idle slots and is also allowed while
@@ -392,8 +397,10 @@ rtl/
     pce_sdram_ctrl_3ch.v      interleaved ROM / firmware / CD / VRAM controller
     uart_rx.v, rom_loader.v   UART ROM loader
     video_scandoubler.v       genlocked line doubler + HDMI timing
-    tmds_encoder.v, dvi_tx.v  DVI encoder, OSER10 serialisers, ELVDS buffers
-    i2s_tx.v                  I2S transmitter
+    tmds_encoder.v, dvi_tx.v  HDMI/DVI TMDS encoder, data islands, OSER10 serializers
+    audio_sampler_48k.sv      HDMI 48 kHz stereo sample clock
+    hdmi_audio_packetizer.sv  LPCM, ACR, InfoFrame and BCH packet generation
+    i2s_tx.v                  onboard-speaker I2S transmitter
     snes_gamepad.v, pce_pad.v pad reader and PC Engine pad multiplexer
 constraints/
   tang_nano20k.cst            pin assignments
@@ -461,6 +468,8 @@ The original core is adapted to Gowin and the board interfaces:
   (`nestang/src/sdram.v`), GPLv3.
 * rPLL / CLKDIV / `OSER10` / `ELVDS_OBUF` usage follows the Sipeed Tang Nano 20K
   examples and NESTang (GPLv3).
+* HDMI audio packet scheduling follows HDMI 1.4a packet organization and was
+  informed by NESTang's GPLv3 HDMI2 transmitter by Sameer Puri.
 * The TMDS encoder implements the encoding algorithm published in the DVI 1.0
   specification.
 * Everything else under `rtl/tang/`, `constraints/` and `tools/` was written for

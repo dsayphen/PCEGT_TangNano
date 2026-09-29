@@ -322,6 +322,7 @@ void video_config_save(void) {
 int audio_volume = 10;   // 0..10, hardware reset default: unity gain
 int audio_bass = 0;      // -5..5, hardware reset default: flat
 int audio_treble = 0;    // -5..5, hardware reset default: flat
+int audio_output_hdmi = 0; // 0 = onboard speaker, 1 = HDMI
 int audio_paused = 0;
 
 // Pushes the current settings to reg_audio; bass/treble are biased by +5 to
@@ -331,7 +332,8 @@ void audio_apply(void) {
 
     reg_audio = volume |
                 ((uint32_t)(audio_bass + 5) << 4) |
-                ((uint32_t)(audio_treble + 5) << 8);
+                ((uint32_t)(audio_treble + 5) << 8) |
+                ((uint32_t)audio_output_hdmi << 12);
 }
 
 void audio_config_load(void) {
@@ -354,6 +356,8 @@ void audio_config_load(void) {
             audio_bass = (int)parse_u8(line + 5) - 5;
         } else if (starts_with(line, "treble=")) {
             audio_treble = (int)parse_u8(line + 7) - 5;
+        } else if (starts_with(line, "output=")) {
+            audio_output_hdmi = parse_u8(line + 7) == 1;
         }
     }
 
@@ -378,6 +382,7 @@ void audio_config_save(void) {
         "# -----------------------------------\n"
         "# volume : 0 (mute) .. 10 (max)\n"
         "# bass, treble : 0 (min) .. 10 (max), stored biased by +5 (5 = flat)\n"
+        "# output : 0 = onboard speaker, 1 = HDMI\n"
         "# -----------------------------------\n";
 
     f_write(&file, header, (UINT)strlen(header), &bw);
@@ -396,6 +401,9 @@ void audio_config_save(void) {
     len = u8_to_str(num, (uint8_t)(audio_treble + 5));
     f_write(&file, num, len, &bw);
     f_write(&file, "\n", 1, &bw);
+
+    f_write(&file, "output=", 7, &bw);
+    f_write(&file, audio_output_hdmi ? "1\n" : "0\n", 2, &bw);
 
     f_close(&file);
 }
