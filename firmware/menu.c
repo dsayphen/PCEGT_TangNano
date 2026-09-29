@@ -403,29 +403,34 @@ int pause_menu(void) {
 
             char label[24];
 
-            if (i < 3) {
-                print_field(6, 8 + i, items[i], 20);
+            if (i == 0) {
+                print_field(6, 8 + i, items[0], 20);
                 continue;
             }
 
-            if (i == 4) {
+            if (i == 2) {
                 print_field(6, 8 + i, "Video Settings >", 20);
                 continue;
             }
 
-            if (i == 5) {
+            if (i == 3) {
                 print_field(6, 8 + i, "Audio Settings >", 20);
                 continue;
             }
 
-            if (i == 6) {
+            if (i == 4) {
                 make_cheats_label(label);
                 print_field(6, 8 + i, label, 20);
                 continue;
             }
 
-            make_menu_label(label, 3);
-            print_field(6, 8 + i, label, 20);
+            if (i == 1) {
+                make_menu_label(label, 3);
+                print_field(6, 8 + i, label, 20);
+                continue;
+            }
+
+            print_field(6, 8 + i, items[i - 4], 20);
         }
         selection_row(8 + active);
 
@@ -441,7 +446,7 @@ int pause_menu(void) {
             audio_apply();
             overlay(0);
             return 0;
-        } else if ((e & JOY_A) && active == 1) {
+        } else if ((e & JOY_A) && active == 5) {
             if (cd_active)
                 cd_audio_reset();
             pce_reset();
@@ -451,27 +456,27 @@ int pause_menu(void) {
             audio_apply();
             overlay(0);
             return 0;
-        } else if ((e & JOY_A) && active == 2) {
+        } else if ((e & JOY_A) && active == 6) {
             cheats_clear();
             pce_stop();
             audio_paused = 0;
             audio_apply();
             return 1;
-        } else if ((e & JOY_A) && active == 3) {
+        } else if ((e & JOY_A) && active == 1) {
             game_pad_mode = !game_pad_mode;
             reg_pad_mode = game_pad_mode;
             game_pad_mode_save(current_game_name); // <--- Sauvegarde dans /config/[nomdujeu].cfg
-        } else if ((e & JOY_A) && active == 4) {
+        } else if ((e & JOY_A) && active == 2) {
             video_menu(1);
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
             print_game_name();
-        } else if ((e & JOY_A) && active == 5) {
+        } else if ((e & JOY_A) && active == 3) {
             audio_menu(1);
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
             print_game_name();
-        } else if ((e & JOY_A) && active == 6) {
+        } else if ((e & JOY_A) && active == 4) {
             cheats_menu();
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
