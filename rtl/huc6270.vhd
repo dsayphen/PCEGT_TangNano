@@ -64,6 +64,10 @@ entity HUC6270 is
 		HSW_DBG				: out std_logic_vector(4 downto 0);
 		HDS_DBG				: out std_logic_vector(6 downto 0);
 		HDE_DBG 				: out std_logic_vector(6 downto 0);
+		VSW_DBG 				: out std_logic_vector(4 downto 0);
+		VDS_DBG 				: out std_logic_vector(7 downto 0);
+		VDW_DBG 				: out std_logic_vector(8 downto 0);
+		VCR_DBG 				: out std_logic_vector(7 downto 0);
 		VDS_END_POS_DBG 	: out unsigned(9 downto 0);
 		VDISP_END_POS_DBG : out unsigned(9 downto 0);
 		VDE_END_POS_DBG 	: out unsigned(9 downto 0)
@@ -1569,6 +1573,10 @@ port map(
 	HSW_DBG <= HSW;
 	HDS_DBG <= HDS;
 	HDE_DBG <= HDE;
+	VSW_DBG <= VSW;
+	VDS_DBG <= VDS;
+	VDW_DBG <= VDW;
+	VCR_DBG <= VDE;
 	
 	VDS_END_POS_DBG <= VDS_END_POS;
 	VDISP_END_POS_DBG <= VDISP_END_POS;

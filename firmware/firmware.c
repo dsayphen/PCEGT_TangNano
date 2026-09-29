@@ -132,13 +132,14 @@ int main(void) {
                             (int)cd_audio_bytes_fed, (int)cd_audio_read_ms,
                             (int)cd_audio_feed_ms, (int)loops);
             } else {
-                uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d cd_ev=%x cd_active=%d cd_phase=%x cdda=%d cd_play=%d adpcm=%x\n",
+                uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d cd_ev=%x cd_active=%d cd_phase=%x cdda=%d cd_play=%d adpcm=%x rfsh_due=%d\n",
                             (int)loops, reg_joystick, reg_vid_dcc_dbg(),
                             reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
                             reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8,
                             (unsigned)reg_cd_events, cd_active, (unsigned)reg_cd_phase,
                             (unsigned)reg_cd_usedw, cd_audio_playing,
-                            (unsigned)reg_cd_adpcm);
+                            (unsigned)(reg_cd_adpcm & 0xff),
+                            (int)reg_refresh_debt());
             }
             loops = 0;
             cd_audio_bytes_fed = 0;

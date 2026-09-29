@@ -127,6 +127,14 @@ entity pce_top is
 		-- VDC0 active display width in 8-pixel characters, for debug/diagnosis only
 		VIDEO_HDW_DBG : out std_logic_vector(6 downto 0);
 		VIDEO_HDS_DBG : out std_logic_vector(6 downto 0);
+		VIDEO_HSW_DBG : out std_logic_vector(4 downto 0);
+		VIDEO_HDE_DBG : out std_logic_vector(6 downto 0);
+		VIDEO_VSW_DBG : out std_logic_vector(4 downto 0);
+		VIDEO_VDS_DBG : out std_logic_vector(7 downto 0);
+		VIDEO_VDW_DBG : out std_logic_vector(8 downto 0);
+		VIDEO_VCR_DBG : out std_logic_vector(7 downto 0);
+		VIDEO_VCE_CR_DBG : out std_logic_vector(7 downto 0);
+		VIDEO_VCE_WR_DBG : out std_logic_vector(15 downto 0);
 		CD_PHASE_DBG  : out std_logic_vector(7 downto 0);
 		CDDA_USEDW_DBG : out std_logic_vector(12 downto 0);
 		ADPCM_DBG : out std_logic_vector(7 downto 0)
@@ -190,6 +198,12 @@ signal VPC_DO			: std_logic_vector(7 downto 0);
 signal VDC0_HDS_END_POS_DBG   : unsigned(6 downto 0);
 signal VDC0_HDISP_END_POS_DBG : unsigned(6 downto 0);
 signal VDC0_HDS_DBG           : std_logic_vector(6 downto 0);
+signal VDC0_HSW_DBG           : std_logic_vector(4 downto 0);
+signal VDC0_HDE_DBG           : std_logic_vector(6 downto 0);
+signal VDC0_VSW_DBG           : std_logic_vector(4 downto 0);
+signal VDC0_VDS_DBG           : std_logic_vector(7 downto 0);
+signal VDC0_VDW_DBG           : std_logic_vector(8 downto 0);
+signal VDC0_VCR_DBG           : std_logic_vector(7 downto 0);
 signal VDCNUM    		: std_logic;
 signal VDC_COLNO		: std_logic_vector(8 downto 0);
 
@@ -441,6 +455,8 @@ port map(
 	CLKEN_FS => VIDEO_CE_FS,
 	RVBL		=> ReducedVBL,
 	DCC      => VIDEO_DCC,
+	CR_DBG   => VIDEO_VCE_CR_DBG,
+	WR_DBG   => VIDEO_VCE_WR_DBG,
 
 	GRID_EN	=> GRID_EN,
 	BORDER_EN=> BORDER_EN,
@@ -505,11 +521,23 @@ port map(
 
 	HDS_END_POS_DBG   => VDC0_HDS_END_POS_DBG,
 	HDISP_END_POS_DBG => VDC0_HDISP_END_POS_DBG,
-	HDS_DBG           => VDC0_HDS_DBG
+	HSW_DBG           => VDC0_HSW_DBG,
+	HDS_DBG           => VDC0_HDS_DBG,
+	HDE_DBG           => VDC0_HDE_DBG,
+	VSW_DBG           => VDC0_VSW_DBG,
+	VDS_DBG           => VDC0_VDS_DBG,
+	VDW_DBG           => VDC0_VDW_DBG,
+	VCR_DBG           => VDC0_VCR_DBG
 );
 
 VIDEO_HDW_DBG <= std_logic_vector(VDC0_HDISP_END_POS_DBG - VDC0_HDS_END_POS_DBG);
 VIDEO_HDS_DBG <= VDC0_HDS_DBG;
+VIDEO_HSW_DBG <= VDC0_HSW_DBG;
+VIDEO_HDE_DBG <= VDC0_HDE_DBG;
+VIDEO_VSW_DBG <= VDC0_VSW_DBG;
+VIDEO_VDS_DBG <= VDC0_VDS_DBG;
+VIDEO_VDW_DBG <= VDC0_VDW_DBG;
+VIDEO_VCR_DBG <= VDC0_VCR_DBG;
 
 CLR_A  <= CLR_A + 1  when rising_edge(CLK);
 CLR_WE <= COLD_RESET when rising_edge(CLK);

@@ -54,6 +54,37 @@ static const char *zoom_names[3] = { "Integer", "Stretch", "Bilinear" };
 static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
 static const char *color_names[2] = { "RAW RGB", "Composite" };
 
+// Snapshot of the HuC6260/HuC6270 timing registers as the running game has
+// programmed them, plus the number of pixels the scandoubler actually latched
+// on the last core scan line.  Read-only, for diagnosing geometry problems.
+void vdc_timing_dump(void) {
+    int hsw = (int)reg_vid_hsw_dbg();
+    int hds = (int)reg_vid_hds_dbg();
+    // reg_vid_hdw_dbg() is HDISP_END - HDS_END, i.e. HDW + 1 = character count
+    int hdw_chars = (int)reg_vid_hdw_dbg();
+    int hde = (int)reg_vid_hde_dbg();
+    int dcc = (int)reg_vid_dcc_dbg();
+    static const int dcc_dots[4] = { 270, 360, 540, 540 };
+
+    uart_printf("vdc raw %x %x %x\n",
+                (unsigned)reg_color_mode, (unsigned)reg_pad_mode,
+                (unsigned)reg_rom_pop);
+    uart_printf("vce cr=%x dcc=%d dots_avail=%d px_per_line=%d\n",
+                (unsigned)reg_vce_cr_dbg(), dcc, dcc_dots[dcc],
+                (int)reg_vid_px_dbg() + 1);
+    uart_printf("vce wr400=%d last400=%x lastreg=%d\n",
+                (int)reg_vce_cr_wr(), (unsigned)reg_vce_cr_last(),
+                (int)reg_vce_last_a());
+    uart_printf("vdc hsw=%d hds=%d hdw=%d hde=%d chars=%d\n",
+                hsw, hds, hdw_chars - 1, hde,
+                (hsw + 1) + (hds + 1) + hdw_chars + (hde + 1));
+    uart_printf("vdc hds_px=%d hdw_px=%d\n", (hds + 1) * 8, hdw_chars * 8);
+    uart_printf("vdc vsw=%d vds=%d vdw=%d vcr=%d vlines=%d\n",
+                (int)reg_vid_vsw_dbg(), (int)reg_vid_vds_dbg(),
+                (int)reg_vid_vdw_dbg(), (int)reg_vid_vcr_dbg(),
+                (int)reg_vid_vdw_dbg() + 1);
+}
+
 static void print_game_name(void) {
     char label[OSD_COLS - 4];
     const char *end = current_game_name;
@@ -337,6 +368,7 @@ int pause_menu(void) {
     int active = 0;
     const int n_items = 7;
 
+    vdc_timing_dump();
     audio_paused = 1;
     audio_apply();
     pce_pause(1);

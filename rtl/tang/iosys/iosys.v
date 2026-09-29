@@ -137,6 +137,9 @@ module iosys #(
     input  wire [7:0]  cd_phase_dbg,
     input  wire [12:0] cdda_usedw_dbg,
     input  wire [7:0]  adpcm_dbg,
+    // Maximum number of pending SDRAM refreshes since reset.
+    // Piggybacked onto reg_cd_adpcm bits 15:8, no new address decode.
+    input  wire [7:0]  refresh_gap_dbg,
 
     // ---- read-only debug: VCE dot clock select (VIDEO_DCC), see huc6260;
     // piggybacked onto reg_core_id's unused bits 17:16, no new address decode
@@ -147,6 +150,22 @@ module iosys #(
     // ---- read-only debug: VDC0 horizontal display start in 8px chars,
     // piggybacked onto reg_core_id bits 31:25
     input  wire [6:0]  vid_hds_dbg,
+    // ---- read-only debug: the rest of the VDC0 HSR/HDR/VPR/VDR/VCR timing
+    // registers, the VCE control register and the number of pixels the
+    // scandoubler actually latched on the last core scan line.  Piggybacked
+    // onto the unused upper bits of reg_color_mode / reg_pad_mode /
+    // reg_rom_pop: adding address decoders here lengthens the mem_rdata
+    // priority chain, which no longer meets timing on the softcore's load
+    // path.
+    input  wire [4:0]  vid_hsw_dbg,
+    input  wire [6:0]  vid_hde_dbg,
+    input  wire [4:0]  vid_vsw_dbg,
+    input  wire [7:0]  vid_vds_dbg,
+    input  wire [8:0]  vid_vdw_dbg,
+    input  wire [7:0]  vid_vcr_dbg,
+    input  wire [7:0]  vid_vce_cr_dbg,
+    input  wire [15:0] vid_vce_wr_dbg,
+    input  wire [9:0]  vid_px_dbg,
 
     // ---- in-game controls -------------------------------------------------
     output reg         game_pause,
@@ -345,6 +364,32 @@ wire [31:0] spi_do;
 wire        spi_wait;
 
 reg  [31:0] time_reg;
+
+// The VDC / VCE / scandoubler debug taps sit at the far end of the die, and
+// mem_rdata already feeds the softcore's register file through a long
+// priority mux, so give the cross-chip route a clock period of its own.
+// Without this stage the reads come back unstable.
+reg  [4:0]  hsw_q;
+reg  [6:0]  hde_q;
+reg  [4:0]  vsw_q;
+reg  [7:0]  vds_q;
+reg  [8:0]  vdw_q;
+reg  [7:0]  vcr_q;
+reg  [7:0]  vce_cr_q;
+reg  [15:0] vce_wr_q;
+reg  [9:0]  vid_px_q;
+
+always @(posedge clk) begin
+    hsw_q    <= vid_hsw_dbg;
+    hde_q    <= vid_hde_dbg;
+    vsw_q    <= vid_vsw_dbg;
+    vds_q    <= vid_vds_dbg;
+    vdw_q    <= vid_vdw_dbg;
+    vcr_q    <= vid_vcr_dbg;
+    vce_cr_q <= vid_vce_cr_dbg;
+    vce_wr_q <= vid_vce_wr_dbg;
+    vid_px_q <= vid_px_dbg;
+end
 reg  [7:0]  cd_events;
 reg  [95:0] cd_comm_reg;
 reg  [79:0] cd_dout_reg;
@@ -409,8 +454,8 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    uart_div_sel ? uart_div_do :
                    uart_dat_sel ? uart_dat_do :
                    time_sel     ? time_reg :
-                   pad_mode_sel ? {31'd0, pad_mode} :
-                   color_mode_sel ? {31'd0, color_mode} :
+                   pad_mode_sel ? {6'd0, vce_cr_q, vcr_q, vdw_q, pad_mode} :
+                   color_mode_sel ? {6'd0, vds_q, vsw_q, hde_q, hsw_q, color_mode} :
                    id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
                    audio_sel    ? {20'b0, audio_treble, audio_bass, audio_volume} :
                    cd_event_sel ? {24'b0, cd_events} :
@@ -422,8 +467,8 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    cd_data2_sel ? {16'b0, cd_dout_reg[79:64]} :
                    cd_phase_sel ? {24'b0, cd_phase_dbg} :
                    cd_usedw_sel ? {19'b0, cdda_usedw_dbg} :
-                   cd_adpcm_sel ? {24'b0, adpcm_dbg} :
-                   rom_pop_sel  ? {31'b0, rom_pop} :
+                   cd_adpcm_sel ? {16'b0, refresh_gap_dbg, adpcm_dbg} :
+                   rom_pop_sel  ? {5'b0, vce_wr_q, vid_px_q, rom_pop} :
                    brm_data_sel ? {24'b0, brm_host_q} :
                    cheat_ctrl_sel ? {31'b0, cheat_apply} :
                    (spi_byte_sel || spi_word_sel) ? spi_do :

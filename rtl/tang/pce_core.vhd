@@ -81,6 +81,14 @@ entity pce_core is
 		-- VDC0 active display width in 8-pixel characters, debug/diagnosis only
 		vid_hdw_dbg : out std_logic_vector(6 downto 0);
 		vid_hds_dbg : out std_logic_vector(6 downto 0);
+		vid_hsw_dbg : out std_logic_vector(4 downto 0);
+		vid_hde_dbg : out std_logic_vector(6 downto 0);
+		vid_vsw_dbg : out std_logic_vector(4 downto 0);
+		vid_vds_dbg : out std_logic_vector(7 downto 0);
+		vid_vdw_dbg : out std_logic_vector(8 downto 0);
+		vid_vcr_dbg : out std_logic_vector(7 downto 0);
+		vid_vce_cr_dbg : out std_logic_vector(7 downto 0);
+		vid_vce_wr_dbg : out std_logic_vector(15 downto 0);
 
 		-- CD host bridge, serviced by the firmware through iosys
 		cd_stat       : in  std_logic_vector(15 downto 0);
@@ -275,6 +283,14 @@ begin
 		VIDEO_VBL   => vid_vbl,
 		VIDEO_HDW_DBG => vid_hdw_dbg,
 		VIDEO_HDS_DBG => vid_hds_dbg,
+		VIDEO_HSW_DBG => vid_hsw_dbg,
+		VIDEO_HDE_DBG => vid_hde_dbg,
+		VIDEO_VSW_DBG => vid_vsw_dbg,
+		VIDEO_VDS_DBG => vid_vds_dbg,
+		VIDEO_VDW_DBG => vid_vdw_dbg,
+		VIDEO_VCR_DBG => vid_vcr_dbg,
+		VIDEO_VCE_CR_DBG => vid_vce_cr_dbg,
+		VIDEO_VCE_WR_DBG => vid_vce_wr_dbg,
 		CD_PHASE_DBG  => cd_phase_dbg,
 		CDDA_USEDW_DBG => cdda_usedw_dbg,
 		ADPCM_DBG => adpcm_dbg

@@ -269,8 +269,5 @@ int load_rom(const char *fname, uint32_t size) {
     pce_load_end();
 
     uart_print("load done\n");
-    uart_printf("dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
-                reg_vid_dcc_dbg(), reg_vid_hds_dbg(), reg_vid_hds_dbg() * 8,
-                reg_vid_hdw_dbg(), reg_vid_hdw_dbg() * 8);
     return 0;
 }

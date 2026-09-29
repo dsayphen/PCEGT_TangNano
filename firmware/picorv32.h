@@ -47,6 +47,9 @@
 #define reg_cd_phase       (*(volatile uint32_t*)0x02000098)
 #define reg_cd_usedw       (*(volatile uint32_t*)0x0200009c)
 #define reg_cd_adpcm       (*(volatile uint32_t*)0x020000a0)
+// Largest pending SDRAM refresh debt since reset. Values >= 12 trigger
+// emergency preemption of a VDC slot.
+#define reg_refresh_debt() ((reg_cd_adpcm >> 8) & 0xff)
 #define reg_rom_pop        (*(volatile uint32_t*)0x020000a4)
 #define reg_brm_addr       (*(volatile uint32_t*)0x020000a8)
 #define reg_brm_data       (*(volatile uint32_t*)0x020000ac)
@@ -66,6 +69,28 @@
 // piggybacked onto reg_core_id bits 24:18. Multiply by 8 for pixels.
 #define reg_vid_hdw_dbg()  ((reg_core_id >> 18) & 0x7f)
 #define reg_vid_hds_dbg()  ((reg_core_id >> 25) & 0x7f)
+
+// Remaining HuC6270 timing registers, the HuC6260 control register and the
+// pixel count the scandoubler really latched on the last core scan line.
+// Read-only, piggybacked onto the unused upper bits of write-only registers
+// (see iosys.v) rather than onto new addresses, which would lengthen the
+// softcore's mem_rdata mux past timing closure.
+#define reg_vid_hsw_dbg()  ((reg_color_mode >> 1)  & 0x1f)
+#define reg_vid_hde_dbg()  ((reg_color_mode >> 6)  & 0x7f)
+#define reg_vid_vsw_dbg()  ((reg_color_mode >> 13) & 0x1f)
+#define reg_vid_vds_dbg()  ((reg_color_mode >> 18) & 0xff)
+#define reg_vid_vdw_dbg()  ((reg_pad_mode >> 1)    & 0x1ff)
+#define reg_vid_vcr_dbg()  ((reg_pad_mode >> 10)   & 0xff)
+// Raw HuC6260 control register ($0400); bits 1:0 are the dot clock select.
+#define reg_vce_cr_dbg()   ((reg_pad_mode >> 18)   & 0xff)
+// Highest line buffer write address, so the written pixel count is this + 1.
+#define reg_vid_px_dbg()   ((reg_rom_pop >> 1)     & 0x3ff)
+// Last VCE register written by the CPU, number of writes to $0400, and the
+// last value written there.  Tells whether the game programs the dot clock.
+#define reg_vce_last_a()   ((reg_rom_pop >> 11)    & 0x7)
+#define reg_vce_cr_wr()    ((reg_rom_pop >> 14)    & 0x1f)
+#define reg_vce_cr_last()  ((reg_rom_pop >> 19)    & 0xff)
+
 
 // ---------------------------------------------------------------------------
 // OSD geometry, must match textdisp.v
