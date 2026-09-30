@@ -193,7 +193,6 @@ signal VDC1_COLNO		: std_logic_vector(8 downto 0);
 signal VRAM1_READ   : std_logic;
 signal VRAM1_WRITE  : std_logic;
 signal VRAM1_ADDR   : std_logic_vector(15 downto 0);
-signal VRAM1_DATA   : std_logic_vector(15 downto 0);
 signal VDC_CLKEN		: std_logic;
 signal VPC_DO			: std_logic_vector(7 downto 0);
 signal VDC0_HDS_END_POS_DBG   : unsigned(6 downto 0);
@@ -207,7 +206,6 @@ signal VDC0_VDW_DBG           : std_logic_vector(8 downto 0);
 signal VDC0_VCR_DBG           : std_logic_vector(7 downto 0);
 signal VDCNUM    		: std_logic;
 signal VDC_COLNO		: std_logic_vector(8 downto 0);
-signal VPC_COLNO		: std_logic_vector(8 downto 0);
 
 -- CD signals
 signal CD_SEL_N		: std_logic;
@@ -397,7 +395,7 @@ port map(
 	RST_N		=> RESET_N,
 	WAIT_N	=> ROM_RDY and EXT_RAM_RDY and not CPU_PAUSE_EN,
 
-	IRQ1_N	=> VDC0_IRQ_N and (VDC1_IRQ_N or not SGX),
+	IRQ1_N	=> VDC0_IRQ_N and VDC1_IRQ_N,
 	IRQ2_N	=> CD_IRQ_N,
 	NMI_N		=> '1',
 
@@ -408,7 +406,7 @@ port map(
 	WR_N 		=> CPU_WR_N,
 	RD_N		=> CPU_RD_N,
 
-	RDY		=> VDC0_BUSY_N and (VDC1_BUSY_N or not SGX),
+	RDY		=> VDC0_BUSY_N and VDC1_BUSY_N,
 
 	CE			=> CPU_CE,
 	CEK_N		=> CPU_VCE_SEL_N,
@@ -546,10 +544,9 @@ CLR_WE <= COLD_RESET when rising_edge(CLK);
 
 generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 
-	VRAM1_RD <= VRAM1_READ and SGX;
-	VRAM1_WE <= VRAM1_WRITE and not VRAM1_ADDR(15) and SGX;
-	VRAM1_A  <= ('0' & VRAM1_ADDR(14 downto 0)) when SGX = '1' else (others => '0');
-	VRAM1_DO <= VRAM1_DATA when SGX = '1' else (others => '0');
+	VRAM1_RD <= VRAM1_READ;
+	VRAM1_WE <= VRAM1_WRITE and not VRAM1_ADDR(15);
+	VRAM1_A  <= '0' & VRAM1_ADDR(14 downto 0);
 
 	VDC1 : entity work.HUC6270
 	generic map(
@@ -558,7 +555,7 @@ generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 	port map(
 		CLK 		=> CLK,
 		CLR_MEM  => COLD_RESET,
-		RST_N		=> RESET_N and SGX,
+		RST_N		=> RESET_N,
 
 		-- CPU Interface
 		CPU_CE	=> CPU_CE,
@@ -572,7 +569,7 @@ generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 		IRQ_N		=> VDC1_IRQ_N,
 
 		-- VCE Interface
-		DCK_CE	=> VDC_CLKEN and SGX,
+		DCK_CE	=> VDC_CLKEN,
 		HSYNC_F	=> VCE_HSYNC_F,
 		HSYNC_R	=> VCE_HSYNC_R,
 		VSYNC_F	=> VCE_VSYNC_F,
@@ -584,7 +581,7 @@ generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 		
 		RAM_A		=> VRAM1_ADDR,
 		RAM_DI	=> VRAM1_DI,
-		RAM_DO	=> VRAM1_DATA,
+		RAM_DO	=> VRAM1_DO,
 		RAM_RD	=> VRAM1_READ,
 		RAM_WE	=> VRAM1_WRITE,
 
@@ -595,8 +592,8 @@ generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 	VPC : entity work.huc6202
 	port map(
 		CLK 		=> CLK,
-		CLKEN		=> VDC_CLKEN and SGX,
-		RESET_N	=> RESET_N and SGX,
+		CLKEN		=> VDC_CLKEN,
+		RESET_N	=> RESET_N,
 
 		-- CPU Interface
 		A			=> CPU_A(2 downto 0),
@@ -607,7 +604,7 @@ generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 		HS_F		=> VCE_HSYNC_F,
 		VDC0_IN  => VDC0_COLNO,
 		VDC1_IN  => VDC1_COLNO,
-		VDC_OUT  => VPC_COLNO,
+		VDC_OUT  => VDC_COLNO,
 
 		SGX      => SGX,
 
@@ -617,7 +614,6 @@ generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 	CPU_VDC0_SEL_N <= CPU_VDC_SEL_N or     CPU_A(3) or     CPU_A(4) when SGX = '1' else CPU_VDC_SEL_N;
 	CPU_VDC1_SEL_N <= CPU_VDC_SEL_N or     CPU_A(3) or not CPU_A(4) when SGX = '1' else '1';
 	CPU_VPC_SEL_N  <= CPU_VDC_SEL_N or not CPU_A(3) or     CPU_A(4) when SGX = '1' else '1';
-	VDC_COLNO <= VPC_COLNO when SGX = '1' else VDC0_COLNO;
 	
 	process( CLK )
 	begin

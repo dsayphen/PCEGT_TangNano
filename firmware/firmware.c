@@ -43,6 +43,38 @@ static FATFS fs;
 
 uint8_t io_buf[2048];
 
+// Test table in free RV RAM (SDRAM 0x500000), rechecked every loop to catch read/write corruption.
+#define CANARY_WORDS 256
+#define CANARY_PER_LOOP 16
+static volatile uint32_t *const canary = (volatile uint32_t *)0x100000;
+static uint32_t canary_errors = 0;
+
+static uint32_t canary_pat(uint32_t i) {
+    return 0xA5C3E100u ^ (i * 0x01000193u);
+}
+
+static void canary_init(void) {
+    for (uint32_t i = 0; i < CANARY_WORDS; i++)
+        canary[i] = canary_pat(i);
+}
+
+static void canary_check(void) {
+    static uint32_t next = 0;
+    for (uint32_t n = 0; n < CANARY_PER_LOOP; n++) {
+        uint32_t i = next;
+        next = (next + 1) % CANARY_WORDS;
+        uint32_t got = canary[i];
+        uint32_t exp = canary_pat(i);
+        if (got != exp) {
+            if (canary_errors < 16)
+                uart_printf("canary: t=%d i=%d got=%x exp=%x xor=%x\n",
+                            (int)time_millis(), (int)i, got, exp, got ^ exp);
+            canary_errors++;
+            canary[i] = exp;
+        }
+    }
+}
+
 char current_game_name[NAME_MAX] = "";
 int current_game_populous = 0;
 
@@ -72,6 +104,7 @@ int main(void) {
     uart_printf("sp=%x io_buf=%x fs=%x\n", sp_val, (uint32_t)io_buf, (uint32_t)&fs);
     
     uart_print("\nPCEtang iosys firmware\n");
+    canary_init();
 
     overlay(1);
     clear();
@@ -123,16 +156,36 @@ int main(void) {
                 cd_empty_polls++;
         }
         cd_service();
+        canary_check();
+
+        {
+            // Logged at once so the new mode is on the UART before a freeze can cut it.
+            static uint32_t last_vid = 0xffffffffu;
+            uint32_t cr = reg_vce_cr_dbg();
+            uint32_t px = reg_vid_px_dbg();
+            uint32_t hsw = reg_vid_hsw_dbg();
+            uint32_t hde = reg_vid_hde_dbg();
+            uint32_t vid = (cr & 3) | (px << 2) | (hsw << 12) | (hde << 17);
+            if (vid != last_vid) {
+                uart_printf("vid: t=%d cr=%x px=%d hsw=%d hde=%d vds=%d vdw=%d crwr=%d\n",
+                            (int)time_millis(), (unsigned)cr, (int)px + 1, (int)hsw,
+                            (int)hde, (int)reg_vid_vds_dbg(), (int)reg_vid_vdw_dbg(),
+                            (int)reg_vce_cr_wr());
+                last_vid = vid;
+            }
+        }
 
         loops++;
         if (time_millis() - last_hb >= 1000) {
             last_hb += 1000;
             if (cd_audio_playing) {
-                uart_printf("cd: m=%d e=%d u=%d b=%d r=%d f=%d l=%d\n",
+                uart_printf("cd: m=%d e=%d u=%d b=%d r=%d f=%d l=%d dcc=%d hdw=%d cn=%d\n",
                             cd_min_usedw == 0xffffffffu ? -1 : (int)cd_min_usedw,
                             (int)cd_empty_polls, (int)reg_cd_usedw,
                             (int)cd_audio_bytes_fed, (int)cd_audio_read_ms,
-                            (int)cd_audio_feed_ms, (int)loops);
+                            (int)cd_audio_feed_ms, (int)loops,
+                            (int)reg_vid_dcc_dbg(), (int)reg_vid_hdw_dbg(),
+                            (int)canary_errors);
             } else {
                 uart_printf("alive loops=%d reg=%x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d cd_ev=%x cd_active=%d cd_phase=%x cdda=%d cd_play=%d adpcm=%x rfsh_due=%d\n",
                             (int)loops, reg_joystick, reg_vid_dcc_dbg(),

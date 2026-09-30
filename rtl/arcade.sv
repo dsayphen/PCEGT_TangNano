@@ -34,16 +34,11 @@ module ARCADE_CARD
 );
 
 
-typedef struct packed
-{
-	reg [23:0] base;
-	reg [15:0] offset;
-	reg [15:0] increment;
-	reg  [6:0] control;
-	reg [20:0] addr;
-} port_t;
-
-port_t port[4];
+reg [23:0] port_base [0:3];
+reg [15:0] port_offset [0:3];
+reg [15:0] port_increment [0:3];
+reg  [6:0] port_control [0:3];
+reg [20:0] port_addr [0:3];
 reg [1:0] p;
 
 reg        ena;
@@ -52,7 +47,7 @@ reg  [7:0] shift_bits;
 reg  [7:0] rotate_bits;
 
 assign SEL_N = ~(EN && &A[20:13] && (A[12:8] == 'h1A));
-assign RAM_A = port[p].addr;
+assign RAM_A = port_addr[p];
 
 always_comb begin
 	DO = 8'hFF;
@@ -70,14 +65,14 @@ always_comb begin
 			case(A[3:0])
 				0,1: RAM_CS_N = SEL_N;
 
-				2: DO = port[p].base[7:0];
-				3: DO = port[p].base[15:8];
-				4: DO = port[p].base[23:16];
-				5: DO = port[p].offset[7:0];
-				6: DO = port[p].offset[15:8];
-				7: DO = port[p].increment[7:0];
-				8: DO = port[p].increment[15:8];
-				9: DO = port[p].control;
+				2: DO = port_base[p][7:0];
+				3: DO = port_base[p][15:8];
+				4: DO = port_base[p][23:16];
+				5: DO = port_offset[p][7:0];
+				6: DO = port_offset[p][15:8];
+				7: DO = port_increment[p][7:0];
+				8: DO = port_increment[p][15:8];
+				9: DO = port_control[p];
 				default:;
 			endcase
 		end
@@ -104,7 +99,7 @@ end
 
 always @(posedge CLK) begin
 	for(int i=0; i<4; i++) begin
-		if (RAM_CS_N) port[i].addr <= port[i].base[20:0] + (port[i].control[1] ? {{5{port[i].control[3]}}, port[i].offset} : 21'd0);
+		if (RAM_CS_N) port_addr[i] <= port_base[i][20:0] + (port_control[i][1] ? {{5{port_control[i][3]}}, port_offset[i]} : 21'd0);
 	end
 end
 
@@ -118,10 +113,10 @@ always @(posedge CLK) begin
 
 	if(~RST_N) begin
 		for(int i=0; i<4; i++) begin
-			port[i].base <= 0;
-			port[i].offset <= 0;
-			port[i].increment <= 0;
-			port[i].control <= 0;
+			port_base[i] <= 0;
+			port_offset[i] <= 0;
+			port_increment[i] <= 0;
+			port_control[i] <= 0;
 		end
 		ena <= 0;
 		shift_latch <= 0;
@@ -135,21 +130,21 @@ always @(posedge CLK) begin
 
 				ena <= 1;
 				case(A[3:0])
-					2: port[p].base[7:0] <= DI;
-					3: port[p].base[15:8] <= DI;
-					4: port[p].base[23:16] <= DI;
+					2: port_base[p][7:0] <= DI;
+					3: port_base[p][15:8] <= DI;
+					4: port_base[p][23:16] <= DI;
 					5: begin
-							port[p].offset[7:0] <= DI;
-							if(port[p].control[6:5] == 1) port[p].base <= port[p].base + {{8{port[p].control[3]}}, port[p].offset[15:8], DI};
+							port_offset[p][7:0] <= DI;
+							if(port_control[p][6:5] == 1) port_base[p] <= port_base[p] + {{8{port_control[p][3]}}, port_offset[p][15:8], DI};
 						end
 					6: begin
-							port[p].offset[15:8] <= DI;
-							if(port[p].control[6:5] == 2) port[p].base <= port[p].base + {{8{port[p].control[3]}}, DI, port[p].offset[7:0]};
+							port_offset[p][15:8] <= DI;
+							if(port_control[p][6:5] == 2) port_base[p] <= port_base[p] + {{8{port_control[p][3]}}, DI, port_offset[p][7:0]};
 						end
-					7: port[p].increment[7:0] <= DI;
-					8: port[p].increment[15:8] <= DI;
-					9: port[p].control <= DI[6:0];
-					10: if(port[p].control[6:5] == 3) port[p].base <= port[p].base + {{8{port[p].control[3]}}, port[p].offset};
+					7: port_increment[p][7:0] <= DI;
+					8: port_increment[p][15:8] <= DI;
+					9: port_control[p] <= DI[6:0];
+					10: if(port_control[p][6:5] == 3) port_base[p] <= port_base[p] + {{8{port_control[p][3]}}, port_offset[p]};
 				endcase
 			end
 			else if(&A[6:5]) begin
@@ -172,9 +167,9 @@ always @(posedge CLK) begin
 			end
 		end
 
-		if(~RAM_CS_N & port[p].control[0]) begin
-			if(port[p].control[4]) port[p].base <= port[p].base + port[p].increment;
-			else port[p].offset <= port[p].offset + port[p].increment;
+		if(~RAM_CS_N & port_control[p][0]) begin
+			if(port_control[p][4]) port_base[p] <= port_base[p] + port_increment[p];
+			else port_offset[p] <= port_offset[p] + port_increment[p];
 		end
 	end
 end

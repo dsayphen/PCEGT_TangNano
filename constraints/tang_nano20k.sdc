@@ -39,5 +39,44 @@ set_false_path -from [get_ports {pad_data}]
 set_false_path -from [get_ports {sd_cmd}]
 set_false_path -from [get_ports {sd_dat0}]
 
+// HuC6280 core -> CPU_DI is a multicycle path. The CPU core and its
+// microcode/ALU registers only advance on CPU_CE, while CPU_DI reloads every
+// clk_sys. Keep the actual PicoRV32 memory path single-cycle.
+set_multicycle_path -setup 4 -from [get_pins {u_pce/CORE/CPU/CORE/MCODE/MI.ALUCtrl_0_*/DO[*]}] -to [get_regs {u_pce/CORE/CPU/CPU_DI*}]
+set_multicycle_path -hold 3 -from [get_pins {u_pce/CORE/CPU/CORE/MCODE/MI.ALUCtrl_0_*/DO[*]}] -to [get_regs {u_pce/CORE/CPU/CPU_DI*}]
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/CPU/CORE/MCODE/*}] -to [get_regs {u_pce/CORE/CPU/CPU_DI*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/CPU/CORE/MCODE/*}] -to [get_regs {u_pce/CORE/CPU/CPU_DI*}]
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/CPU/CORE/*}] -to [get_regs {u_pce/CORE/CPU/CPU_DI*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/CPU/CORE/*}] -to [get_regs {u_pce/CORE/CPU/CPU_DI*}]
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/CPU/CORE/AG/*}] -to [get_regs {u_pce/CORE/CPU/CPU_DI*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/CPU/CORE/AG/*}] -to [get_regs {u_pce/CORE/CPU/CPU_DI*}]
+
+// Same CPU_CE argument for the two other CPU-launched endpoints. PSG writes are
+// gated by EN = CPU_CE and CPU_RDY, so they land at the next CPU_CE (>= 6 clk).
+// The Arcade Card registers capture on the rising edge of RD_N/WR_N, which the
+// CPU raises 3 clk after the core advanced, i.e. on the 4th edge: no margin.
+set_multicycle_path -setup 4 -from [get_pins {u_pce/CORE/CPU/CORE/MCODE/MI.ALUCtrl_0_*/DO[*]}] -to [get_regs {u_pce/CORE/CPU/PSG/*}]
+set_multicycle_path -hold 3 -from [get_pins {u_pce/CORE/CPU/CORE/MCODE/MI.ALUCtrl_0_*/DO[*]}] -to [get_regs {u_pce/CORE/CPU/PSG/*}]
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/CPU/CORE/MCODE/*}] -to [get_regs {u_pce/CORE/CPU/PSG/*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/CPU/CORE/MCODE/*}] -to [get_regs {u_pce/CORE/CPU/PSG/*}]
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/CPU/CORE/*}] -to [get_regs {u_pce/CORE/CPU/PSG/*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/CPU/CORE/*}] -to [get_regs {u_pce/CORE/CPU/PSG/*}]
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/CPU/CORE/AG/*}] -to [get_regs {u_pce/CORE/CPU/PSG/*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/CPU/CORE/AG/*}] -to [get_regs {u_pce/CORE/CPU/PSG/*}]
+set_multicycle_path -setup 4 -from [get_pins {u_pce/CORE/CPU/CORE/MCODE/MI.ALUCtrl_0_*/DO[*]}] -to [get_regs {u_pce/CORE/generate_AC.AC/port_*}]
+set_multicycle_path -hold 3 -from [get_pins {u_pce/CORE/CPU/CORE/MCODE/MI.ALUCtrl_0_*/DO[*]}] -to [get_regs {u_pce/CORE/generate_AC.AC/port_*}]
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/CPU/CORE/MCODE/*}] -to [get_regs {u_pce/CORE/generate_AC.AC/port_*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/CPU/CORE/MCODE/*}] -to [get_regs {u_pce/CORE/generate_AC.AC/port_*}]
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/CPU/CORE/*}] -to [get_regs {u_pce/CORE/generate_AC.AC/port_*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/CPU/CORE/*}] -to [get_regs {u_pce/CORE/generate_AC.AC/port_*}]
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/CPU/CORE/AG/*}] -to [get_regs {u_pce/CORE/generate_AC.AC/port_*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/CPU/CORE/AG/*}] -to [get_regs {u_pce/CORE/generate_AC.AC/port_*}]
+
+// RESET_N only changes on reset transitions and the first CPU_CE follows by 6 clk.
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/RESET_N*}] -to [get_regs {u_pce/CORE/CPU/CPU_DI*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/RESET_N*}] -to [get_regs {u_pce/CORE/CPU/CPU_DI*}]
+set_multicycle_path -setup 4 -from [get_regs {u_pce/CORE/RESET_N*}] -to [get_regs {u_pce/CORE/generate_AC.AC/port_*}]
+set_multicycle_path -hold 3 -from [get_regs {u_pce/CORE/RESET_N*}] -to [get_regs {u_pce/CORE/generate_AC.AC/port_*}]
+
 report_timing -setup -max_paths 100 -max_common_paths 1
 report_timing -hold  -max_paths 25 -max_common_paths 1

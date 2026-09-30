@@ -38,6 +38,7 @@ static uint32_t cd_audio_pos = 0;   // byte offset into cd_audio_file
 static uint32_t cd_audio_start = 0;
 static uint32_t cd_audio_end = 0;
 static int      cd_audio_loop = 0;
+static int      cd_audio_priming = 0;
 static FIL      cd_audio_file;
 static int      cd_audio_file_open = 0;
 static int      cd_audio_cur_track = -1;
@@ -451,12 +452,18 @@ void cd_service(void) {
             cd_audio_feed_ms += time_millis() - feed_start;
             cd_audio_pos += br;
             cd_audio_bytes_fed += br;
+            if (cd_audio_priming && reg_cd_usedw >= 3072) {
+                reg_cd_audio_hold = 0;
+                cd_audio_priming = 0;
+            }
         } else {
             uart_printf("cd: audio stopped read=%d pos=%d size=%d\n",
                         (int)read_result, (int)cd_audio_pos,
                         (int)f_size(&cd_audio_file));
             cd_audio_playing = 0;
             cd_audio_paused = 0;
+            cd_audio_priming = 0;
+            reg_cd_audio_hold = 1;
         }
     }
 
@@ -635,6 +642,7 @@ void cd_service(void) {
             cd_audio_playing = 0;
             cd_audio_paused = 0;
             cd_audio_loop = 0;
+            cd_audio_priming = 0;
             reg_cd_audio_hold = 1;
             if (t >= 0 && cd_audio_file_open) {
                 uint32_t ss = cd_track_sector_size[t];
@@ -680,7 +688,8 @@ void cd_service(void) {
                     cd_audio_pos += br;
                 }
             }
-            reg_cd_audio_hold = !cd_audio_playing;
+            cd_audio_priming = cd_audio_playing && reg_cd_usedw < 3072;
+            reg_cd_audio_hold = !cd_audio_playing || cd_audio_priming;
             uart_printf("cd: sapsp fed iter=%d, halffull=%d usedw=%d adpcm=%x\n",
                         iter, (reg_cd_events & 0x20) ? 1 : 0, (int)reg_cd_usedw,
                         (unsigned)reg_cd_adpcm);
@@ -699,7 +708,8 @@ void cd_service(void) {
                                (cd_audio_pos < cd_audio_end ||
                                 (cd_audio_loop && cd_audio_start < cd_audio_end));
             cd_audio_paused = 0;
-            reg_cd_audio_hold = !cd_audio_playing;
+            cd_audio_priming = cd_audio_playing && reg_cd_usedw < 3072;
+            reg_cd_audio_hold = !cd_audio_playing || cd_audio_priming;
             uart_printf("cd: sapep end=%d play=%d\n", (int)end_lba, cd_audio_playing);
         } else if (opcode == 0xda) {
             uart_printf("cd: audio stopped opcode=%x pos=%d\n",
@@ -707,6 +717,7 @@ void cd_service(void) {
             cd_audio_playing = 0;
             cd_audio_paused = 1;
             cd_audio_loop = 0;
+            cd_audio_priming = 0;
             reg_cd_audio_hold = 1;
         }
 
