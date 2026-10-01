@@ -338,6 +338,7 @@ iosys #(
     .cdda_usedw_dbg   (cdda_usedw_dbg),
     .adpcm_dbg        (adpcm_dbg),
     .refresh_gap_dbg  (refresh_gap_dbg),
+    .rv_probe_fault   (rv_probe_fault),
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
@@ -520,6 +521,7 @@ pce_sdram_ctrl_3ch #(
 );
 
 wire [7:0] refresh_gap_dbg;
+wire rv_probe_fault;
 
 // ===========================================================================
 // Core reset
@@ -590,6 +592,10 @@ wire [9:0]  vid_px_dbg;
 
 pce_core #(
     .SGX_SUPPORT (1)
+`ifdef GAO_CAPTURE_NO_CD
+    , .CD_SUPPORT (0)
+    , .AC_SUPPORT (0)
+`endif
 ) u_pce (
     .clk        (clk_sys),
     .reset      (core_reset),
@@ -861,6 +867,7 @@ assign pa_en = ~audio_hdmi;
 //           whole of any ROM transfer.
 // ===========================================================================
 assign led[0] = ~(lock_main & lock_hdmi & sdram_init_done);
-assign led[1] = ~(image_valid & ~loading & ~core_reset);
+assign led[1] = rv_probe_fault ? 1'b1 :
+                ~(image_valid & ~loading & ~core_reset);
 
 endmodule

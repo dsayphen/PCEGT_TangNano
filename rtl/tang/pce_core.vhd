@@ -18,7 +18,9 @@ entity pce_core is
     generic (
         -- 0 = HuCard standard (un seul VDC, fonctionnel sur ce device)
 		-- 1 = SuperGrafx (second VDC + VRAM doublée)
-        SGX_SUPPORT : integer := 1
+		SGX_SUPPORT : integer := 1;
+		CD_SUPPORT  : integer := 1;
+		AC_SUPPORT  : integer := 1
 	);
 
 	port (
@@ -175,8 +177,8 @@ begin
 		PSG_O_WIDTH      => 20,
 		MAX_SPRITES      => 16,
 		USE_INTERNAL_RAM => 1,
-		CD_SUPPORT       => 1,
-		AC_SUPPORT       => 1
+		CD_SUPPORT       => CD_SUPPORT,
+		AC_SUPPORT       => AC_SUPPORT
 	)
 	port map (
 		RESET       => reset,

@@ -15,6 +15,11 @@
 #define reg_joystick     (*(volatile uint32_t*)0x02000040)
 #define reg_time         (*(volatile uint32_t*)0x02000050)
 #define reg_core_id      (*(volatile uint32_t*)0x02000060)
+#define reg_probe_addr   (*(volatile uint32_t*)0x020000d0)
+#define reg_probe_expect (*(volatile uint32_t*)0x020000d4)
+#define reg_probe_status (*(volatile uint32_t*)0x020000d8)
+#define reg_probe_data   (*(volatile uint32_t*)0x020000dc)
+#define reg_probe_fault_addr (*(volatile uint32_t*)0x020000e0)
 
 static volatile uint32_t scratch[4];
 
@@ -32,11 +37,23 @@ int main(void) {
         volatile uint8_t *b = (volatile uint8_t *)&scratch[2];
         b[0] = 0x11; b[1] = 0x22; b[2] = 0x33; b[3] = 0x44;
     }
-    mark((scratch[0] == 0x12345678u && scratch[1] == 0xdeadbeefu &&
-          scratch[2] == 0x44332211u) ? 'A' : 'E');
+    {
+        int ok = scratch[0] == 0x12345678u && scratch[1] == 0xdeadbeefu &&
+                 scratch[2] == 0x44332211u;
+        reg_probe_addr = (uint32_t)&scratch[0];
+        reg_probe_expect = 0x12345678u;
+        ok &= scratch[0] == 0x12345678u && reg_probe_status == 2;
+        reg_probe_expect = 0xdeadbeefu;
+        (void)scratch[0];
+        ok &= reg_probe_status == 3 && reg_probe_data == 0x12345678u &&
+              reg_probe_fault_addr == (uint32_t)&scratch[0];
+        reg_probe_expect = 0x12345678u;
+        ok &= scratch[0] == 0x12345678u && reg_probe_status == 2;
+        mark(ok ? 'A' : 'E');
+    }
 
     // 2. core id register
-    mark(reg_core_id == 3 ? 'B' : 'E');
+    mark((reg_core_id & 0xffffu) == 0x8003u ? 'B' : 'E');
 
     // 3. joypad register
     mark((reg_joystick & 0xfff) == 0x0a5 ? 'C' : 'E');

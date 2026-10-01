@@ -40,6 +40,7 @@
 #include "cd.h"
 
 static FATFS fs;
+static volatile uint32_t rv_probe_word = 0x01402483u;
 
 uint8_t io_buf[2048];
 
@@ -72,6 +73,11 @@ int main(void) {
     uart_printf("sp=%x io_buf=%x fs=%x\n", sp_val, (uint32_t)io_buf, (uint32_t)&fs);
     
     uart_print("\nPCEtang iosys firmware\n");
+    int probe_supported = (reg_core_id & 0x8000u) != 0;
+    if (probe_supported) {
+        reg_probe_addr = (uint32_t)&rv_probe_word;
+        reg_probe_expect = 0x01402483u;
+    }
 
     overlay(1);
     clear();
@@ -109,8 +115,15 @@ int main(void) {
     uint32_t last_raw = 0xffffffff;
     uint32_t cd_min_usedw = 0xffffffffu;
     uint32_t cd_empty_polls = 0;
+    int probe_reported = 0;
+    uint32_t last_probe = last_hb;
+    uint32_t probe_value = rv_probe_word;
 
     for (;;) {
+        if (probe_supported && time_millis() - last_probe >= 10) {
+            last_probe += 10;
+            probe_value = rv_probe_word;
+        }
         uint32_t raw = joy_raw();
         uint32_t e = joy_edge();
         static uint32_t loops = 0;
@@ -127,6 +140,12 @@ int main(void) {
         loops++;
         if (time_millis() - last_hb >= 1000) {
             last_hb += 1000;
+            if (probe_supported && !probe_reported && (reg_probe_status & 1u)) {
+                uart_printf("RV FAULT addr=%x got=%x want=01402483 last=%x\n",
+                            (unsigned)reg_probe_fault_addr, (unsigned)reg_probe_data,
+                            (unsigned)probe_value);
+                probe_reported = 1;
+            }
             if (cd_audio_playing) {
                 uart_printf("cd: m=%d e=%d u=%d b=%d r=%d f=%d l=%d\n",
                             cd_min_usedw == 0xffffffffu ? -1 : (int)cd_min_usedw,

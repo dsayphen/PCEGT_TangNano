@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE gowin-fpga-project>
+<Project>
+    <Template>FPGA</Template>
+    <Version>5</Version>
+    <Device name="GW2AR-18C" pn="GW2AR-LV18QN88C8/I7">gw2ar18c-000</Device>
+    <FileList>
+        <File path="rtl/arcade.sv" type="file.verilog" enable="1"/>
+        <File path="rtl/cheatcodes.sv" type="file.verilog" enable="1"/>
+        <File path="rtl/color_mix.sv" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/audio_tone.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/audio_sampler_48k.sv" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/dvi_tx.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/hdmi_audio_packetizer.sv" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/i2s_tx.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/font_rom.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/iosys.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/picorv32.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/simplespimaster.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/simpleuart.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/spi_master.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/spiflash.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/iosys/textdisp.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/pce_pad.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/pce_sdram_ctrl_3ch.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/pll_clocks.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/rom_loader.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/rom_source_arb.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/snes_gamepad.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/tmds_encoder.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/uart_rx.v" type="file.verilog" enable="1"/>
+        <File path="rtl/tang/video_scandoubler.v" type="file.verilog" enable="1"/>
+        <File path="tools/gao/top_diag.v" type="file.verilog" enable="1"/>
+        <File path="src/gowin_dp/gowin_dpb_line.v" type="file.verilog" enable="1"/>
+        <File path="src/gowin_dp/gowin_dpb_sat.v" type="file.verilog" enable="1"/>
+        <File path="rtl/HUC6280/AddSubBCD.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/HUC6280/HUC6280.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/HUC6280/HUC6280_AG.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/HUC6280/HUC6280_ALU.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/HUC6280/HUC6280_CPU.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/HUC6280/HUC6280_MC.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/HUC6280/HUC6280_PKG.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/HUC6280/psg.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/HUC6280/psg_mixer.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/dpram.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/dpram_ip.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/dpram_ip_9x10.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/CEGen.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/cd/cd.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/cd/SCSI.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/cd/SCSI_FIFO.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/cd/MSM5205.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/cd/CDDA_FIFO.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/huc6202.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/huc6260.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/huc6270.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/mem_init_pkg.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/pce_top_extram.vhd" type="file.vhdl" enable="1"/>
+        <File path="rtl/tang/pce_core.vhd" type="file.vhdl" enable="1"/>
+        <File path="constraints/tang_nano20k.cst" type="file.cst" enable="1"/>
+        <File path="constraints/tang_nano20k.sdc" type="file.sdc" enable="1"/>
+        <File path="tools/gao/rv_capture.rao" type="file.gao" enable="1"/>
+    </FileList>
+</Project>

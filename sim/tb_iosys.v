@@ -553,4 +553,71 @@ initial begin
     $finish;
 end
 
+task probe_write;
+    input [31:0] addr;
+    input [31:0] data;
+    begin
+        @(negedge clk);
+        force dut.mem_valid = 1'b1;
+        force dut.mem_addr = addr;
+        force dut.mem_wdata = data;
+        force dut.mem_wstrb = 4'hf;
+        @(negedge clk);
+        release dut.mem_valid;
+        release dut.mem_addr;
+        release dut.mem_wdata;
+        release dut.mem_wstrb;
+    end
+endtask
+
+initial if ($test$plusargs("probe_only")) begin
+    wait (resetn);
+    repeat (2) @(negedge clk);
+    force dut.mem_valid = 1'b1;
+    force dut.mem_addr = 32'h02000060;
+    force dut.mem_wstrb = 4'h0;
+    @(negedge clk);
+    if (dut.mem_ready !== 1'b1 || dut.mem_rdata[15:0] !== 16'h8003)
+        errors = errors + 1;
+    release dut.mem_valid;
+    release dut.mem_addr;
+    release dut.mem_wstrb;
+    probe_write(32'h020000d0, 32'h00000100);
+    probe_write(32'h020000d4, 32'h01402483);
+
+    force dut.mem_valid = 1'b1;
+    force dut.mem_addr = 32'h00000100;
+    force dut.mem_wstrb = 4'h0;
+    force dut.rv_ready = 1'b1;
+    force dut.rv_rdata = 32'h01402483;
+    repeat (2) @(negedge clk);
+    if (dut.rv_probe_fault !== 1'b0 || dut.probe_enabled !== 1'b1)
+        errors = errors + 1;
+
+    force dut.rv_rdata = 32'h33cccc33;
+    @(negedge clk);
+    if (dut.rv_probe_fault !== 1'b1 || dut.probe_bad_data !== 32'h33cccc33 ||
+        dut.probe_bad_addr !== 21'h100)
+        errors = errors + 1;
+    force dut.rv_rdata = 32'hcc3333cc;
+    @(negedge clk);
+    if (dut.probe_bad_data !== 32'h33cccc33)
+        errors = errors + 1;
+
+    release dut.rv_ready;
+    release dut.rv_rdata;
+    release dut.mem_valid;
+    release dut.mem_addr;
+    release dut.mem_wstrb;
+    probe_write(32'h020000d4, 32'h01402483);
+    if (dut.rv_probe_fault !== 1'b0)
+        errors = errors + 1;
+
+    if (errors == 0)
+        $display("*** RV_PROBE PASSED ***");
+    else
+        $display("*** RV_PROBE FAILED with %0d error(s) ***", errors);
+    $finish;
+end
+
 endmodule

@@ -21,6 +21,11 @@
 
 module tb_sprite_stream;
 
+parameter integer DQ_HOLD_CYCLES = 3;
+parameter real DQ_OUTPUT_DELAY_NS = 0.0;
+parameter real DQ_VALID_NS = 0.0;
+parameter integer CHECK_TIMING = 0;
+
 reg clk = 0;
 reg clk_mem = 0;
 reg clk_sdram = 0;
@@ -51,6 +56,9 @@ reg         rv_valid = 1'b0;
 wire        rv_ready;
 reg  [22:0] rv_addr  = 23'd0;
 wire [31:0] rv_rdata;
+reg         rom_rd = 1'b0;
+reg  [21:0] rom_a = 22'd0;
+wire        rom_rdy;
 
 reg         refresh_window = 1'b0;
 reg         clkref = 1'b0;
@@ -83,11 +91,11 @@ pce_sdram_ctrl_3ch #(.FREQ(86_400_000)) mem (
     .ld_idle       (),
     .ld_active     (1'b0),
 
-    .rom_rd        (1'b0),
-    .rom_a         (22'd0),
+    .rom_rd        (rom_rd),
+    .rom_a         (rom_a),
     .rom_offset    (23'd0),
     .rom_do        (),
-    .rom_rdy       (),
+    .rom_rdy       (rom_rdy),
 
     .vram_addr     (vram_addr),
     .vram_din      (16'd0),
@@ -111,7 +119,12 @@ pce_sdram_ctrl_3ch #(.FREQ(86_400_000)) mem (
     .init_done     (sdram_init_done)
 );
 
-sdram_model sd (
+sdram_model #(
+    .DQ_HOLD_CYCLES(DQ_HOLD_CYCLES),
+    .DQ_OUTPUT_DELAY_NS(DQ_OUTPUT_DELAY_NS),
+    .DQ_VALID_NS(DQ_VALID_NS),
+    .CHECK_TIMING(CHECK_TIMING)
+) sd (
     .DQ   (IO_sdram_dq),
     .A    (O_sdram_addr),
     .BA   (O_sdram_ba),
@@ -169,14 +182,23 @@ initial begin
 end
 
 integer errors = 0;
+integer rv_errors = 0;
+integer rv_checks = 0;
+integer host_reads = 0;
 integer p;
 reg [15:0] a;
 reg [31:0] word32;
+reg [22:0] rv_test_addr;
+reg [31:0] rv_expected;
+integer rv_timeout;
 integer urgent_refreshes = 0;
 integer normal_refreshes = 0;
 time last_urgent_refresh = 0;
 
 always @(posedge clk_mem) begin
+    if (mem.memory.cycle == 3'd5 && mem.memory.active[0] &&
+        !mem.memory.we_latch[0])
+        host_reads = host_reads + 1;
     if (mem.memory.cycle == 3'd1 && mem.memory.refresh_now) begin
         if (mem.memory.refresh_urgent) begin
             urgent_refreshes = urgent_refreshes + 1;
@@ -214,6 +236,33 @@ task preload_all1;
     end
 endtask
 
+task check_rv_read;
+    input [22:0] addr;
+    input [31:0] expected;
+    begin
+        @(negedge clk);
+        rv_addr = addr;
+        rv_valid = 1'b1;
+        rv_timeout = 0;
+        while (rv_ready !== 1'b1 && rv_timeout < 200) begin
+            @(negedge clk);
+            rv_timeout = rv_timeout + 1;
+            clkref = (rv_timeout % 7 == 1);
+        end
+        clkref = 1'b0;
+        if (rv_timeout == 200 || rv_rdata !== expected) begin
+            $display("FAIL RV: addr=%h data=%h expected=%h timeout=%0d DQ=%h state=%0d req=%b ack=%b pending1=%b",
+                     addr, rv_rdata, expected, rv_timeout, IO_sdram_dq,
+                     mem.rv_state, mem.rv_mem_req, mem.rv_mem_ack,
+                     mem.memory.vram1_req != mem.memory.vram1_ack);
+            errors = errors + 1;
+            rv_errors = rv_errors + 1;
+        end
+        rv_valid = 1'b0;
+        @(negedge clk);
+    end
+endtask
+
 // ===========================================================================
 // Background contention: occasional refresh windows and channel-1 (PicoRV32)
 // traffic running concurrently with the VRAM0 sprite stream, exactly the
@@ -228,10 +277,20 @@ initial begin
         @(posedge clk);
         if (bg_run && bg_rv && !rv_valid && ($random % 5 == 0)) begin
             rv_valid <= 1'b1;
-            rv_addr  <= {$random} % 23'h100;
+            rv_addr  <= ($test$plusargs("rv_probe") ? 23'h400000 : 23'd0) |
+                        ({$random} % 23'h100);
         end
-        if (rv_valid && rv_ready)
+        if (rv_valid && rv_ready) begin
+            rv_checks = rv_checks + 1;
+            if (rv_rdata !== sd.mem[rv_addr[22:2]]) begin
+                if (rv_errors < 8)
+                    $display("FAIL RV stream: addr=%h got=%h expected=%h",
+                             rv_addr, rv_rdata, sd.mem[rv_addr[22:2]]);
+                rv_errors = rv_errors + 1;
+                errors = errors + 1;
+            end
             rv_valid <= 1'b0;
+        end
     end
 end
 
@@ -333,6 +392,7 @@ task stream_blanked_lines;
     integer line_index;
     integer dot_index;
     integer word_index;
+    reg slot_reads;
     integer errors_before;
     integer urgent_before;
     integer normal_before;
@@ -344,8 +404,16 @@ task stream_blanked_lines;
             for (dot_index = 0; dot_index < 455; dot_index = dot_index + 1) begin
                 @(negedge clk);
                 word_index = (line_index * 360 + dot_index) % (NUM_TILES * 4);
-                vram_rd <= dot_index < 360;
-                vram_addr <= word_index * 64;
+                slot_reads = !$test$plusargs("rv_probe_vm01") &&
+                             !$test$plusargs("rv_probe_vm00") ||
+                             ($test$plusargs("rv_probe_vm01") && (dot_index % 2 != 0)) ||
+                             ($test$plusargs("rv_probe_vm00") && (dot_index % 8 != 3));
+                vram_rd <= dot_index < 360 && slot_reads;
+                vram_addr <= slot_reads ? word_index * 64 : 16'd0;
+                if ($test$plusargs("rv_probe_rom")) begin
+                    rom_rd <= dot_index < 360;
+                    rom_a <= word_index * 64;
+                end
                 if ($test$plusargs("blanked_both")) begin
                     vram1_rd <= dot_index < 360;
                     vram1_addr <= word_index * 64;
@@ -355,7 +423,8 @@ task stream_blanked_lines;
                 @(negedge clk);
                 clkref <= 1'b0;
                 repeat (5) @(posedge clk);
-                if (dot_index < 360 && vram_dout !== expect_word[word_index])
+                if (dot_index < 360 && slot_reads &&
+                    vram_dout !== expect_word[word_index])
                     errors = errors + 1;
                 if ($test$plusargs("blanked_both") && dot_index < 360 &&
                     vram1_dout !== expect_word1[word_index])
@@ -367,6 +436,7 @@ task stream_blanked_lines;
                  normal_refreshes - normal_before, mem.memory.refresh_gap_max);
         vram_rd <= 1'b0;
         vram1_rd <= 1'b0;
+        rom_rd <= 1'b0;
     end
 endtask
 
@@ -381,6 +451,33 @@ initial begin
 
     preload_all;
     repeat (5) @(posedge clk);
+    for (p = 0; p < 64; p = p + 1)
+        sd.mem[p] = 32'h01402483 ^ (p * 32'h01010101);
+    for (p = 0; p < 64; p = p + 1)
+        sd.mem[21'h100000 + p] = 32'h01402483 ^ (p * 32'h01010101);
+
+    rv_test_addr = 23'h400040;
+    rv_expected = 32'h01402483;
+    sd.mem[rv_test_addr[22:2]] = rv_expected;
+    check_rv_read(rv_test_addr, rv_expected);
+
+    if ($test$plusargs("rv_probe")) begin
+        host_reads = 0;
+        preload_all1;
+        bg_run = 1'b1;
+        bg_rv = 1'b1;
+        stream_blanked_lines;
+        bg_run = 1'b0;
+        repeat (25) @(posedge clk);
+        if (rv_errors == 0 && rv_checks >= 20 && sd.ac_timing_errors == 0 &&
+            (!$test$plusargs("rv_probe_rom") || host_reads > 20))
+            $display("PASS RV probe: %0d reads checked, host reads=%0d, AC violations=%0d",
+                     rv_checks, host_reads, sd.ac_timing_errors);
+        else
+            $display("FAIL RV probe: %0d mismatches in %0d reads, host reads=%0d, AC violations=%0d",
+                     rv_errors, rv_checks, host_reads, sd.ac_timing_errors);
+        $finish;
+    end
 
     if ($test$plusargs("blanked")) begin
         if ($test$plusargs("blanked_both")) begin

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GAO_CONFIG>
+    <Version>3.0</Version>
+    <Mode>Standard</Mode>
+    <AoCore index="0" sample_clock="clk_mem" trig_type="0" storage_depth="8" window_num="1" capture_amount="8" implementation="0" trigger_pos="5" module_name="top_tang_nano20k" force_trigger_by_falling_edge="false">
+        <SignalList>
+            <Signal>u_mem/memory/rv_ack</Signal>
+            <Bus name="cycle[2:0]">
+                <Signal>u_mem/memory/cycle[2]</Signal>
+                <Signal>u_mem/memory/cycle[1]</Signal>
+                <Signal>u_mem/memory/cycle[0]</Signal>
+            </Bus>
+            <Bus name="cmd[3:0]">
+                <Signal>u_mem/memory/cmd[3]</Signal>
+                <Signal>u_mem/memory/cmd[2]</Signal>
+                <Signal>u_mem/memory/cmd[1]</Signal>
+                <Signal>u_mem/memory/cmd[0]</Signal>
+            </Bus>
+            <Bus name="SDRAM_BA[1:0]">
+                <Signal>u_mem/memory/SDRAM_BA[1]</Signal>
+                <Signal>u_mem/memory/SDRAM_BA[0]</Signal>
+            </Bus>
+            <Bus name="dq_in[15:0]">
+                <Signal>u_mem/memory/dq_in[15]</Signal>
+                <Signal>u_mem/memory/dq_in[14]</Signal>
+                <Signal>u_mem/memory/dq_in[13]</Signal>
+                <Signal>u_mem/memory/dq_in[12]</Signal>
+                <Signal>u_mem/memory/dq_in[11]</Signal>
+                <Signal>u_mem/memory/dq_in[10]</Signal>
+                <Signal>u_mem/memory/dq_in[9]</Signal>
+                <Signal>u_mem/memory/dq_in[8]</Signal>
+                <Signal>u_mem/memory/dq_in[7]</Signal>
+                <Signal>u_mem/memory/dq_in[6]</Signal>
+                <Signal>u_mem/memory/dq_in[5]</Signal>
+                <Signal>u_mem/memory/dq_in[4]</Signal>
+                <Signal>u_mem/memory/dq_in[3]</Signal>
+                <Signal>u_mem/memory/dq_in[2]</Signal>
+                <Signal>u_mem/memory/dq_in[1]</Signal>
+                <Signal>u_mem/memory/dq_in[0]</Signal>
+            </Bus>
+        </SignalList>
+        <Triggers>
+            <Trigger index="0"><SignalList><Signal>u_mem/memory/rv_ack</Signal></SignalList></Trigger>
+            <Trigger index="1">
+                <SignalList>
+                    <Signal>u_mem/memory/rv_dout[15]</Signal>
+                    <Signal>u_mem/memory/rv_dout[14]</Signal>
+                    <Signal>u_mem/memory/rv_dout[13]</Signal>
+                    <Signal>u_mem/memory/rv_dout[12]</Signal>
+                    <Signal>u_mem/memory/rv_dout[11]</Signal>
+                    <Signal>u_mem/memory/rv_dout[10]</Signal>
+                    <Signal>u_mem/memory/rv_dout[9]</Signal>
+                    <Signal>u_mem/memory/rv_dout[8]</Signal>
+                    <Signal>u_mem/memory/rv_dout[7]</Signal>
+                    <Signal>u_mem/memory/rv_dout[6]</Signal>
+                    <Signal>u_mem/memory/rv_dout[5]</Signal>
+                    <Signal>u_mem/memory/rv_dout[4]</Signal>
+                    <Signal>u_mem/memory/rv_dout[3]</Signal>
+                    <Signal>u_mem/memory/rv_dout[2]</Signal>
+                    <Signal>u_mem/memory/rv_dout[1]</Signal>
+                    <Signal>u_mem/memory/rv_dout[0]</Signal>
+                </SignalList>
+            </Trigger>
+            <Trigger index="2"/>
+            <Trigger index="3"/>
+            <Trigger index="4"/>
+            <Trigger index="5"/>
+            <Trigger index="6"/>
+            <Trigger index="7"/>
+            <Trigger index="8"/>
+            <Trigger index="9"/>
+            <Trigger index="10"/>
+            <Trigger index="11"/>
+            <Trigger index="12"/>
+            <Trigger index="13"/>
+            <Trigger index="14"/>
+            <Trigger index="15"/>
+        </Triggers>
+        <MatchUnits>
+            <MatchUnit index="0" enabled="1" match_type="1" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="R" value1="0" trigger="0"/>
+            <MatchUnit index="1" enabled="1" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="1100110000110011" value1="" trigger="1"/>
+        </MatchUnits>
+        <Expressions type="Static"><Expression>M0&amp;M1</Expression></Expressions>
+    </AoCore>
+    <GAO_ID>0101001001010110</GAO_ID>
+</GAO_CONFIG>

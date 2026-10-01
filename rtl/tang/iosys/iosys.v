@@ -141,6 +141,7 @@ module iosys #(
     // Maximum number of pending SDRAM refreshes since reset.
     // Piggybacked onto reg_cd_adpcm bits 15:8, no new address decode.
     input  wire [7:0]  refresh_gap_dbg,
+    output wire        rv_probe_fault,
 
     // ---- read-only debug: VCE dot clock select (VIDEO_DCC), see huc6260;
     // piggybacked onto reg_core_id's unused bits 17:16, no new address decode
@@ -332,6 +333,11 @@ wire game_ctrl_sel = mem_valid && (mem_addr == 32'h0200_004c);
 wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
 wire pad_mode_sel  = mem_valid && (mem_addr == 32'h0200_0058);
 wire color_mode_sel= mem_valid && (mem_addr == 32'h0200_005c);
+wire probe_addr_sel = mem_valid && (mem_addr == 32'h0200_00d0);
+wire probe_expect_sel = mem_valid && (mem_addr == 32'h0200_00d4);
+wire probe_status_sel = mem_valid && (mem_addr == 32'h0200_00d8);
+wire probe_data_sel = mem_valid && (mem_addr == 32'h0200_00dc);
+wire probe_fault_addr_sel = mem_valid && (mem_addr == 32'h0200_00e0);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 wire audio_sel     = mem_valid && (mem_addr == 32'h0200_0064);
 wire cd_event_sel  = mem_valid && (mem_addr == 32'h0200_0070);
@@ -365,6 +371,42 @@ wire [31:0] spi_do;
 wire        spi_wait;
 
 reg  [31:0] time_reg;
+reg  [20:0] probe_addr;
+reg  [31:0] probe_expected;
+reg         probe_enabled;
+reg         probe_fault;
+reg  [31:0] probe_bad_data;
+reg  [20:0] probe_bad_addr;
+assign rv_probe_fault = probe_fault;
+
+always @(posedge clk) begin
+    if (!resetn) begin
+        probe_addr <= 21'd0;
+        probe_expected <= 32'd0;
+        probe_enabled <= 1'b0;
+        probe_fault <= 1'b0;
+        probe_bad_data <= 32'd0;
+        probe_bad_addr <= 21'd0;
+    end else begin
+        if (probe_addr_sel && |mem_wstrb) begin
+            probe_addr <= mem_wdata[20:0];
+            probe_enabled <= 1'b0;
+            probe_fault <= 1'b0;
+        end
+        if (probe_expect_sel && |mem_wstrb) begin
+            probe_expected <= mem_wdata;
+            probe_enabled <= 1'b1;
+            probe_fault <= 1'b0;
+        end
+        if (probe_enabled && !probe_fault && ram_sel && rv_ready &&
+            mem_wstrb == 4'b0000 && mem_addr[20:0] == probe_addr &&
+            rv_rdata !== probe_expected) begin
+            probe_fault <= 1'b1;
+            probe_bad_data <= rv_rdata;
+            probe_bad_addr <= mem_addr[20:0];
+        end
+    end
+end
 
 // The VDC / VCE / scandoubler debug taps sit at the far end of the die, and
 // mem_rdata already feeds the softcore's register file through a long
@@ -444,6 +486,8 @@ assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    cd_hold_sel ||
                    (cd_audio_word_sel && cd_audio_count == 0) ||
                    cheat_ctrl_sel || cheat_addr_sel || cheat_value_sel || cheat_push_sel ||
+                   probe_addr_sel || probe_expect_sel || probe_status_sel ||
+                   probe_data_sel || probe_fault_addr_sel ||
                    (rl_data_sel && rl_data_ready) ||
                    (uart_dat_sel && !uart_dat_wait) ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
@@ -457,7 +501,12 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    time_sel     ? time_reg :
                    pad_mode_sel ? {6'd0, vce_cr_q, vcr_q, vdw_q, pad_mode} :
                    color_mode_sel ? {6'd0, vds_q, vsw_q, hde_q, hsw_q, color_mode} :
-                   id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
+                   id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, (CORE_ID | 16'h8000)} :
+                   probe_addr_sel ? {11'b0, probe_addr} :
+                   probe_expect_sel ? probe_expected :
+                   probe_status_sel ? {30'b0, probe_enabled, probe_fault} :
+                   probe_data_sel ? probe_bad_data :
+                   probe_fault_addr_sel ? {11'b0, probe_bad_addr} :
                    audio_sel    ? {19'b0, audio_hdmi, audio_treble, audio_bass, audio_volume} :
                    cd_event_sel ? {24'b0, cd_events} :
                    cd_cmd0_sel ? cd_comm_reg[31:0] :

@@ -60,6 +60,11 @@
 #define reg_cheat_addr     (*(volatile uint32_t*)0x020000c4)
 #define reg_cheat_value    (*(volatile uint32_t*)0x020000c8)
 #define reg_cheat_push     (*(volatile uint32_t*)0x020000cc)
+#define reg_probe_addr     (*(volatile uint32_t*)0x020000d0)
+#define reg_probe_expect   (*(volatile uint32_t*)0x020000d4)
+#define reg_probe_status   (*(volatile uint32_t*)0x020000d8)
+#define reg_probe_data     (*(volatile uint32_t*)0x020000dc)
+#define reg_probe_fault_addr (*(volatile uint32_t*)0x020000e0)
 
 // VCE dot clock select (VIDEO_DCC), debug only: piggybacked onto reg_core_id
 // bits 17:16 (see iosys.v) instead of its own address decode.

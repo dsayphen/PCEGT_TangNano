@@ -10,7 +10,14 @@
 // scheduler and its new 32 bit masked write, not the SDRAM AC timing (which is
 // unchanged and already proven on hardware).
 //
-module sdram_model (
+module sdram_model #(
+    parameter integer DQ_HOLD_CYCLES = 3,
+    parameter real DQ_OUTPUT_DELAY_NS = 0.0,
+    parameter real DQ_VALID_NS = 0.0,
+    parameter integer CHECK_TIMING = 0,
+    parameter integer MIN_RCD_CYCLES = 2,
+    parameter integer MIN_RC_CYCLES = 6
+) (
     inout  wire [31:0] DQ,
     input  wire [10:0] A,
     input  wire [1:0]  BA,
@@ -26,6 +33,9 @@ module sdram_model (
 
 reg [31:0] mem [0:2097151];       // 2 M words
 reg [10:0] row [0:3];
+integer last_act [0:3];
+integer model_cycle = 0;
+integer ac_timing_errors = 0;
 
 reg [31:0] dq_data;
 reg [3:0]  dq_hold;
@@ -48,6 +58,8 @@ initial begin
         mem[i] = 32'h0000_0000;
     for (i = 0; i < 4; i = i + 1)
         row[i] = 11'd0;
+    for (i = 0; i < 4; i = i + 1)
+        last_act[i] = -1000;
     dq_hold = 0;
     dq_data = 0;
     rd_v1   = 0;
@@ -55,6 +67,7 @@ initial begin
 end
 
 always @(negedge clk) begin
+    model_cycle = model_cycle + 1;
     rd_v1 <= 1'b0;
 
     if (dq_hold != 0)
@@ -62,14 +75,35 @@ always @(negedge clk) begin
 
     if (!nCS) begin
         case (cmd)
-            CMD_ACTIVATE: row[BA] <= A;
+            CMD_ACTIVATE: begin
+                if (CHECK_TIMING && model_cycle - last_act[BA] < MIN_RC_CYCLES) begin
+                    if (ac_timing_errors < 8)
+                        $display("SDRAM tRC bank=%0d gap=%0d cycle=%0d",
+                                 BA, model_cycle - last_act[BA], model_cycle);
+                    ac_timing_errors = ac_timing_errors + 1;
+                end
+                last_act[BA] = model_cycle;
+                row[BA] <= A;
+            end
             CMD_WRITE: begin
+                if (CHECK_TIMING && model_cycle - last_act[BA] < MIN_RCD_CYCLES) begin
+                    if (ac_timing_errors < 8)
+                        $display("SDRAM tRCD write bank=%0d gap=%0d cycle=%0d",
+                                 BA, model_cycle - last_act[BA], model_cycle);
+                    ac_timing_errors = ac_timing_errors + 1;
+                end
                 if (!DQM[0]) mem[full_addr][7:0]   <= DQ[7:0];
                 if (!DQM[1]) mem[full_addr][15:8]  <= DQ[15:8];
                 if (!DQM[2]) mem[full_addr][23:16] <= DQ[23:16];
                 if (!DQM[3]) mem[full_addr][31:24] <= DQ[31:24];
             end
             CMD_READ: begin
+                if (CHECK_TIMING && model_cycle - last_act[BA] < MIN_RCD_CYCLES) begin
+                    if (ac_timing_errors < 8)
+                        $display("SDRAM tRCD read bank=%0d gap=%0d cycle=%0d",
+                                 BA, model_cycle - last_act[BA], model_cycle);
+                    ac_timing_errors = ac_timing_errors + 1;
+                end
                 rd_v1 <= 1'b1;
                 rd_a1 <= full_addr;
             end
@@ -82,8 +116,10 @@ always @(negedge clk) begin
     rd_v2 <= rd_v1;
     rd_a2 <= rd_a1;
     if (rd_v2) begin
-        dq_data <= mem[rd_a2];
-        dq_hold <= 4'd3;
+        dq_data <= #(DQ_OUTPUT_DELAY_NS) mem[rd_a2];
+        dq_hold <= #(DQ_OUTPUT_DELAY_NS) DQ_HOLD_CYCLES;
+        if (DQ_VALID_NS > 0.0)
+            dq_hold <= #(DQ_OUTPUT_DELAY_NS + DQ_VALID_NS) 4'd0;
     end
 end
 
