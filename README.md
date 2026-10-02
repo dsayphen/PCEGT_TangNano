@@ -249,8 +249,9 @@ writes, and address/bank mapping compatibility is game-dependent. Switching
 games and returning to the browser clears hardware codes; a warm reset of the
 same game keeps them.
 
-The Tang build synthesizes `16,917` LUT+ALU resources of `20,736`, `404` SSRAM
-and `43/46` BSRAM in Gowin V1.9.12.03. The protocol simulation
+The standard Tang synthesis report (Gowin V1.9.11.03) reports `14,170` LUT,
+`2,939` ALU, `438` SSRAM cells and `43/46` BSRAM blocks. Resource occupancy
+and the main consumers are summarized in section 6. The protocol simulation
 `sim/tb_cheat_protocol.sv` covers clear, two patch transfers, matching-address
 replacement and enable polarity. SD-card parsing and game/address compatibility
 still require on-board validation; no claim is made that arbitrary codes work
@@ -327,7 +328,8 @@ track selection, repeat, pause, GET SUBQ and register-controlled CDDA/ADPCM
 fade. The ADPCM nibble RAM is in SDRAM, not block RAM. CDDA and data playback
 have been exercised on hardware; the newly connected ADPCM memory path passed
 focused SDRAM simulation and Gowin place-and-route but still needs an audible
-on-board test. The GW2AR-18 build currently uses all 46 available BSRAM blocks.
+on-board test. The standard Gowin synthesis report uses 43 of the 46 available
+BSRAM blocks.
 
 ### Clocks
 
@@ -342,37 +344,47 @@ on-board test. The GW2AR-18 build currently uses all 46 available BSRAM blocks.
 
 ---
 
-## 6. Memory map
+## 6. Consequences
 
-The HuCard ROM, PicoRV32 RAM, CD scratch/ADPCM RAM and both VDC VRAMs share the
-on-package SDRAM through three fixed interleaved channels. VDC1 shares the
-bank-2 channel with the firmware and CD memories.
+The following figures come from the standard Gowin V1.9.11.03 synthesis report
+for the GW2AR-18. The device has a shared pool of `20,736` logic resources;
+Gowin reports `19,834` used (`95.6%`), leaving `902` (`4.4%`). LUT and ALU
+counts are shown separately, but the report does not give independent device
+limits or remaining counts for either resource.
 
-| What | Where | Size |
-| --- | --- | --- |
-| HuCard ROM | SDRAM, byte address 0 (+512 if the image has a header) | ≤ 4 MiB |
-| Arcade Card RAM (CD mode only) | SDRAM bank 1, `0x200000..0x3FFFFF` | 2 MiB |
-| Work RAM | block RAM inside `pce_top` (`USE_INTERNAL_RAM = 1`) | 8 KiB |
-| PicoRV32 firmware/data | SDRAM bank 2, `0x400000..0x59FFFF` | 1664 KiB |
-| ADPCM nibble RAM | SDRAM bank 2, `0x5A0000..0x5AFFFF` | 64 KiB |
-| CD-ROM scratch RAM (incl. Populous SRAM backing) | SDRAM bank 2, `0x5B0000..0x5EFFFF` | 256 KiB |
-| Battery-backed RAM emulation | block RAM, saved to microSD at firmware-menu entry | 2 KiB |
-| VDC0 VRAM | SDRAM bank 3, byte address `0x7F0000` | 32K × 16 |
-| VDC1 VRAM | SDRAM bank 2, byte address `0x5F0000` | 32K × 16 |
-| Palette RAM, sprite/attribute buffers, PSG table | block RAM inside the core | small |
-| Line buffers for the scan doubler | block RAM | 2 × 1024 × 9 |
+| Resource | Used | Capacity reported | Utilization / share | Remaining | Main consumers in the hierarchy report |
+| --- | ---: | ---: | ---: | ---: | --- |
+| LUT | 14,170 | Shared logic pool: 20,736 | 68.3% of pool | Not reported separately | PCE core 9,392; PicoRV32/OSD I/O system 2,522; memory controller 819; DVI 721 |
+| ALU | 2,939 | Shared logic pool: 20,736 | 14.2% of pool | Not reported separately | PCE core 1,759; I/O system 316; memory controller 194; audio tone 180; color mixer 175 |
+| Logic resources, total | 19,834 | 20,736 | 95.6% | 902 (4.4%) | Shared device logic pool |
+| BSRAM | 43 blocks | 46 blocks | 93.5% | 3 blocks (6.5%) | PCE core 40; scandoubler line buffers 2; OSD font 1 |
+| SSRAM | 438 cells | Not reported | Not reported | Not reported | PCE core 284 (including SCSI FIFO 256); I/O system 112; DVI audio packets 32; scandoubler 2; memory controller 8 |
 
-The Arcade Card uses bank 1 only in CD mode; 4 MiB HuCards continue to use
-banks 0 and 1 when CD mode is off. The CD/Arcade read cache shares the bank-2
-PicoRV32/CD/ADPCM channel, so Arcade accesses contend with those clients.
-The latest Gowin place-and-route uses 43/46 BSRAM blocks (94%) and 10351/10368
-CLS (100%, 17 sites free), leaving almost no logic headroom.
-`rtl/tang/pce_sdram_ctrl_3ch.v` runs the SDRAM at 86.4 MHz and assigns fixed
-slots to (1) HuCard ROM/loader, (2)
-PicoRV32/CD/Arcade/ADPCM or VDC1 and (3) VDC0.
-Its eight-cycle schedule returns VRAM data within one fastest PCE pixel period.
-Refresh is distributed across available idle slots and is also allowed while
-the console is held in reset.
+The LUT figure above counts LUT cells only. The report also lists 97 `INV`
+cells; its logic summary displays 14,267 LUT-related cells including those
+inverters. Hierarchy totals include child modules and must not be added to their
+parent totals. SSRAM is reported as cells (`RAM16S4` / `RAM16SDP4`), not as a
+capacity in bits.
+
+The on-package SDRAM has a physical capacity of 8 MiB. The table below describes
+its address-space allocation; the ROM and Arcade Card share the first 4 MiB
+window, so they are alternatives rather than additive allocations.
+
+| SDRAM allocation | Address / size | Share of 8 MiB | Notes |
+| --- | --- | ---: | --- |
+| HuCard ROM / Arcade Card window | `0x000000..0x3FFFFF`, 4 MiB | 50% | HuCard uses banks 0-1; Arcade Card uses bank 1 in CD mode |
+| PicoRV32 firmware/data | `0x400000..0x59FFFF`, 1,664 KiB | 20.3% | Bank 2 |
+| ADPCM nibble RAM | `0x5A0000..0x5AFFFF`, 64 KiB | 0.8% | Bank 2 |
+| CD scratch RAM | `0x5B0000..0x5EFFFF`, 256 KiB | 3.1% | Includes Populous SRAM backing; bank 2 |
+| VDC1 VRAM | `0x5F0000..0x5FFFFF`, 64 KiB | 0.8% | Bank 2 |
+| VDC0 VRAM | `0x7F0000..0x7FFFFF`, 64 KiB | 0.8% | Bank 3 |
+| Unassigned address space | `0x600000..0x7EFFFF`, 1,984 KiB | 24.2% | Not assigned by the current map |
+
+The four bank-2 allocations total 2 MiB (25%). The SDRAM runs at 86.4 MHz;
+`rtl/tang/pce_sdram_ctrl_3ch.v` assigns fixed slots to (1) HuCard ROM/loader,
+(2) PicoRV32/CD/Arcade/ADPCM or VDC1 and (3) VDC0. Its eight-cycle schedule
+returns VRAM data within one fastest PCE pixel period. Refresh is distributed
+across idle slots and is also allowed while the console is held in reset.
 
 ---
 
