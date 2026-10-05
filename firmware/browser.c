@@ -35,6 +35,37 @@ static int is_hidden_dir(const char *name) {
     return 0;
 }
 
+static uint32_t required_profile(const char *name) {
+    int length = (int)strlen(name);
+
+    if (is_cue(name))
+        return CORE_PROFILE_CD;
+    if (length >= 4 && strcasecmp(name + length - 4, ".sgx") == 0)
+        return CORE_PROFILE_SGX;
+    return CORE_PROFILE_PCE;
+}
+
+static int profile_supports(uint32_t required) {
+    uint32_t active = CORE_PROFILE_ID;
+
+    return active == required || active == CORE_PROFILE_SUPERSET;
+}
+
+static int check_entry_profile(const char *name) {
+    uint32_t required = required_profile(name);
+
+    if (profile_supports(required))
+        return 1;
+
+    if (required == CORE_PROFILE_CD)
+        message("Needs CD-ROM core", name);
+    else if (required == CORE_PROFILE_SGX)
+        message("Needs SGX core", name);
+    else
+        message("Needs PCE core", name);
+    return 0;
+}
+
 typedef struct {
     char name[FF_LFN_BUF + 1];
     uint32_t size;
@@ -348,6 +379,12 @@ void browse(void) {
             if (!page_len)
                 continue;
             if (is_dir[active]) {
+                if (is_cd_dir(names[active]) &&
+                    !profile_supports(CORE_PROFILE_CD)) {
+                    message("Needs CD-ROM core", names[active]);
+                    need_redraw = 1;
+                    continue;
+                }
                 if (strlen(pwd) + strlen(names[active]) + 2 < PWD_SIZE) {
                     if (pwd[1] != '\0')
                         strncat(pwd, "/", PWD_SIZE);
@@ -371,6 +408,10 @@ void browse(void) {
                     need_redraw = 1;
                 }
             } else {
+                if (!check_entry_profile(names[active])) {
+                    need_redraw = 1;
+                    continue;
+                }
                 int loaded = is_cue(names[active])
                     ? open_cd_image(names[active])
                     : load_rom(names[active], sizes[active]);

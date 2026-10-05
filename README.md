@@ -60,6 +60,19 @@ From the repository root, build **both** components:
 & "G:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\gw_sh.exe" tools/build.tcl
 ```
 
+To build the three profile variants from the same RTL sources, run:
+
+```powershell
+& .\tools\build_profiles.ps1 -Profile all
+```
+
+The script creates temporary Gowin project/config copies and stores each
+profile's bitstream, binary and reports under `impl/profiles/{pce,sgx,cd}/`.
+Each current `.bin` is about 887 KiB and fits the 1 MiB candidate flash slot.
+The browser reports the active profile and rejects incompatible ROM types, but
+runtime Multi-Boot switching is not enabled yet. Do not program the candidate
+flash slots until the GW2AR jump method and address alignment are validated.
+
 The resulting FPGA bitstream is `impl/pnr/PCE_GT_TangNano.fs`. Program it
 with the Gowin Programmer or `openFPGALoader`:
 
@@ -344,7 +357,7 @@ BSRAM blocks.
 
 ---
 
-## 6. Consequences
+## 6. Occupation
 
 The following figures come from the standard Gowin V1.9.11.03 synthesis report
 for the GW2AR-18. The device has a shared pool of `20,736` logic resources;
@@ -360,6 +373,21 @@ limits or remaining counts for either resource.
 | BSRAM | 43 blocks | 46 blocks | 93.5% | 3 blocks (6.5%) | PCE core 40; scandoubler line buffers 2; OSD font 1 |
 | SSRAM | 438 cells | Not reported | Not reported | Not reported | PCE core 284 (including SCSI FIFO 256); I/O system 112; DVI audio packets 32; scandoubler 2; memory controller 8 |
 
+The profile builds produced these additional synthesis results:
+
+| Profile | LUT | ALU | Total logic | BSRAM | BSRAM remaining |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| PCE, one VDC with BSRAM VRAM | 13,135 | 2,180 | 16,413 / 20,736 (80%) | 46 / 46 | 0 |
+| SuperGrafx | 10,305 | 2,458 | 13,895 / 20,736 (68%) | 39 / 46 | 7 |
+| CD, one VDC | 12,719 | 2,682 | 18,094 / 20,736 (88%) | 27 / 46 | 19 |
+
+The LUT column counts LUT cells only; inverter cells are reported separately
+(84 in the PCE profile). The PCE BSRAM profile successfully completed
+place-and-route, but it uses every BSRAM block and has no memory-block
+headroom. The generated profile binaries are currently `907,418` bytes each.
+These are build measurements, not hardware validation of automatic Multi-Boot
+switching.
+
 The LUT figure above counts LUT cells only. The report also lists 97 `INV`
 cells; its logic summary displays 14,267 LUT-related cells including those
 inverters. Hierarchy totals include child modules and must not be added to their
@@ -367,8 +395,10 @@ parent totals. SSRAM is reported as cells (`RAM16S4` / `RAM16SDP4`), not as a
 capacity in bits.
 
 The on-package SDRAM has a physical capacity of 8 MiB. The table below describes
-its address-space allocation; the ROM and Arcade Card share the first 4 MiB
-window, so they are alternatives rather than additive allocations.
+the compatibility-superset profile's address-space allocation; the ROM and
+Arcade Card share the first 4 MiB window, so they are alternatives rather than
+additive allocations. In the normal PCE BSRAM profile, VDC0 VRAM is local BSRAM
+and does not use the final 64 KiB of this SDRAM map.
 
 | SDRAM allocation | Address / size | Share of 8 MiB | Notes |
 | --- | --- | ---: | --- |
@@ -420,6 +450,7 @@ constraints/
 tools/
   pce_send.py                 host side ROM sender
   build.tcl                   Gowin batch build
+  build_profiles.ps1          isolated PCE / SGX / CD profile builds
   mif2vhd.py                  .mif -> VHDL constant tables
 firmware/
   build.ps1                   RV32I firmware build

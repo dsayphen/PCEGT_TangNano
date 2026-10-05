@@ -325,8 +325,10 @@ integer i;
 reg [7:0] b;
 
 initial begin
+`ifdef DUMP_VCD
     $dumpfile("sim/tb_iosys.vcd");
     $dumpvars(0, tb_iosys);
+`endif
 
     repeat (10) @(posedge clk);
     resetn = 1;

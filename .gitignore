@@ -3,6 +3,8 @@ impl/gwsynthesis/
 impl/pnr/
 impl/temp/
 impl/gao/
+impl/profile-build/
+impl/profiles/
 *.fs
 *.rpt.html
 *.rpt.txt

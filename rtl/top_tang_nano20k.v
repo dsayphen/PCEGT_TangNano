@@ -18,7 +18,9 @@
 // See README.md for the build, flash, load and wiring instructions.
 //
 
-module top_tang_nano20k (
+module top_tang_nano20k #(
+    parameter [1:0] CORE_PROFILE = 2'd3
+) (
     input  wire        sys_clk,        // 27 MHz crystal
 
     // on-board push buttons (active high)
@@ -82,6 +84,17 @@ module top_tang_nano20k (
 // also handles 921600, which cuts the load time of a 1 MiB image to ~11 s.
 localparam BAUD_RATE  = 115200;
 localparam CLK_SYS_HZ = 43_200_000;
+
+localparam PROFILE_PCE      = 2'd0;
+localparam PROFILE_SGX      = 2'd1;
+localparam PROFILE_CD       = 2'd2;
+localparam PROFILE_SUPERSET = 2'd3;
+localparam CORE_HAS_SGX = (CORE_PROFILE == PROFILE_SGX) ||
+                          (CORE_PROFILE == PROFILE_SUPERSET);
+localparam CORE_HAS_CD  = (CORE_PROFILE == PROFILE_CD) ||
+                          (CORE_PROFILE == PROFILE_SUPERSET);
+localparam CORE_HAS_AC  = (CORE_PROFILE == PROFILE_CD) ||
+                          (CORE_PROFILE == PROFILE_SUPERSET);
 
 // Firmware image location in the on-board SPI NOR flash.  The Tang Nano 20K
 // carries a 64 Mbit (8 MiB) part and the GW2AR-18 bitstream is well under
@@ -259,7 +272,8 @@ iosys #(
     .FREQ                (CLK_SYS_HZ),
     .FIRMWARE_FLASH_ADDR (FIRMWARE_FLASH_ADDR),
     .FIRMWARE_SIZE       (FIRMWARE_SIZE),
-    .RV_BASE             (23'h40_0000)
+    .RV_BASE             (23'h40_0000),
+    .CORE_ID             (CORE_PROFILE)
 ) u_iosys (
     .clk              (clk_sys),
     .resetn           (sys_resetn),
@@ -589,7 +603,10 @@ wire [15:0] vid_vce_wr_dbg;
 wire [9:0]  vid_px_dbg;
 
 pce_core #(
-    .SGX_SUPPORT (1)
+    .SGX_SUPPORT (CORE_HAS_SGX),
+    .CD_SUPPORT  (CORE_HAS_CD),
+    .AC_SUPPORT  (CORE_HAS_AC),
+    .INTERNAL_VRAM (CORE_PROFILE == PROFILE_PCE)
 ) u_pce (
     .clk        (clk_sys),
     .reset      (core_reset),

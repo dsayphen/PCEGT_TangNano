@@ -18,7 +18,10 @@ entity pce_core is
     generic (
         -- 0 = HuCard standard (un seul VDC, fonctionnel sur ce device)
 		-- 1 = SuperGrafx (second VDC + VRAM doublée)
-        SGX_SUPPORT : integer := 1
+		SGX_SUPPORT : integer := 1;
+		CD_SUPPORT  : integer := 1;
+		AC_SUPPORT  : integer := 1;
+		INTERNAL_VRAM : integer := 0
 	);
 
 	port (
@@ -128,6 +131,13 @@ end pce_core;
 architecture rtl of pce_core is
 
     signal sgx_i    : std_logic;
+	signal vram0_a_core : std_logic_vector(15 downto 0);
+	signal vram0_do_core : std_logic_vector(15 downto 0);
+	signal vram0_di_core : std_logic_vector(15 downto 0);
+	signal vram0_rd_core : std_logic;
+	signal vram0_we_core : std_logic;
+	signal vram0_q : std_logic_vector(15 downto 0);
+	signal vram0_hi : std_logic;
 
 	signal ff_byte   : std_logic_vector(7 downto 0) := x"FF";
 	signal zero_byte : std_logic_vector(7 downto 0) := x"00";
@@ -168,6 +178,42 @@ begin
 
     sgx_i <= sgx_mode when SGX_SUPPORT /= 0 else '0';
 
+	gen_internal_vram: if (INTERNAL_VRAM /= 0) generate begin
+		VRAM0_RAM : entity work.dpram
+		generic map (
+			addr_width => 15,
+			data_width => 16
+		)
+		port map (
+			clock     => clk,
+			address_a => vram0_a_core(14 downto 0),
+			data_a    => vram0_do_core,
+			wren_a    => vram0_we_core,
+			q_a       => vram0_q
+		);
+
+		process (clk)
+		begin
+			if rising_edge(clk) then
+				vram0_hi <= vram0_a_core(15);
+			end if;
+		end process;
+
+		vram0_di_core <= (others => '0') when vram0_hi = '1' else vram0_q;
+		vram0_a  <= (others => '0');
+		vram0_do <= (others => '0');
+		vram0_rd <= '0';
+		vram0_we <= '0';
+	end generate;
+
+	gen_external_vram: if (INTERNAL_VRAM = 0) generate begin
+		vram0_a       <= vram0_a_core;
+		vram0_do      <= vram0_do_core;
+		vram0_rd      <= vram0_rd_core;
+		vram0_we      <= vram0_we_core;
+		vram0_di_core <= vram0_di;
+	end generate;
+
 	CORE : entity work.pce_top
 	generic map (
 		SGX_SUPPORT      => SGX_SUPPORT,
@@ -175,8 +221,8 @@ begin
 		PSG_O_WIDTH      => 20,
 		MAX_SPRITES      => 16,
 		USE_INTERNAL_RAM => 1,
-		CD_SUPPORT       => 1,
-		AC_SUPPORT       => 1
+		CD_SUPPORT       => CD_SUPPORT,
+		AC_SUPPORT       => AC_SUPPORT
 	)
 	port map (
 		RESET       => reset,
@@ -196,11 +242,11 @@ begin
 		BRM_DO      => brm_do_i,
 		BRM_WE      => brm_we_i,
 
-		VRAM0_A     => vram0_a,
-		VRAM0_DO    => vram0_do,
-		VRAM0_RD    => vram0_rd,
-		VRAM0_WE    => vram0_we,
-		VRAM0_DI    => vram0_di,
+		VRAM0_A     => vram0_a_core,
+		VRAM0_DO    => vram0_do_core,
+		VRAM0_RD    => vram0_rd_core,
+		VRAM0_WE    => vram0_we_core,
+		VRAM0_DI    => vram0_di_core,
 
         VRAM1_A     => vram1_a,
         VRAM1_DO    => vram1_do,

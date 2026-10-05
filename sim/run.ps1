@@ -66,7 +66,9 @@ if ($CROSS) {
         'rtl/tang/iosys/textdisp.v', 'rtl/tang/iosys/font_rom.v',
         'rtl/tang/pce_sdram_ctrl_3ch.v'
     )
-    & $iverilog -g2005-sv -o sim/tb_iosys.vvp @iosysFiles
+    $iosysFlags = @('-g2005-sv')
+    if ($env:SIM_DUMP_VCD -eq '1') { $iosysFlags += '-DDUMP_VCD' }
+    & $iverilog @iosysFlags -o sim/tb_iosys.vvp @iosysFiles
     if ($LASTEXITCODE) { throw 'iverilog failed for tb_iosys' }
     $out = & $vvp sim/tb_iosys.vvp
     $out | Write-Host

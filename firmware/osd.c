@@ -18,9 +18,30 @@ void loading_status(const char *msg) {
 }
 
 void title(void) {
+    const char *profile;
+
+    switch (CORE_PROFILE_ID) {
+    case CORE_PROFILE_PCE:
+        profile = "PC Engine";
+        break;
+    case CORE_PROFILE_SGX:
+        profile = "SuperGrafx";
+        break;
+    case CORE_PROFILE_CD:
+        profile = "CD-ROM";
+        break;
+    case CORE_PROFILE_SUPERSET:
+        profile = "PCE/SGX/CD";
+        break;
+    default:
+        profile = "Unknown core";
+        break;
+    }
+
     clear_line(ROW_TITLE);
     cursor(1, ROW_TITLE);
-    print("PCEngine - pick a ROM");
+    print(profile);
+    print(" - pick a ROM");
 }
 
 // Print a string right-truncated to `w` columns starting at column x.

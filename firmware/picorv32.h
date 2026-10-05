@@ -33,6 +33,11 @@
 #define reg_pad_mode       (*(volatile uint32_t*)0x02000058)
 #define reg_color_mode     (*(volatile uint32_t*)0x0200005c)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
+#define CORE_PROFILE_PCE      0u
+#define CORE_PROFILE_SGX      1u
+#define CORE_PROFILE_CD       2u
+#define CORE_PROFILE_SUPERSET 3u
+#define CORE_PROFILE_ID       (reg_core_id & 0xffffu)
 #define reg_audio          (*(volatile uint32_t*)0x02000064)
 #define reg_cd_events      (*(volatile uint32_t*)0x02000070)
 #define reg_cd_stat        (*(volatile uint32_t*)0x02000074)
