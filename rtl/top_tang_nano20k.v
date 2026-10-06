@@ -19,7 +19,11 @@
 //
 
 module top_tang_nano20k #(
-    parameter [1:0] CORE_PROFILE = 2'd3
+    parameter [1:0] CORE_PROFILE = 2'd3,
+    parameter [1:0] CORE_LOGIC_PROFILE = CORE_PROFILE,
+    parameter CORE_EXTRA_SGX = 0,
+    parameter CORE_EXTRA_VDC1 = 0,
+    parameter CORE_EXTRA_CHEATS = 0
 ) (
     input  wire        sys_clk,        // 27 MHz crystal
 
@@ -89,12 +93,16 @@ localparam PROFILE_PCE      = 2'd0;
 localparam PROFILE_SGX      = 2'd1;
 localparam PROFILE_CD       = 2'd2;
 localparam PROFILE_SUPERSET = 2'd3;
-localparam CORE_HAS_SGX = (CORE_PROFILE == PROFILE_SGX) ||
-                          (CORE_PROFILE == PROFILE_SUPERSET);
-localparam CORE_HAS_CD  = (CORE_PROFILE == PROFILE_CD) ||
-                          (CORE_PROFILE == PROFILE_SUPERSET);
-localparam CORE_HAS_AC  = (CORE_PROFILE == PROFILE_CD) ||
-                          (CORE_PROFILE == PROFILE_SUPERSET);
+localparam CORE_HAS_SGX = (CORE_LOGIC_PROFILE == PROFILE_SGX) ||
+                          (CORE_LOGIC_PROFILE == PROFILE_SUPERSET) ||
+                          (CORE_EXTRA_SGX != 0);
+localparam CORE_HAS_CD  = (CORE_LOGIC_PROFILE == PROFILE_CD) ||
+                          (CORE_LOGIC_PROFILE == PROFILE_SUPERSET);
+localparam CORE_HAS_AC  = (CORE_LOGIC_PROFILE == PROFILE_CD) ||
+                          (CORE_LOGIC_PROFILE == PROFILE_SUPERSET);
+localparam CORE_HAS_CHEATS = (CORE_LOGIC_PROFILE == PROFILE_SGX) ||
+                             (CORE_LOGIC_PROFILE == PROFILE_SUPERSET) ||
+                             (CORE_EXTRA_CHEATS != 0);
 
 // Firmware image location in the on-board SPI NOR flash.  The Tang Nano 20K
 // carries a 64 Mbit (8 MiB) part and the GW2AR-18 bitstream is well under
@@ -606,6 +614,8 @@ pce_core #(
     .SGX_SUPPORT (CORE_HAS_SGX),
     .CD_SUPPORT  (CORE_HAS_CD),
     .AC_SUPPORT  (CORE_HAS_AC),
+    .CHEAT_SUPPORT (CORE_HAS_CHEATS),
+    .VDC1_SUPPORT (CORE_HAS_SGX || (CORE_EXTRA_VDC1 != 0)),
     .INTERNAL_VRAM (CORE_PROFILE == PROFILE_PCE)
 ) u_pce (
     .clk        (clk_sys),

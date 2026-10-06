@@ -10,8 +10,10 @@
 #include "rom.h"
 #include "cd.h"
 #include "cheats.h"
+#include "fatfs/diskio.h"
 
 static FIL cd_image;
+static char cd_data_path[PWD_SIZE + NAME_MAX + 2];
 static int cd_image_track = -1;     // data track whose file is open in cd_image
 int cd_active = 0;
 
@@ -93,18 +95,52 @@ void cd_close(void) {
     cd_active = 0;
 }
 
-static void cd_file_path(char *dst, size_t len, const char *name) {
-    strncpy(dst, pwd, len);
-    if (dst[1] != '\0')
-        strncat(dst, "/", len);
-    strncat(dst, name, len);
+static int cd_file_path(char *dst, size_t len, const char *name) {
+    size_t used = 0;
+
+    if (!dst || !name || len == 0)
+        return -1;
+    while (used < PWD_SIZE && pwd[used]) {
+        if (used + 1 >= len)
+            return -1;
+        dst[used] = pwd[used];
+        used++;
+    }
+    if (sd_trace_enabled)
+        uart_print("cd: cwd copied\n");
+    if (used == PWD_SIZE) {
+        if (sd_trace_enabled)
+            uart_print("cd: cwd invalid\n");
+        return -1;
+    }
+    if (sd_trace_enabled)
+        uart_print("cd: sep start\n");
+    if (used > 1) {
+        if (used + 1 >= len)
+            return -1;
+        dst[used++] = '/';
+    }
+    if (sd_trace_enabled)
+        uart_print("cd: sep done\n");
+    if (sd_trace_enabled)
+        uart_print("cd: name start\n");
+    while (*name) {
+        if (used + 1 >= len)
+            return -1;
+        dst[used++] = *name++;
+    }
+    dst[used] = '\0';
+    if (sd_trace_enabled)
+        uart_printf("cd: name done len=%d\n", (int)used);
+    return 0;
 }
 
 static uint32_t cd_file_frames(const char *name, uint32_t sector_size) {
     char path[PWD_SIZE + NAME_MAX + 2];
     FILINFO fno;
 
-    cd_file_path(path, sizeof(path), name);
+    if (cd_file_path(path, sizeof(path), name) != 0)
+        return 0;
     if (f_stat(path, &fno) != FR_OK) {
         uart_printf("cd: cannot stat %s\n", path);
         return 0;
@@ -131,8 +167,6 @@ static int cd_data_track_at(uint32_t lba) {
 }
 
 static int cd_open_data_track(int t) {
-    char path[PWD_SIZE + NAME_MAX + 2];
-
     if (cd_image_track == t)
         return 0;
     if (cd_image_track >= 0 &&
@@ -143,9 +177,22 @@ static int cd_open_data_track(int t) {
     if (cd_image_track >= 0)
         f_close(&cd_image);
     cd_image_track = -1;
-    cd_file_path(path, sizeof(path), cd_track_filename[t]);
-    if (f_open(&cd_image, path, FA_READ) != FR_OK)
+    sd_trace_enabled = 1;
+    uart_print("cd: path build begin\n");
+    if (cd_file_path(cd_data_path, sizeof(cd_data_path),
+                     cd_track_filename[t]) != 0) {
+        uart_print("cd: path build FAILED\n");
+        sd_trace_enabled = 0;
         return -1;
+    }
+    uart_print("cd: path build done\n");
+    uart_print("cd: f_open call\n");
+    FRESULT r = f_open(&cd_image, cd_data_path, FA_READ);
+    sd_trace_enabled = 0;
+    if (r != FR_OK) {
+        uart_printf("cd: f_open failed, FRESULT=%d\n", (int)r);
+        return -1;
+    }
     cd_image_track = t;
     return 0;
 }
@@ -203,6 +250,7 @@ static int load_system_card(void) {
 
     status("Loading System Card...");
     uart_print("syscard: starting SDRAM transfer\n");
+    pce_pause(1);
     pce_load_start(size, 0);
     cheats_clear();
     while (total < size) {
@@ -210,7 +258,8 @@ static int load_system_card(void) {
                                                                : (size - total));
         if (f_read(&f, io_buf, want, &br) != FR_OK || br == 0) {
             uart_printf("syscard: SD read error at %d bytes\n", (int)total);
-            pce_load_end();
+            (void)pce_load_end();
+            pce_pause(0);
             f_close(&f);
             message("System Card read error", names[i]);
             return -1;
@@ -231,7 +280,11 @@ static int load_system_card(void) {
 
     f_close(&f);
     uart_print("syscard: transfer queued, waiting for SDRAM drain\n");
-    pce_load_end();
+    if (pce_load_end() != 0) {
+        pce_pause(0);
+        message("System Card transfer timeout", names[i]);
+        return -1;
+    }
     uart_print("syscard: load request complete\n");
     return 0;
 }
@@ -366,14 +419,30 @@ int open_cd_image(const char *cue_name) {
     }
     if (load_system_card() != 0)
         return -1;
-    if (cheat_cd_enabled)
+    if (cd_first_data_track < 0) {
+        uart_print("cd: no DATA track found in CUE sheet\n");
+        pce_pause(0);
+        message("No data track in CUE", cue_name);
+        return -1;
+    }
+    if (cheat_cd_enabled) {
+        uart_print("cd: loading CD cheats\n");
         cheats_load(current_game_name, CHEAT_GAME_CD);
+        uart_print("cd: cheats step done\n");
+    }
     // status("Preparing CD..."); // ne pas afficher, trop rapide
+    sd_trace_enabled = 1;
+    uart_printf("cd: diag2 profile=%d status=%x track=%d\n",
+                (int)CORE_PROFILE_ID, reg_romload_status,
+                cd_first_data_track + 1);
     if (cd_open_data_track(cd_first_data_track) != 0) {
+        uart_print("cd: data track open FAILED\n");
         cheats_clear();
+        pce_pause(0);
         message("Cannot open CD image", cd_track_filename[cd_first_data_track]);
         return -1;
     }
+    uart_print("cd: data track open ok\n");
 
     cd_stat_pending = 0;
     cd_active = 1;
@@ -384,7 +453,10 @@ int open_cd_image(const char *cue_name) {
     current_game_populous = 0;
     reg_rom_pop = 0;
     game_pad_mode_load(current_game_name);
+    uart_print("cd: pad mode loaded\n");
     load_game_saves(current_game_name, 0);
+    pce_pause(1);
+    uart_print("cd: saves step done\n");
     uart_print("cd: sending start request\n");
     pce_cd_start();
     return 0;
@@ -409,9 +481,18 @@ int find_cd_cue(char *cue_name, size_t cue_len) {
 
 void cd_service(void) {
     static uint32_t logged_events = 0;
+    static int service_logged = 0;
+    static int command_logged = 0;
+    static int command_done_logged = 0;
+    static int first_sector_logged = 0;
+    static int event_logged = 0;
     uint32_t events = reg_cd_events;
     if (!cd_active)
         return;
+    if (!service_logged) {
+        uart_print("cd: service active\n");
+        service_logged = 1;
+    }
 
     // CD-DA streaming: audio sectors are raw interleaved 16-bit stereo PCM,
     // no header to skip. Feed a modest chunk every poll so the CDDA FIFO's
@@ -462,8 +543,10 @@ void cd_service(void) {
 
     uint32_t new_events = (events & 0x1f) & ~logged_events;
     logged_events = events & 0x1f;
-    if (new_events)
-        uart_printf("cd: t=%d events=%x\n", (int)time_millis(), (unsigned)events);
+    if (new_events && !event_logged) {
+        uart_print("cd: first hardware event\n");
+        event_logged = 1;
+    }
 
     // The SCSI core must fully drain any FIFO bytes pushed below before it
     // can be told status is ready; doing it earlier reorders phases and
@@ -478,6 +561,10 @@ void cd_service(void) {
         reg_cd_ack = 0x10;
 
     if (events & 0x01) {
+        if (!command_logged) {
+            uart_print("cd: first command received\n");
+            command_logged = 1;
+        }
         uint32_t cmd0 = reg_cd_cmd0;
         uint32_t cmd1 = reg_cd_cmd1;
         uint32_t opcode = cmd0 & 0xff;
@@ -488,14 +575,14 @@ void cd_service(void) {
             if (opcode == 0x08 && count == 0)
             count = 256;
 
-        if (opcode == 0x08) {
-            uart_printf("cd: t=%d opcode=%x lba=%d count=%d\n",
-                        (int)time_millis(), (unsigned)opcode, (int)lba, (int)count);
-        } else {
-            uart_printf("cd: t=%d opcode=%x raw=%x %x %x\n",
-                        (int)time_millis(), (unsigned)opcode, (unsigned)cmd0,
-                        (unsigned)cmd1, (unsigned)reg_cd_cmd2);
-        }
+        if (opcode == 0x08)
+            uart_print("cd: READ command\n");
+        else if (opcode == 0xde)
+            uart_print("cd: GET_DIR_INFO command\n");
+        else if (opcode == 0x00)
+            uart_print("cd: TEST UNIT READY command\n");
+        else
+            uart_print("cd: other command\n");
 
         int pushed_data = 0;
 
@@ -520,18 +607,33 @@ void cd_service(void) {
                 uint32_t offset = frame * cd_track_sector_size[t] +
                                   cd_track_data_offset[t];
                 UINT br;
-                if (f_lseek(&cd_image, offset) != FR_OK) {
-                    uart_printf("cd: seek failed, offset=%d\n", (int)offset);
+                if (!first_sector_logged)
+                    uart_print("cd: first sector read begin\n");
+                sd_trace_enabled = !first_sector_logged;
+                FRESULT seek_result = f_lseek(&cd_image, offset);
+                if (seek_result != FR_OK) {
+                    sd_trace_enabled = 0;
+                    uart_printf("cd: seek failed res=%d offset=%d size=%d pos=%d\n",
+                                (int)seek_result, (int)offset,
+                                (int)f_size(&cd_image), (int)f_tell(&cd_image));
                     ok = 0;
                     break;
                 }
-                if (f_read(&cd_image, io_buf, 2048, &br) != FR_OK || br != 2048) {
+                FRESULT read_result = f_read(&cd_image, io_buf, 2048, &br);
+                sd_trace_enabled = 0;
+                if (read_result != FR_OK || br != 2048) {
                     uart_printf("cd: short read at sector %d\n", (int)sector);
                     ok = 0;
                     break;
                 }
+                if (!first_sector_logged)
+                    uart_print("cd: first sector read ok\n");
                 for (UINT i = 0; i < br; i++)
                     reg_cd_feed = (uint32_t)io_buf[i] | 0x100;
+                if (!first_sector_logged) {
+                    uart_print("cd: first sector fed\n");
+                    first_sector_logged = 1;
+                }
 
                 // the SCSI FIFO only holds one sector; without waiting here
                 // the next sector's bytes overrun it and get silently lost
@@ -627,8 +729,9 @@ void cd_service(void) {
                 if (cd_audio_file_open)
                     f_close(&cd_audio_file);
                 char apath[PWD_SIZE + NAME_MAX + 2];
-                cd_file_path(apath, sizeof(apath), cd_track_filename[t]);
-                cd_audio_file_open = (f_open(&cd_audio_file, apath, FA_READ) == FR_OK);
+                cd_audio_file_open = cd_file_path(apath, sizeof(apath),
+                                                  cd_track_filename[t]) == 0 &&
+                    f_open(&cd_audio_file, apath, FA_READ) == FR_OK;
                 cd_audio_cur_track = cd_audio_file_open ? t : -1;
             }
 
@@ -711,6 +814,10 @@ void cd_service(void) {
         }
 
         reg_cd_ack = 0x01;
+        if (command_logged && !command_done_logged && !first_sector_logged) {
+            uart_print("cd: command completed without sector read\n");
+            command_done_logged = 1;
+        }
         if (pushed_data)
             cd_stat_pending = 1;
         else

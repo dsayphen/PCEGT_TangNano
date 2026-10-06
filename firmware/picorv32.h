@@ -25,6 +25,8 @@
 #define reg_romload_ctrl   (*(volatile uint32_t*)0x02000030)
 #define reg_romload_data   (*(volatile uint32_t*)0x02000034)
 #define reg_romload_size   (*(volatile uint32_t*)0x02000038)
+#define reg_romload_status (*(volatile uint32_t*)0x02000068)
+#define reg_romload_debug  (*(volatile uint32_t*)0x0200006c)
 #define reg_joystick       (*(volatile uint32_t*)0x02000040)
 #define reg_video_zoom     (*(volatile uint32_t*)0x02000044)
 #define reg_scanline       (*(volatile uint32_t*)0x02000048)
@@ -175,8 +177,17 @@ static inline void pce_load_start(uint32_t size_bytes, int sgx) {
 static inline void pce_load_word(uint32_t w) {
     reg_romload_data = w;
 }
-static inline void pce_load_end(void) {
+static inline int pce_load_end(void) {
     reg_romload_ctrl = 0;
+    uint32_t started = time_millis();
+    while (reg_romload_status & 1u) {
+        if ((uint32_t)(time_millis() - started) >= 2000u) {
+            uart_printf("load drain timeout status=%x debug=%x\n",
+                        reg_romload_status, reg_romload_debug);
+            return -1;
+        }
+    }
+    return 0;
 }
 
 static inline void pce_pause(int pause) {
@@ -191,7 +202,7 @@ static inline void pce_stop(void) {
     reg_game_ctrl = 8;
 }
 static inline void pce_cd_start(void) {
-    reg_game_ctrl = 16;
+    reg_game_ctrl = 17;
 }
 
 // ---- tiny libc ------------------------------------------------------------

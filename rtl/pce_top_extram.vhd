@@ -17,7 +17,11 @@ entity pce_top is
 		-- their original behaviour; the Tang Nano 20K HuCard-only build sets
 		-- them to 0.
 		CD_SUPPORT : integer := 1;
-		AC_SUPPORT : integer := 1
+		AC_SUPPORT : integer := 1;
+		VDC1_SUPPORT : integer := SGX_SUPPORT;
+		-- Set to 1 when VRAM0_A/VRAM0_DI are backed by single-cycle BSRAM
+		-- instead of the SDRAM controller (see HUC6270's VRAM_FAST generic).
+		VRAM0_FAST : integer := 0
 	);
 	port(
 		RESET       : in  std_logic;
@@ -480,7 +484,8 @@ VRAM0_A <= VRAM0_ADDR;
 
 VDC0 : entity work.HUC6270
 generic map(
-	MAX_SPRITES => MAX_SPRITES
+	MAX_SPRITES => MAX_SPRITES,
+	VRAM_FAST   => VRAM0_FAST
 )
 port map(
 	CLK 		=> CLK,
@@ -542,13 +547,11 @@ VIDEO_VCR_DBG <= VDC0_VCR_DBG;
 CLR_A  <= CLR_A + 1  when rising_edge(CLK);
 CLR_WE <= COLD_RESET when rising_edge(CLK);
 
-generate_SGX: if (SGX_SUPPORT /= 0) generate begin
-
-	-- FIX: Do not cut off VRAM1_RD on VRAM1_ADDR(15). 
-	-- Mask only the upper address bit to stay within the 32K words (64 KB) boundary.
+generate_VDC1: if (VDC1_SUPPORT /= 0) generate begin
+	-- Keep VRAM1 within the 32K-word physical range.
 	VRAM1_RD <= VRAM1_READ;
 	VRAM1_WE <= VRAM1_WRITE and not VRAM1_ADDR(15);
-	VRAM1_A  <= '0' & VRAM1_ADDR(14 downto 0); -- Force VRAM1 address range between 0x0000 and 0x7FFF
+	VRAM1_A  <= '0' & VRAM1_ADDR(14 downto 0);
 
 	VDC1 : entity work.HUC6270
 	generic map(
@@ -591,6 +594,20 @@ generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 		SPR_EN	=> SPR_EN
 	);
 
+end generate;
+
+generate_NO_VDC1: if (VDC1_SUPPORT = 0) generate begin
+	VRAM1_A  <= (others => '0');
+	VRAM1_DO <= (others => '0');
+	VRAM1_RD <= '0';
+	VRAM1_WE <= '0';
+	VDC1_BUSY_N <= '1';
+	VDC1_IRQ_N <= '1';
+	VDC1_DO <= (others => '1');
+end generate;
+
+generate_SGX: if (SGX_SUPPORT /= 0) generate begin
+
 	VPC : entity work.huc6202
 	port map(
 		CLK 		=> CLK,
@@ -631,20 +648,11 @@ end generate;
 
 generate_NOSGX: if (SGX_SUPPORT = 0) generate begin
 
-	-- No second VDC: keep the (unused) external VRAM1 port quiet.
-	VRAM1_A  <= (others => '0');
-	VRAM1_DO <= (others => '0');
-	VRAM1_RD <= '0';
-	VRAM1_WE <= '0';
-
 	CPU_VDC0_SEL_N <= CPU_VDC_SEL_N;
 	CPU_VDC1_SEL_N <= '1';
 	CPU_VPC_SEL_N  <= '1';
-	VDC1_BUSY_N <= '1';
-	VDC1_IRQ_N <= '1';
 
 	VDCNUM <= '0';
-	VDC1_DO <= (others => '1');
 	VPC_DO <= (others => '1');
 	VDC_COLNO <= VDC0_COLNO;
 	

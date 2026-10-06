@@ -334,6 +334,8 @@ wire pad_mode_sel  = mem_valid && (mem_addr == 32'h0200_0058);
 wire color_mode_sel= mem_valid && (mem_addr == 32'h0200_005c);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 wire audio_sel     = mem_valid && (mem_addr == 32'h0200_0064);
+wire rl_status_sel  = mem_valid && (mem_addr == 32'h0200_0068);
+wire rl_debug_sel   = mem_valid && (mem_addr == 32'h0200_006c);
 wire cd_event_sel  = mem_valid && (mem_addr == 32'h0200_0070);
 wire cd_stat_sel   = mem_valid && (mem_addr == 32'h0200_0074);
 wire cd_cmd0_sel   = mem_valid && (mem_addr == 32'h0200_0078);
@@ -432,7 +434,7 @@ wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
-                   game_ctrl_sel ||
+                   game_ctrl_sel || rl_status_sel || rl_debug_sel ||
                    time_sel || pad_mode_sel || color_mode_sel || id_sel || audio_sel ||
                    cd_event_sel || cd_stat_sel || cd_cmd0_sel || cd_cmd1_sel || cd_cmd2_sel ||
                    cd_data0_sel || cd_data1_sel || cd_data2_sel ||
@@ -459,6 +461,9 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    color_mode_sel ? {6'd0, vds_q, vsw_q, hde_q, hsw_q, color_mode} :
                    id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
                    audio_sel    ? {19'b0, audio_hdmi, audio_treble, audio_bass, audio_volume} :
+                   rl_status_sel ? {30'b0, image_valid, loading} :
+                   rl_debug_sel ? {2'b0, rl_timeout, rl_cnt, ld_idle, ld_busy, ld_wr,
+                                   rl_clearing, rl_finishing, image_valid, loading} :
                    cd_event_sel ? {24'b0, cd_events} :
                    cd_cmd0_sel ? cd_comm_reg[31:0] :
                    cd_cmd1_sel ? cd_comm_reg[63:32] :

@@ -386,6 +386,8 @@ int pause_menu(void) {
     };
     int active = 0;
     const int n_items = 7;
+    const int has_cheats = CORE_PROFILE_ID == CORE_PROFILE_SGX ||
+                           CORE_PROFILE_ID == CORE_PROFILE_SUPERSET;
 
     vdc_timing_dump();
     audio_paused = 1;
@@ -419,8 +421,12 @@ int pause_menu(void) {
             }
 
             if (i == 4) {
-                make_cheats_label(label);
-                print_field(6, 8 + i, label, 20);
+                if (has_cheats) {
+                    make_cheats_label(label);
+                    print_field(6, 8 + i, label, 20);
+                } else {
+                    print_field(6, 8 + i, "Cheats unavailable", 20);
+                }
                 continue;
             }
 
@@ -477,10 +483,17 @@ int pause_menu(void) {
             print_field(5, 5, "Game paused", OSD_COLS - 2);
             print_game_name();
         } else if ((e & JOY_A) && active == 4) {
-            cheats_menu();
-            clear();
-            print_field(5, 5, "Game paused", OSD_COLS - 2);
-            print_game_name();
+            if (has_cheats) {
+                cheats_menu();
+                clear();
+                print_field(5, 5, "Game paused", OSD_COLS - 2);
+                print_game_name();
+            } else {
+                message("Cheats unavailable", "Not in this core");
+                clear();
+                print_field(5, 5, "Game paused", OSD_COLS - 2);
+                print_game_name();
+            }
         }
         delay(20);
     }

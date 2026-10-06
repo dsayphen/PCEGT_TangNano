@@ -234,7 +234,7 @@ int load_rom(const char *fname, uint32_t size) {
         UINT want = (UINT)((size - total) > sizeof(io_buf) ? sizeof(io_buf)
                                                            : (size - total));
         if (f_read(&f, io_buf, want, &br) != FR_OK || br == 0) {
-            pce_load_end();
+            (void)pce_load_end();
             f_close(&f);
             message("Read error", fname);
             return -1;
@@ -266,7 +266,10 @@ int load_rom(const char *fname, uint32_t size) {
     load_game_saves(current_game_name, current_game_populous);
 
     // releases the PC Engine once the last byte has reached the SDRAM
-    pce_load_end();
+    if (pce_load_end() != 0) {
+        message("ROM transfer timeout", fname);
+        return -1;
+    }
 
     uart_print("load done\n");
     return 0;

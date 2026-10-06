@@ -93,7 +93,9 @@ int main(void) {
     video_config_load();
     audio_config_load();
 
+    uart_print("main: entering browser\n");
     browse();
+    uart_print("main: browser returned\n");
 
     // The console is running now.  Stay alive so the user can bring the menu
     // back with Select+Start and pick another game without a power cycle,
@@ -110,7 +112,12 @@ int main(void) {
     uint32_t cd_min_usedw = 0xffffffffu;
     uint32_t cd_empty_polls = 0;
 
+    int cd_needs_resume = cd_active;
+    if (cd_needs_resume)
+        uart_print("main: CD service ready\n");
+
     for (;;) {
+        int trace_cd_iteration = cd_needs_resume;
         uint32_t raw = joy_raw();
         uint32_t e = joy_edge();
         static uint32_t loops = 0;
@@ -152,21 +159,22 @@ int main(void) {
         }
 
         if (raw != last_raw) {
-            if (!cd_audio_playing)
-                uart_printf("joy %x dcc=%d hds=%d hds_px=%d hdw=%d hdw_px=%d\n",
-                            raw, reg_vid_dcc_dbg(), reg_vid_hds_dbg(),
-                            reg_vid_hds_dbg() * 8, reg_vid_hdw_dbg(),
-                            reg_vid_hdw_dbg() * 8);
+            if (!cd_audio_playing) {
+                if (raw & JOY_START)
+                    uart_print("joy: RUN pressed\n");
+                else
+                    uart_print("joy: state changed\n");
+            }
             last_raw = raw;
         }
 
         static uint32_t last_reg = 0xffffffff;
         uint32_t r = reg_joystick;
         if (r != last_reg) {
-            if (!cd_audio_playing)
-                uart_printf("reg %x\n", r);
             last_reg = r;
         }
+        if (trace_cd_iteration)
+            uart_print("main: joystick register sampled\n");
 
         if (!(raw & JOY_SELECT)) {
             // Select released: require another 500 ms hold next time.
@@ -201,10 +209,20 @@ int main(void) {
                    (e & (JOY_LEFT | JOY_RIGHT))) {
             scanline_cycle((e & JOY_RIGHT) ? 1 : -1);
         }
+        if (trace_cd_iteration)
+            uart_print("main: button handling done\n");
         if (!cd_audio_playing)
             delay(20);
         else if (reg_cd_usedw >= 3072)
             delay(2);
+        if (trace_cd_iteration)
+            uart_print("main: delay done\n");
+
+        if (cd_needs_resume) {
+            cd_needs_resume = 0;
+            uart_print("main: HuC resume write\n");
+            pce_pause(0);
+        }
     }
 
     return 0;

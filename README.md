@@ -377,16 +377,18 @@ The profile builds produced these additional synthesis results:
 
 | Profile | LUT | ALU | Total logic | BSRAM | BSRAM remaining |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| PCE, one VDC with BSRAM VRAM | 13,135 | 2,180 | 16,413 / 20,736 (80%) | 46 / 46 | 0 |
+| PCE, one VDC with BSRAM VRAM, Game Genie off | 12,731 | 1,507 | 15,335 / 20,736 (74%) | 46 / 46 | 0 |
 | SuperGrafx | 10,305 | 2,458 | 13,895 / 20,736 (68%) | 39 / 46 | 7 |
-| CD, one VDC | 12,719 | 2,682 | 18,094 / 20,736 (88%) | 27 / 46 | 19 |
+| CD, one VDC, Game Genie off | 12,512 | 2,005 | 17,197 / 20,736 (83%) | 27 / 46 | 19 |
 
 The LUT column counts LUT cells only; inverter cells are reported separately
-(84 in the PCE profile). The PCE BSRAM profile successfully completed
-place-and-route, but it uses every BSRAM block and has no memory-block
-headroom. The generated profile binaries are currently `907,418` bytes each.
-These are build measurements, not hardware validation of automatic Multi-Boot
-switching.
+(83 in PCE, 88 in SGX and 82 in CD). After removing Game Genie from PCE and CD,
+the worst setup slack is `+0.148 ns` for PCE and `+0.040 ns` for CD; their
+critical paths now end in the PSG and Arcade Card respectively. These margins
+are positive but very small. The PCE BSRAM profile completed place-and-route,
+but uses every BSRAM block and has no memory-block headroom. The generated
+profile binaries are currently `907,418` bytes each. These are build
+measurements, not hardware validation of automatic Multi-Boot switching.
 
 The LUT figure above counts LUT cells only. The report also lists 97 `INV`
 cells; its logic summary displays 14,267 LUT-related cells including those

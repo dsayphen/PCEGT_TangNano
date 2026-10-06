@@ -21,6 +21,8 @@ entity pce_core is
 		SGX_SUPPORT : integer := 1;
 		CD_SUPPORT  : integer := 1;
 		AC_SUPPORT  : integer := 1;
+		CHEAT_SUPPORT : integer := 1;
+		VDC1_SUPPORT : integer := SGX_SUPPORT;
 		INTERNAL_VRAM : integer := 0
 	);
 
@@ -217,12 +219,14 @@ begin
 	CORE : entity work.pce_top
 	generic map (
 		SGX_SUPPORT      => SGX_SUPPORT,
-		CHEAT_SUPPORT    => 1,
+		CHEAT_SUPPORT    => CHEAT_SUPPORT,
 		PSG_O_WIDTH      => 20,
 		MAX_SPRITES      => 16,
 		USE_INTERNAL_RAM => 1,
 		CD_SUPPORT       => CD_SUPPORT,
-		AC_SUPPORT       => AC_SUPPORT
+		AC_SUPPORT       => AC_SUPPORT,
+		VDC1_SUPPORT     => VDC1_SUPPORT,
+		VRAM0_FAST       => INTERNAL_VRAM
 	)
 	port map (
 		RESET       => reset,

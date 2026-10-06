@@ -396,6 +396,7 @@ void browse(void) {
                             open_cd_image(cue_name) == 0) {
                             overlay(0);
                             uart_printf("browser: CD started, overlay=%d\n", overlay_status());
+                            uart_print("browser: returning\n");
                             return;
                         }
                         go_parent();

@@ -5,7 +5,13 @@ library work;
 
 entity HUC6270 is
 	generic(
-		MAX_SPRITES : integer := 16
+		MAX_SPRITES : integer := 16;
+		-- BG fetch capture (CAP_CE) is delayed 2 CLK after the address to match
+		-- external SDRAM's ~5 CLK response. Internal BSRAM answers in 1 CLK, so
+		-- that extra delay captures the NEXT slot's data instead of the one the
+		-- address belonged to. Set VRAM_FAST /= 0 when RAM_A/RAM_DI are backed
+		-- by BSRAM instead of the SDRAM controller.
+		VRAM_FAST : integer := 0
 	);
 	port( 
 		CLK		: in std_logic;
@@ -667,7 +673,11 @@ process(CLK)
 begin
 	if rising_edge(CLK) then
 		DCK_CE_D1 <= DCK_CE;
-		CAP_CE    <= DCK_CE_D1;      -- haut 2 CLK après le front DCK_CE
+		if VRAM_FAST /= 0 then
+			CAP_CE <= DCK_CE;        -- haut 1 CLK après le front DCK_CE (BSRAM)
+		else
+			CAP_CE <= DCK_CE_D1;     -- haut 2 CLK après le front DCK_CE (SDRAM)
+		end if;
 		if DCK_CE = '1' then
 			SLOT_Q <= SLOT;           -- slot qui vient de se terminer
 		end if;

@@ -3767,14 +3767,18 @@ FRESULT f_open (
 
 
 	if (!fp) return FR_INVALID_OBJECT;
+	if (sd_trace_enabled) uart_print("fatfs: f_open entered\n");
 
 	/* Get logical drive number */
 	mode &= FF_FS_READONLY ? FA_READ : FA_READ | FA_WRITE | FA_CREATE_ALWAYS | FA_CREATE_NEW | FA_OPEN_ALWAYS | FA_OPEN_APPEND;
 	res = mount_volume(&path, &fs, mode);
+	if (sd_trace_enabled) uart_printf("fatfs: mount result=%d\n", (int)res);
 	if (res == FR_OK) {
 		dj.obj.fs = fs;
 		INIT_NAMBUF(fs);
+		if (sd_trace_enabled) uart_print("fatfs: follow_path begin\n");
 		res = follow_path(&dj, path);	/* Follow the file path */
+		if (sd_trace_enabled) uart_printf("fatfs: follow_path result=%d\n", (int)res);
 #if !FF_FS_READONLY	/* Read/Write configuration */
 		if (res == FR_OK) {
 			if (dj.fn[NSFLAG] & NS_NONAME) {	/* Origin directory itself? */

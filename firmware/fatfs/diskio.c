@@ -15,6 +15,7 @@
 #define DEV_SD 0
 
 int sd_initialized = 0;
+volatile int sd_trace_enabled = 0;
 int sd_writesector(uint32_t start_block, const uint8_t *buffer, uint32_t sector_count);
 
 DSTATUS disk_status (BYTE pdrv)
@@ -40,12 +41,19 @@ DSTATUS disk_initialize (BYTE pdrv)
 
 DRESULT disk_read (BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
 {
+    int ok;
+
     if (pdrv != DEV_SD)
         return RES_PARERR;
     if (!sd_initialized)
         return RES_NOTRDY;
 
-    return sd_readsector((uint32_t)sector, (uint8_t *)buff, count) ? RES_OK : RES_ERROR;
+    if (sd_trace_enabled)
+        uart_printf("sd: read begin sector=%d count=%d\n", (int)sector, (int)count);
+    ok = sd_readsector((uint32_t)sector, (uint8_t *)buff, count);
+    if (sd_trace_enabled)
+        uart_printf("sd: read end result=%d\n", ok);
+    return ok ? RES_OK : RES_ERROR;
 }
 
 #if FF_FS_READONLY == 0 || defined(_FS_READONLY)

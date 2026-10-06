@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('pce', 'sgx', 'cd', 'all')]
+    [ValidateSet('pce', 'sgx', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'superset', 'all')]
     [string]$Profile = 'all',
     [string]$GowinShell
 )
@@ -27,8 +27,13 @@ $profileIds = @{
     pce = 0
     sgx = 1
     cd  = 2
+    cdprobe = 2
+    cd_sgx = 2
+    cd_vdc1 = 2
+    cd_vdc1_gg = 2
+    superset = 3
 }
-$profiles = if ($Profile -eq 'all') { @('pce', 'sgx', 'cd') } else { @($Profile) }
+$profiles = if ($Profile -eq 'all') { @('pce', 'sgx', 'cd', 'superset') } else { @($Profile) }
 $profileTop = Join-Path $workDir 'top_tang_nano20k.v'
 
 New-Item -ItemType Directory -Force -Path $workDir, $outputRoot | Out-Null
@@ -51,6 +56,36 @@ foreach ($name in $profiles) {
             $parameterPattern,
             "parameter [1:0] CORE_PROFILE = 2'd$id",
             1)
+        if ($name -eq 'cdprobe') {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter \[1:0\] CORE_LOGIC_PROFILE = CORE_PROFILE',
+                "parameter [1:0] CORE_LOGIC_PROFILE = 2'd3",
+                1)
+        } elseif ($name -eq 'cd_sgx') {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_EXTRA_SGX = 0',
+                'parameter CORE_EXTRA_SGX = 1',
+                1)
+        } elseif ($name -eq 'cd_vdc1') {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_EXTRA_VDC1 = 0',
+                'parameter CORE_EXTRA_VDC1 = 1',
+                1)
+        } elseif ($name -eq 'cd_vdc1_gg') {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_EXTRA_VDC1 = 0',
+                'parameter CORE_EXTRA_VDC1 = 1',
+                1)
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_EXTRA_CHEATS = 0',
+                'parameter CORE_EXTRA_CHEATS = 1',
+                1)
+        }
         [System.IO.File]::WriteAllText(
             $profileTop,
             $profileSource,

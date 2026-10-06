@@ -51,6 +51,25 @@ endgenerate
 
 reg [INDEX_SIZE:0] index = '0;
 
+wire [MAX_CODES-1:0] code_match;
+wire [MAX_CODES-1:0] code_select;
+
+genvar g;
+generate
+for (g = 0; g < MAX_CODES; g = g + 1) begin : generate_code_match
+	assign code_match[g] = enable && codes[g][ENA_F_S] &&
+		(codes[g][ADDR_S-:ADDR_WIDTH] == addr_in) &&
+		(!codes[g][COMP_F_S] ||
+		 (codes[g][COMP_S-:DATA_WIDTH] == data_in));
+	if (g == MAX_CODES-1) begin : generate_last_select
+		assign code_select[g] = code_match[g];
+	end else begin : generate_priority_select
+		assign code_select[g] = code_match[g] &&
+			!(|code_match[MAX_CODES-1:g+1]);
+	end
+end
+endgenerate
+
 assign available = |index;
 
 reg code_change;
@@ -71,19 +90,12 @@ end
 
 always_comb begin
 	int x;
-	genie_ovr = 0;
 	genie_data = '0;
-
-	if (enable) begin
-		for (x = 0; x < MAX_CODES; x = x + 1) begin
-			if (codes[x][ENA_F_S] && codes[x][ADDR_S-:ADDR_WIDTH] == addr_in) begin
-				if (!codes[x][COMP_F_S] || (codes[x][COMP_S-:DATA_WIDTH] == data_in)) begin
-					genie_ovr = 1;
-					genie_data = codes[x][DATA_S-:DATA_WIDTH];
-				end
-			end
-		end
-	end
+	for (x = 0; x < MAX_CODES; x = x + 1)
+		genie_data |= codes[x][DATA_S-:DATA_WIDTH] &
+			{DATA_WIDTH{code_select[x]}};
 end
+
+assign genie_ovr = |code_match;
 
 endmodule
