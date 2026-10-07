@@ -117,7 +117,6 @@ int main(void) {
         uart_print("main: CD service ready\n");
 
     for (;;) {
-        int trace_cd_iteration = cd_needs_resume;
         uint32_t raw = joy_raw();
         uint32_t e = joy_edge();
         static uint32_t loops = 0;
@@ -159,7 +158,7 @@ int main(void) {
         }
 
         if (raw != last_raw) {
-            if (!cd_audio_playing) {
+            if (!cd_audio_playing && !cd_active) {
                 if (raw & JOY_START)
                     uart_print("joy: RUN pressed\n");
                 else
@@ -173,8 +172,6 @@ int main(void) {
         if (r != last_reg) {
             last_reg = r;
         }
-        if (trace_cd_iteration)
-            uart_print("main: joystick register sampled\n");
 
         if (!(raw & JOY_SELECT)) {
             // Select released: require another 500 ms hold next time.
@@ -209,18 +206,13 @@ int main(void) {
                    (e & (JOY_LEFT | JOY_RIGHT))) {
             scanline_cycle((e & JOY_RIGHT) ? 1 : -1);
         }
-        if (trace_cd_iteration)
-            uart_print("main: button handling done\n");
         if (!cd_audio_playing)
             delay(20);
         else if (reg_cd_usedw >= 3072)
             delay(2);
-        if (trace_cd_iteration)
-            uart_print("main: delay done\n");
 
         if (cd_needs_resume) {
             cd_needs_resume = 0;
-            uart_print("main: HuC resume write\n");
             pce_pause(0);
         }
     }

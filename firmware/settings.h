@@ -15,6 +15,8 @@ extern int audio_volume;
 extern int audio_bass;
 extern int audio_treble;
 extern int audio_output_hdmi;
+extern int audio_cdda_enabled;
+extern int audio_adpcm_enabled;
 extern int audio_paused;
 
 void game_pad_mode_load(const char *game_name);

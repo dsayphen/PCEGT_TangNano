@@ -111,6 +111,8 @@ module iosys #(
     output reg  [3:0]  audio_bass,
     output reg  [3:0]  audio_treble,
     output reg         audio_hdmi,
+    output reg         audio_cdda_enable,
+    output reg         audio_adpcm_enable,
 
     // Save-RAM service port. The CPU is paused while firmware accesses BRAM.
     input  wire [7:0]  brm_host_q,
@@ -460,7 +462,8 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    pad_mode_sel ? {6'd0, vce_cr_q, vcr_q, vdw_q, pad_mode} :
                    color_mode_sel ? {6'd0, vds_q, vsw_q, hde_q, hsw_q, color_mode} :
                    id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
-                   audio_sel    ? {19'b0, audio_hdmi, audio_treble, audio_bass, audio_volume} :
+                   audio_sel    ? {17'b0, audio_adpcm_enable, audio_cdda_enable,
+                                   audio_hdmi, audio_treble, audio_bass, audio_volume} :
                    rl_status_sel ? {30'b0, image_valid, loading} :
                    rl_debug_sel ? {2'b0, rl_timeout, rl_cnt, ld_idle, ld_busy, ld_wr,
                                    rl_clearing, rl_finishing, image_valid, loading} :
@@ -759,6 +762,8 @@ always @(posedge clk) begin
         audio_bass   <= mem_wdata[7:4];
         audio_treble <= mem_wdata[11:8];
         audio_hdmi   <= mem_wdata[12];
+        audio_cdda_enable <= mem_wdata[13];
+        audio_adpcm_enable <= mem_wdata[14];
     end
 
     // ---- end of transfer: wait for the SDRAM to really drain -------------
@@ -800,6 +805,8 @@ always @(posedge clk) begin
         audio_bass   <= 4'd5;      // flat (offset by +5)
         audio_treble <= 4'd5;      // flat (offset by +5)
         audio_hdmi   <= 1'b0;
+        audio_cdda_enable <= 1'b1;
+        audio_adpcm_enable <= 1'b1;
         brm_host_addr <= 11'd0;
         brm_host_data <= 8'd0;
         brm_host_we   <= 1'b0;

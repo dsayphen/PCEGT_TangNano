@@ -324,6 +324,8 @@ int audio_volume = 10;   // 0..10, hardware reset default: unity gain
 int audio_bass = 0;      // -5..5, hardware reset default: flat
 int audio_treble = 0;    // -5..5, hardware reset default: flat
 int audio_output_hdmi = 0; // 0 = onboard speaker, 1 = HDMI
+int audio_cdda_enabled = 1;
+int audio_adpcm_enabled = 1;
 int audio_paused = 0;
 
 // Pushes the current settings to reg_audio; bass/treble are biased by +5 to
@@ -334,7 +336,9 @@ void audio_apply(void) {
     reg_audio = volume |
                 ((uint32_t)(audio_bass + 5) << 4) |
                 ((uint32_t)(audio_treble + 5) << 8) |
-                ((uint32_t)audio_output_hdmi << 12);
+                ((uint32_t)audio_output_hdmi << 12) |
+                ((uint32_t)audio_cdda_enabled << 13) |
+                ((uint32_t)audio_adpcm_enabled << 14);
 }
 
 void audio_config_load(void) {
@@ -359,6 +363,10 @@ void audio_config_load(void) {
             audio_treble = (int)parse_u8(line + 7) - 5;
         } else if (starts_with(line, "output=")) {
             audio_output_hdmi = parse_u8(line + 7) == 1;
+        } else if (starts_with(line, "cd_audio=")) {
+            audio_cdda_enabled = parse_u8(line + 9) == 1;
+        } else if (starts_with(line, "adpcm=")) {
+            audio_adpcm_enabled = parse_u8(line + 6) == 1;
         }
     }
 
@@ -384,6 +392,8 @@ void audio_config_save(void) {
         "# volume : 0 (mute) .. 10 (max)\n"
         "# bass, treble : 0 (min) .. 10 (max), stored biased by +5 (5 = flat)\n"
         "# output : 0 = onboard speaker, 1 = HDMI\n"
+        "# cd_audio : 0 = mute CD-DA output, 1 = play it\n"
+        "# adpcm : 0 = mute ADPCM audio output, 1 = play it (DMA unchanged)\n"
         "# -----------------------------------\n";
 
     f_write(&file, header, (UINT)strlen(header), &bw);
@@ -405,6 +415,12 @@ void audio_config_save(void) {
 
     f_write(&file, "output=", 7, &bw);
     f_write(&file, audio_output_hdmi ? "1\n" : "0\n", 2, &bw);
+
+    f_write(&file, "cd_audio=", 9, &bw);
+    f_write(&file, audio_cdda_enabled ? "1\n" : "0\n", 2, &bw);
+
+    f_write(&file, "adpcm=", 6, &bw);
+    f_write(&file, audio_adpcm_enabled ? "1\n" : "0\n", 2, &bw);
 
     f_close(&file);
 }

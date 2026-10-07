@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('pce', 'sgx', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_gg16', 'superset', 'all')]
+    [ValidateSet('pce', 'pce_gg8', 'sgx', 'cd', 'cd_gg4', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_gg16', 'cd_vdc1_quiet', 'superset', 'all')]
     [string]$Profile = 'all',
     [string]$GowinShell
 )
@@ -25,13 +25,16 @@ if (-not (Test-Path $GowinShell)) {
 
 $profileIds = @{
     pce = 0
+    pce_gg8 = 0
     sgx = 1
     cd  = 2
+    cd_gg4 = 2
     cdprobe = 2
     cd_sgx = 2
     cd_vdc1 = 2
     cd_vdc1_gg = 2
     cd_vdc1_gg16 = 2
+    cd_vdc1_quiet = 2
     superset = 3
 }
 $profiles = if ($Profile -eq 'all') { @('pce', 'sgx', 'cd', 'superset') } else { @($Profile) }
@@ -57,7 +60,24 @@ foreach ($name in $profiles) {
             $parameterPattern,
             "parameter [1:0] CORE_PROFILE = 2'd$id",
             1)
-        if ($name -eq 'cdprobe') {
+        if ($name -eq 'cd_gg4') {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_CHEAT_MAX_CODES =\s*\(CORE_PROFILE == 2''d0 \|\| CORE_PROFILE == 2''d2\) \? 8 : 32',
+                'parameter CORE_CHEAT_MAX_CODES = 4',
+                1)
+        } elseif ($name -eq 'pce_gg8') {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_EXTRA_CHEATS = 0',
+                'parameter CORE_EXTRA_CHEATS = 1',
+                1)
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_CHEAT_MAX_CODES = CORE_PROFILE == 2''d2 \? 8 : 32',
+                'parameter CORE_CHEAT_MAX_CODES = 8',
+                1)
+        } elseif ($name -eq 'cdprobe') {
             $profileSource = [regex]::Replace(
                 $profileSource,
                 'parameter \[1:0\] CORE_LOGIC_PROFILE = CORE_PROFILE',
@@ -101,6 +121,17 @@ foreach ($name in $profiles) {
                 $profileSource,
                 'parameter CORE_CHEAT_MAX_CODES = 32',
                 'parameter CORE_CHEAT_MAX_CODES = 16',
+                1)
+        } elseif ($name -eq 'cd_vdc1_quiet') {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_EXTRA_VDC1 = 0',
+                'parameter CORE_EXTRA_VDC1 = 1',
+                1)
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_VDC1_MEMORY = 1',
+                'parameter CORE_VDC1_MEMORY = 0',
                 1)
         }
         [System.IO.File]::WriteAllText(

@@ -377,21 +377,23 @@ The profile builds produced these additional synthesis results:
 
 | Profile | LUT | ALU | Total logic | BSRAM | BSRAM remaining |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| PCE, one VDC with BSRAM VRAM, Game Genie off | 13,006 | 1,695 | 15,715 / 20,736 (76%) | 46 / 46 | 0 |
-| SuperGrafx, Game Genie (32 patches) | 10,330 | 2,759 | 14,133 / 20,736 (69%) | 39 / 46 | 7 |
-| CD, one VDC, Game Genie (8 patches) | 12,783 | 2,412 | 17,793 / 20,736 (86%) | 27 / 46 | 19 |
-| Superset, Game Genie (32 patches) | 14,177 | 3,275 | 20,080 / 20,736 (97%) | 43 / 46 | 3 |
+| PCE, one VDC with BSRAM VRAM, Game Genie (8 patches) | 12,946 | 1,879 | 15,839 / 20,736 (77%) | 46 / 46 | 0 |
+| SuperGrafx, Game Genie (32 patches) | 10,377 | 2,759 | 14,180 / 20,736 (69%) | 39 / 46 | 7 |
+| CD, VDC1 active / VPC off, Game Genie (4 patches) | 12,770 | 2,334 | 17,702 / 20,736 (86%) | 27 / 46 | 19 |
+| Superset, Game Genie (32 patches) | 14,243 | 3,274 | 20,145 / 20,736 (98%) | 43 / 46 | 3 |
 
 The LUT column counts LUT cells only; inverter cells are reported separately
 (the exact inverter counts vary with synthesis optimization). Current worst
-setup slack is `+0.620 ns` for PCE, `-0.563 ns` for SGX, `+0.006 ns` for CD,
-and `-6.844 ns` for Superset. The CD build enables Game Genie but limits its
-hardware table to eight address/value patches; the firmware rejects activations
-that exceed this limit. Its timing margin is positive but extremely small. SGX
-and Superset complete place-and-route but do not meet setup timing in these
-builds. The PCE BSRAM profile uses every BSRAM block and has no memory-block
-headroom. Generated profile binaries are `907,418` bytes each. These are build
-measurements, not hardware validation of automatic Multi-Boot switching.
+setup slack is `+0.084 ns` for PCE, `+0.004 ns` for SGX, `+0.013 ns` for CD,
+and `-5.391 ns` for Superset. CD keeps VDC1's SDRAM activity, which was needed
+for reliable CD startup, while SGX CPU address decoding and the VPC remain off.
+The CD Game Genie table is limited to four address/value patches; PCE is limited
+to eight, and the firmware refuses activations that exceed the profile limit.
+PCE and CD timing margins are positive but extremely small. Superset does not
+meet setup timing in this build. The PCE BSRAM profile uses every BSRAM block
+and has no memory-block headroom. Generated profile binaries are `907,418`
+bytes each. These are build measurements, not hardware validation of automatic
+Multi-Boot switching.
 
 The LUT figure above counts LUT cells only. The report also lists 97 `INV`
 cells; its logic summary displays 14,267 LUT-related cells including those

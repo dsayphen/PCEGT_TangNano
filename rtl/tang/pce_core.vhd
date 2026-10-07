@@ -45,6 +45,8 @@ entity pce_core is
 		sgx_mode   : in  std_logic;
 		cd_enable  : in  std_logic;
 		cd_audio_hold : in std_logic;
+		cd_audio_enabled : in std_logic := '1';
+		adpcm_audio_enabled : in std_logic := '1';
 		rom_pop    : in  std_logic;
 		brm_host_addr : in  std_logic_vector(10 downto 0);
 		brm_host_data : in  std_logic_vector(7 downto 0);
@@ -163,6 +165,9 @@ architecture rtl of pce_core is
 	signal cdda_l : signed(19 downto 0);
 	signal cdda_r : signed(19 downto 0);
 	signal adpcm_nc  : signed(15 downto 0);
+	signal cdda_mix_l : signed(19 downto 0);
+	signal cdda_mix_r : signed(19 downto 0);
+	signal adpcm_mix : signed(15 downto 0);
 
 	function saturate_audio(value : signed(21 downto 0)) return signed is
 		variable result : signed(19 downto 0);
@@ -348,12 +353,15 @@ begin
 		ADPCM_DBG => adpcm_dbg
 	);
 
+	cdda_mix_l <= cdda_l when cd_audio_enabled = '1' else (others => '0');
+	cdda_mix_r <= cdda_r when cd_audio_enabled = '1' else (others => '0');
+	adpcm_mix <= adpcm_nc when adpcm_audio_enabled = '1' else (others => '0');
 	aud_mix_l <= resize(psg_l, aud_mix_l'length) +
-		      resize(cdda_l, aud_mix_l'length) +
-		      shift_left(resize(adpcm_nc, aud_mix_l'length), 4);
+		      resize(cdda_mix_l, aud_mix_l'length) +
+		      shift_left(resize(adpcm_mix, aud_mix_l'length), 4);
 	aud_mix_r <= resize(psg_r, aud_mix_r'length) +
-		      resize(cdda_r, aud_mix_r'length) +
-		      shift_left(resize(adpcm_nc, aud_mix_r'length), 4);
+		      resize(cdda_mix_r, aud_mix_r'length) +
+		      shift_left(resize(adpcm_mix, aud_mix_r'length), 4);
 	aud_l <= std_logic_vector(saturate_audio(aud_mix_l));
 	aud_r <= std_logic_vector(saturate_audio(aud_mix_r));
 

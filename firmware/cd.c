@@ -480,15 +480,16 @@ int find_cd_cue(char *cue_name, size_t cue_len) {
 }
 
 void cd_service(void) {
-    static uint32_t logged_events = 0;
     static int service_logged = 0;
-    static int command_logged = 0;
-    static int command_done_logged = 0;
-    static int first_sector_logged = 0;
-    static int event_logged = 0;
     uint32_t events = reg_cd_events;
     if (!cd_active)
         return;
+    if (!audio_cdda_enabled && cd_audio_playing) {
+        cd_audio_playing = 0;
+        cd_audio_paused = 1;
+        cd_audio_loop = 0;
+        reg_cd_audio_hold = 1;
+    }
     if (!service_logged) {
         uart_print("cd: service active\n");
         service_logged = 1;
@@ -541,13 +542,6 @@ void cd_service(void) {
         }
     }
 
-    uint32_t new_events = (events & 0x1f) & ~logged_events;
-    logged_events = events & 0x1f;
-    if (new_events && !event_logged) {
-        uart_print("cd: first hardware event\n");
-        event_logged = 1;
-    }
-
     // The SCSI core must fully drain any FIFO bytes pushed below before it
     // can be told status is ready; doing it earlier reorders phases and
     // confuses the BIOS driver.
@@ -561,10 +555,6 @@ void cd_service(void) {
         reg_cd_ack = 0x10;
 
     if (events & 0x01) {
-        if (!command_logged) {
-            uart_print("cd: first command received\n");
-            command_logged = 1;
-        }
         uint32_t cmd0 = reg_cd_cmd0;
         uint32_t cmd1 = reg_cd_cmd1;
         uint32_t opcode = cmd0 & 0xff;
@@ -574,15 +564,6 @@ void cd_service(void) {
         uint32_t count = cmd1 & 0xff;
             if (opcode == 0x08 && count == 0)
             count = 256;
-
-        if (opcode == 0x08)
-            uart_print("cd: READ command\n");
-        else if (opcode == 0xde)
-            uart_print("cd: GET_DIR_INFO command\n");
-        else if (opcode == 0x00)
-            uart_print("cd: TEST UNIT READY command\n");
-        else
-            uart_print("cd: other command\n");
 
         int pushed_data = 0;
 
@@ -607,9 +588,7 @@ void cd_service(void) {
                 uint32_t offset = frame * cd_track_sector_size[t] +
                                   cd_track_data_offset[t];
                 UINT br;
-                if (!first_sector_logged)
-                    uart_print("cd: first sector read begin\n");
-                sd_trace_enabled = !first_sector_logged;
+                sd_trace_enabled = 0;
                 FRESULT seek_result = f_lseek(&cd_image, offset);
                 if (seek_result != FR_OK) {
                     sd_trace_enabled = 0;
@@ -626,14 +605,8 @@ void cd_service(void) {
                     ok = 0;
                     break;
                 }
-                if (!first_sector_logged)
-                    uart_print("cd: first sector read ok\n");
                 for (UINT i = 0; i < br; i++)
                     reg_cd_feed = (uint32_t)io_buf[i] | 0x100;
-                if (!first_sector_logged) {
-                    uart_print("cd: first sector fed\n");
-                    first_sector_logged = 1;
-                }
 
                 // the SCSI FIFO only holds one sector; without waiting here
                 // the next sector's bytes overrun it and get silently lost
@@ -754,7 +727,8 @@ void cd_service(void) {
                         cd_audio_end = next_track;
                 }
                 cd_audio_loop = (cmd0 >> 8 & 3) == 1;
-                cd_audio_playing = (cmd0 >> 8 & 3) != 0 && cd_audio_pos < cd_audio_end;
+                cd_audio_playing = audio_cdda_enabled &&
+                                   (cmd0 >> 8 & 3) != 0 && cd_audio_pos < cd_audio_end;
                 cd_audio_paused = !cd_audio_playing;
             }
             uart_printf("cd: sapsp track=%d lba=%d play=%d\n",
@@ -798,7 +772,8 @@ void cd_service(void) {
                     cd_audio_end = (uint32_t)f_size(&cd_audio_file);
             }
             cd_audio_loop = (cmd0 >> 8 & 3) == 1;
-            cd_audio_playing = (cmd0 >> 8 & 3) != 0 && cd_audio_file_open &&
+            cd_audio_playing = audio_cdda_enabled &&
+                               (cmd0 >> 8 & 3) != 0 && cd_audio_file_open &&
                                (cd_audio_pos < cd_audio_end ||
                                 (cd_audio_loop && cd_audio_start < cd_audio_end));
             cd_audio_paused = 0;
@@ -814,10 +789,6 @@ void cd_service(void) {
         }
 
         reg_cd_ack = 0x01;
-        if (command_logged && !command_done_logged && !first_sector_logged) {
-            uart_print("cd: command completed without sector read\n");
-            command_done_logged = 1;
-        }
         if (pushed_data)
             cd_stat_pending = 1;
         else

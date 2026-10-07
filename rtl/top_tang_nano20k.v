@@ -24,7 +24,9 @@ module top_tang_nano20k #(
     parameter CORE_EXTRA_SGX = 0,
     parameter CORE_EXTRA_VDC1 = 0,
     parameter CORE_EXTRA_CHEATS = 0,
-    parameter CORE_CHEAT_MAX_CODES = CORE_PROFILE == 2'd2 ? 8 : 32
+    parameter CORE_CHEAT_MAX_CODES = CORE_PROFILE == 2'd2 ? 4 :
+        CORE_PROFILE == 2'd0 ? 8 : 32,
+    parameter CORE_VDC1_MEMORY = 1
 ) (
     input  wire        sys_clk,        // 27 MHz crystal
 
@@ -97,12 +99,15 @@ localparam PROFILE_SUPERSET = 2'd3;
 localparam CORE_HAS_SGX = (CORE_LOGIC_PROFILE == PROFILE_SGX) ||
                           (CORE_LOGIC_PROFILE == PROFILE_SUPERSET) ||
                           (CORE_EXTRA_SGX != 0);
+localparam CORE_HAS_VDC1 = CORE_HAS_SGX || (CORE_PROFILE == PROFILE_CD) ||
+                           (CORE_EXTRA_VDC1 != 0);
 localparam CORE_HAS_CD  = (CORE_LOGIC_PROFILE == PROFILE_CD) ||
                           (CORE_LOGIC_PROFILE == PROFILE_SUPERSET);
 localparam CORE_HAS_AC  = (CORE_LOGIC_PROFILE == PROFILE_CD) ||
                           (CORE_LOGIC_PROFILE == PROFILE_SUPERSET);
 localparam CORE_HAS_CHEATS = (CORE_LOGIC_PROFILE == PROFILE_SGX) ||
                              (CORE_LOGIC_PROFILE == PROFILE_SUPERSET) ||
+                             (CORE_PROFILE == PROFILE_PCE) ||
                              (CORE_PROFILE == PROFILE_CD) ||
                              (CORE_EXTRA_CHEATS != 0);
 
@@ -207,6 +212,8 @@ wire [3:0]  audio_volume;
 wire [3:0]  audio_bass;
 wire [3:0]  audio_treble;
 wire        audio_hdmi;
+wire        audio_cdda_enable;
+wire        audio_adpcm_enable;
 
 // ---- softcore / menu ------------------------------------------------------
 wire        rv_ld_wr;
@@ -326,6 +333,8 @@ iosys #(
     .audio_bass       (audio_bass),
     .audio_treble     (audio_treble),
     .audio_hdmi       (audio_hdmi),
+    .audio_cdda_enable (audio_cdda_enable),
+    .audio_adpcm_enable (audio_adpcm_enable),
     .brm_host_q       (brm_host_q),
     .brm_host_addr    (brm_host_addr),
     .brm_host_data    (brm_host_data),
@@ -466,8 +475,11 @@ wire        vram0_we;
 wire [15:0] vram1_a;
 wire [15:0] vram1_do;
 wire [15:0] vram1_di;
+wire [15:0] vram1_mem_di;
 wire        vram1_rd;
 wire        vram1_we;
+wire        vram1_mem_rd = vram1_rd && (CORE_VDC1_MEMORY != 0);
+wire        vram1_mem_we = vram1_we && (CORE_VDC1_MEMORY != 0);
 wire        vid_ce;
 wire        vid_vbl;
 wire        vram_refresh_window;
@@ -514,9 +526,9 @@ pce_sdram_ctrl_3ch #(
 
     .vram1_addr    (vram1_a),
     .vram1_din     (vram1_do),
-    .vram1_dout    (vram1_di),
-    .vram1_rd      (vram1_rd),
-    .vram1_we      (vram1_we),
+    .vram1_dout    (vram1_mem_di),
+    .vram1_rd      (vram1_mem_rd),
+    .vram1_we      (vram1_mem_we),
 
     .rv_valid      (rv_valid),
     .rv_ready      (rv_ready),
@@ -542,6 +554,8 @@ pce_sdram_ctrl_3ch #(
     .init_done     (sdram_init_done),
     .refresh_gap_dbg (refresh_gap_dbg)
 );
+
+assign vram1_di = (CORE_VDC1_MEMORY != 0) ? vram1_mem_di : 16'd0;
 
 wire [7:0] refresh_gap_dbg;
 
@@ -618,7 +632,7 @@ pce_core #(
     .AC_SUPPORT  (CORE_HAS_AC),
     .CHEAT_SUPPORT (CORE_HAS_CHEATS),
     .CHEAT_MAX_CODES (CORE_CHEAT_MAX_CODES),
-    .VDC1_SUPPORT (CORE_HAS_SGX || (CORE_EXTRA_VDC1 != 0)),
+    .VDC1_SUPPORT (CORE_HAS_VDC1),
     .INTERNAL_VRAM (CORE_PROFILE == PROFILE_PCE)
 ) u_pce (
     .clk        (clk_sys),
@@ -637,6 +651,8 @@ pce_core #(
     .sgx_mode   (sgx_mode),
     .cd_enable  (rv_cd_mode),
     .cd_audio_hold (cd_audio_hold),
+    .cd_audio_enabled (audio_cdda_enable),
+    .adpcm_audio_enabled (audio_adpcm_enable),
     .rom_pop    (rv_rom_pop),
     .brm_host_addr (brm_host_addr),
     .brm_host_data (brm_host_data),

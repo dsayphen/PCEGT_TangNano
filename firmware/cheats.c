@@ -4,7 +4,8 @@
 
 #define CHEAT_GROUP_MAX 64
 #define CHEAT_PATCH_MAX 32
-#define CHEAT_CD_PATCH_MAX 8
+#define CHEAT_PCE_PATCH_MAX 8
+#define CHEAT_CD_PATCH_MAX 4
 #define CHEAT_DESC_SIZE 96
 
 typedef struct {
@@ -26,8 +27,11 @@ static int enabled_groups;
 static char status_text[32] = "No cheats file";
 
 static int hardware_patch_limit(void) {
-    return CORE_PROFILE_ID == CORE_PROFILE_CD ? CHEAT_CD_PATCH_MAX
-                                               : CHEAT_PATCH_MAX;
+    if (CORE_PROFILE_ID == CORE_PROFILE_CD)
+        return CHEAT_CD_PATCH_MAX;
+    if (CORE_PROFILE_ID == CORE_PROFILE_PCE)
+        return CHEAT_PCE_PATCH_MAX;
+    return CHEAT_PATCH_MAX;
 }
 
 static char *trim(char *text) {

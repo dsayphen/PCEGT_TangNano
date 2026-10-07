@@ -281,13 +281,13 @@ static void video_menu(int in_game) {
     }
 }
 
-// Volume/Bass/Treble sub-menu, reached from "Audio Settings >" in pause_menu.
+// Global audio options are available in the browser; in-game keeps only live mix controls.
 static void audio_menu(int in_game) {
-    static const char *labels[5] = {
-        "Volume", "Bass", "Treble", "Output", "Back"
+    static const char *labels[7] = {
+        "Volume", "Bass", "Treble", "Output", "CD-DA", "ADPCM audio", "Back"
     };
     int active = 0;
-    const int n_items = 5;
+    const int n_items = in_game ? 4 : 7;
 
     menu_header("Audio Settings", in_game);
 
@@ -298,7 +298,7 @@ static void audio_menu(int in_game) {
 
             char label[24];
             int j = 0;
-            const char *prefix = labels[i];
+            const char *prefix = (in_game && i == 3) ? "Back" : labels[i];
             while (*prefix)
                 label[j++] = *prefix++;
 
@@ -318,8 +318,15 @@ static void audio_menu(int in_game) {
                 len = u8_to_str(num, (uint8_t)val);
                 for (int k = 0; k < len; k++)
                     label[j++] = num[k];
-            } else if (i == 3) {
+            } else if (!in_game && i == 3) {
                 const char *value = audio_output_hdmi ? "HDMI" : "Speaker";
+                label[j++] = ':';
+                label[j++] = ' ';
+                while (*value)
+                    label[j++] = *value++;
+            } else if (!in_game && (i == 4 || i == 5)) {
+                const char *value = (i == 4 ? audio_cdda_enabled : audio_adpcm_enabled)
+                    ? "On" : "Off";
                 label[j++] = ':';
                 label[j++] = ' ';
                 while (*value)
@@ -349,8 +356,15 @@ static void audio_menu(int in_game) {
                 audio_treble--;
                 audio_apply();
                 audio_config_save();
-            } else if (active == 3) {
+            } else if (!in_game && active == 3) {
                 audio_output_hdmi = !audio_output_hdmi;
+                audio_apply();
+                audio_config_save();
+            } else if (!in_game && (active == 4 || active == 5)) {
+                if (active == 4)
+                    audio_cdda_enabled = !audio_cdda_enabled;
+                else
+                    audio_adpcm_enabled = !audio_adpcm_enabled;
                 audio_apply();
                 audio_config_save();
             }
@@ -367,12 +381,19 @@ static void audio_menu(int in_game) {
                 audio_treble++;
                 audio_apply();
                 audio_config_save();
-            } else if (active == 3) {
+            } else if (!in_game && active == 3) {
                 audio_output_hdmi = !audio_output_hdmi;
                 audio_apply();
                 audio_config_save();
+            } else if (!in_game && (active == 4 || active == 5)) {
+                if (active == 4)
+                    audio_cdda_enabled = !audio_cdda_enabled;
+                else
+                    audio_adpcm_enabled = !audio_adpcm_enabled;
+                audio_apply();
+                audio_config_save();
             }
-        } else if ((e & JOY_B) || ((e & JOY_A) && active == 4)) {
+        } else if ((e & JOY_B) || ((e & JOY_A) && active == n_items - 1)) {
             return;
         }
         delay(20);
@@ -386,7 +407,8 @@ int pause_menu(void) {
     };
     int active = 0;
     const int n_items = 7;
-    const int has_cheats = CORE_PROFILE_ID == CORE_PROFILE_SGX ||
+    const int has_cheats = CORE_PROFILE_ID == CORE_PROFILE_PCE ||
+                           CORE_PROFILE_ID == CORE_PROFILE_SGX ||
                            CORE_PROFILE_ID == CORE_PROFILE_CD ||
                            CORE_PROFILE_ID == CORE_PROFILE_SUPERSET;
 
