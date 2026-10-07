@@ -23,7 +23,8 @@ module top_tang_nano20k #(
     parameter [1:0] CORE_LOGIC_PROFILE = CORE_PROFILE,
     parameter CORE_EXTRA_SGX = 0,
     parameter CORE_EXTRA_VDC1 = 0,
-    parameter CORE_EXTRA_CHEATS = 0
+    parameter CORE_EXTRA_CHEATS = 0,
+    parameter CORE_CHEAT_MAX_CODES = CORE_PROFILE == 2'd2 ? 8 : 32
 ) (
     input  wire        sys_clk,        // 27 MHz crystal
 
@@ -102,6 +103,7 @@ localparam CORE_HAS_AC  = (CORE_LOGIC_PROFILE == PROFILE_CD) ||
                           (CORE_LOGIC_PROFILE == PROFILE_SUPERSET);
 localparam CORE_HAS_CHEATS = (CORE_LOGIC_PROFILE == PROFILE_SGX) ||
                              (CORE_LOGIC_PROFILE == PROFILE_SUPERSET) ||
+                             (CORE_PROFILE == PROFILE_CD) ||
                              (CORE_EXTRA_CHEATS != 0);
 
 // Firmware image location in the on-board SPI NOR flash.  The Tang Nano 20K
@@ -615,6 +617,7 @@ pce_core #(
     .CD_SUPPORT  (CORE_HAS_CD),
     .AC_SUPPORT  (CORE_HAS_AC),
     .CHEAT_SUPPORT (CORE_HAS_CHEATS),
+    .CHEAT_MAX_CODES (CORE_CHEAT_MAX_CODES),
     .VDC1_SUPPORT (CORE_HAS_SGX || (CORE_EXTRA_VDC1 != 0)),
     .INTERNAL_VRAM (CORE_PROFILE == PROFILE_PCE)
 ) u_pce (

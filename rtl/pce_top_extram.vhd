@@ -8,6 +8,7 @@ entity pce_top is
 	generic (
 		SGX_SUPPORT   : integer := 0;
 		CHEAT_SUPPORT : integer := 0;
+		CHEAT_MAX_CODES : integer := 32;
 		PSG_O_WIDTH: integer := 16;
 		MAX_SPRITES: integer := 16;
 		USE_INTERNAL_RAM: integer := 0;
@@ -237,6 +238,7 @@ component CODES is
 	generic(
 		ADDR_WIDTH  : in integer := 16;
 		DATA_WIDTH  : in integer := 8;
+		MAX_CODES   : in integer := 32;
 		COMPARE_SUPPORT : in integer := 1
 	);
 	port(
@@ -366,6 +368,7 @@ GAMEGENIE : component CODES
 generic map(
 	ADDR_WIDTH => 21,
 	DATA_WIDTH => 8,
+	MAX_CODES => CHEAT_MAX_CODES,
 	COMPARE_SUPPORT => 0
 )
 port map(

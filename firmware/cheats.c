@@ -4,6 +4,7 @@
 
 #define CHEAT_GROUP_MAX 64
 #define CHEAT_PATCH_MAX 32
+#define CHEAT_CD_PATCH_MAX 8
 #define CHEAT_DESC_SIZE 96
 
 typedef struct {
@@ -23,6 +24,11 @@ static cheat_group_t groups[CHEAT_GROUP_MAX];
 static int group_count;
 static int enabled_groups;
 static char status_text[32] = "No cheats file";
+
+static int hardware_patch_limit(void) {
+    return CORE_PROFILE_ID == CORE_PROFILE_CD ? CHEAT_CD_PATCH_MAX
+                                               : CHEAT_PATCH_MAX;
+}
 
 static char *trim(char *text) {
     char *end;
@@ -213,7 +219,7 @@ static int active_patch_count(void) {
 }
 
 static int hardware_reload(void) {
-    if (active_patch_count() > CHEAT_PATCH_MAX)
+    if (active_patch_count() > hardware_patch_limit())
         return -1;
     reg_cheat_ctrl = 2;
     for (int i = 0; i < group_count; i++) {
@@ -295,11 +301,12 @@ void cheats_load(const char *game_name, enum cheat_game_type type) {
     enabled_groups = 0;
     for (int i = 0; i < group_count; i++)
         enabled_groups += groups[i].enabled != 0;
-    if (active_patch_count() > CHEAT_PATCH_MAX) {
+    if (active_patch_count() > hardware_patch_limit()) {
         strcpy(status_text, "Too many active patches");
-        group_count = 0;
+        for (int i = 0; i < group_count; i++)
+            groups[i].enabled = 0;
         enabled_groups = 0;
-        uart_print("cheats: active selection exceeds 32 patches\n");
+        uart_print("cheats: active selection exceeds hardware limit\n");
         return;
     }
     if (active_patch_count() != 0 && hardware_reload() != 0) {
@@ -328,7 +335,7 @@ int cheats_toggle(int index) {
         return -1;
     groups[index].enabled = !groups[index].enabled;
     enabled_groups += groups[index].enabled ? 1 : -1;
-    if (active_patch_count() > CHEAT_PATCH_MAX) {
+    if (active_patch_count() > hardware_patch_limit()) {
         groups[index].enabled = !groups[index].enabled;
         enabled_groups += groups[index].enabled ? 1 : -1;
         strcpy(status_text, "Too many active patches");

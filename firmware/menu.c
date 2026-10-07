@@ -387,6 +387,7 @@ int pause_menu(void) {
     int active = 0;
     const int n_items = 7;
     const int has_cheats = CORE_PROFILE_ID == CORE_PROFILE_SGX ||
+                           CORE_PROFILE_ID == CORE_PROFILE_CD ||
                            CORE_PROFILE_ID == CORE_PROFILE_SUPERSET;
 
     vdc_timing_dump();

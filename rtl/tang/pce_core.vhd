@@ -22,6 +22,7 @@ entity pce_core is
 		CD_SUPPORT  : integer := 1;
 		AC_SUPPORT  : integer := 1;
 		CHEAT_SUPPORT : integer := 1;
+		CHEAT_MAX_CODES : integer := 32;
 		VDC1_SUPPORT : integer := SGX_SUPPORT;
 		INTERNAL_VRAM : integer := 0
 	);
@@ -220,6 +221,7 @@ begin
 	generic map (
 		SGX_SUPPORT      => SGX_SUPPORT,
 		CHEAT_SUPPORT    => CHEAT_SUPPORT,
+		CHEAT_MAX_CODES  => CHEAT_MAX_CODES,
 		PSG_O_WIDTH      => 20,
 		MAX_SPRITES      => 16,
 		USE_INTERNAL_RAM => 1,

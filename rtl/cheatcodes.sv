@@ -51,21 +51,38 @@ endgenerate
 
 reg [INDEX_SIZE:0] index = '0;
 
-wire [MAX_CODES-1:0] code_match;
-wire [MAX_CODES-1:0] code_select;
+localparam TREE_LEVELS = $clog2(MAX_CODES);
+localparam TREE_LEAVES = 1 << TREE_LEVELS;
 
-genvar g;
+wire [TREE_LEAVES-1:0] match_tree [0:TREE_LEVELS];
+wire [TREE_LEAVES*DATA_WIDTH-1:0] data_tree [0:TREE_LEVELS];
+
+genvar leaf;
 generate
-for (g = 0; g < MAX_CODES; g = g + 1) begin : generate_code_match
-	assign code_match[g] = enable && codes[g][ENA_F_S] &&
-		(codes[g][ADDR_S-:ADDR_WIDTH] == addr_in) &&
-		(!codes[g][COMP_F_S] ||
-		 (codes[g][COMP_S-:DATA_WIDTH] == data_in));
-	if (g == MAX_CODES-1) begin : generate_last_select
-		assign code_select[g] = code_match[g];
-	end else begin : generate_priority_select
-		assign code_select[g] = code_match[g] &&
-			!(|code_match[MAX_CODES-1:g+1]);
+for (leaf = 0; leaf < TREE_LEAVES; leaf = leaf + 1) begin : generate_match_leaves
+	if (leaf < MAX_CODES) begin : generate_valid_leaf
+		assign match_tree[0][leaf] = enable && codes[leaf][ENA_F_S] &&
+			(codes[leaf][ADDR_S-:ADDR_WIDTH] == addr_in) &&
+			(!codes[leaf][COMP_F_S] ||
+			 (codes[leaf][COMP_S-:DATA_WIDTH] == data_in));
+		assign data_tree[0][leaf*DATA_WIDTH +: DATA_WIDTH] =
+			match_tree[0][leaf] ? codes[leaf][DATA_S-:DATA_WIDTH] : '0;
+	end else begin : generate_empty_leaf
+		assign match_tree[0][leaf] = 1'b0;
+		assign data_tree[0][leaf*DATA_WIDTH +: DATA_WIDTH] = '0;
+	end
+end
+
+for (genvar level = 0; level < TREE_LEVELS; level = level + 1) begin : generate_tree_level
+	for (genvar node = 0; node < (TREE_LEAVES >> (level + 1)); node = node + 1) begin : generate_tree_node
+		localparam LOW_NODE = node * 2;
+		localparam HIGH_NODE = LOW_NODE + 1;
+		assign match_tree[level+1][node] = match_tree[level][LOW_NODE] ||
+			match_tree[level][HIGH_NODE];
+		assign data_tree[level+1][node*DATA_WIDTH +: DATA_WIDTH] =
+			match_tree[level][HIGH_NODE]
+			? data_tree[level][HIGH_NODE*DATA_WIDTH +: DATA_WIDTH]
+			: data_tree[level][LOW_NODE*DATA_WIDTH +: DATA_WIDTH];
 	end
 end
 endgenerate
@@ -89,13 +106,8 @@ always_ff @(posedge clk) begin
 end
 
 always_comb begin
-	int x;
-	genie_data = '0;
-	for (x = 0; x < MAX_CODES; x = x + 1)
-		genie_data |= codes[x][DATA_S-:DATA_WIDTH] &
-			{DATA_WIDTH{code_select[x]}};
+	genie_data = data_tree[TREE_LEVELS][0 +: DATA_WIDTH];
+	genie_ovr = match_tree[TREE_LEVELS][0];
 end
-
-assign genie_ovr = |code_match;
 
 endmodule
