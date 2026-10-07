@@ -52,6 +52,8 @@ architecture rtl of SCSI is
 		SP_STAT_END,
 		SP_MSGIN_START,
 		SP_MSGIN_END,
+		SP_DATAIN_PREP,
+		SP_DATAIN_LATCH,
 		SP_DATAIN_START,
 		SP_DATAIN_END,
 		SP_DATAOUT_START,
@@ -200,14 +202,12 @@ begin
 							REQ_Nr <= '0';
 							SP <= SP_STAT_START;
 						elsif EMPTY = '0' then
-							DBO <= FIFO_Q;
 							BSY_Nr <= '0';
 							MSG_Nr <= '1';
 							CD_Nr <= '1';
 							IO_Nr <= '0';
-							REQ_Nr <= '0';
 							FIFO_RD_REQ <= '1';
-							SP <= SP_DATAIN_START;
+							SP <= SP_DATAIN_PREP;
 						elsif DOUT_PEND = '1' then
 							DOUT_PEND <= '0';
 							BSY_Nr <= '0';
@@ -278,6 +278,14 @@ begin
 							SP <= SP_FREE;
 						end if;
 						
+					when SP_DATAIN_PREP =>
+						SP <= SP_DATAIN_LATCH;
+					
+					when SP_DATAIN_LATCH =>
+						DBO <= FIFO_Q;
+						REQ_Nr <= '0';
+						SP <= SP_DATAIN_START;
+					
 					when SP_DATAIN_START =>
 						if REQ_Nr = '0' and ACK_N = '0' then
 							REQ_Nr <= '1';
@@ -288,10 +296,8 @@ begin
 					when SP_DATAIN_END =>
 						if REQ_Nr = '1' and ACK_N = '1' then
 							if EMPTY = '0' then
-								DBO <= FIFO_Q;
-								REQ_Nr <= '0';
 								FIFO_RD_REQ <= '1';
-								SP <= SP_DATAIN_START;
+								SP <= SP_DATAIN_PREP;
 							else
 								CD_DATA_END <= '1';
 								SP <= SP_FREE;

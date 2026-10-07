@@ -336,13 +336,15 @@ unchanged, and HDMI playback still needs verification on a physical display.
 The HuC6280 PSG, CDDA and decoded ADPCM are mixed before the board's 16-bit
 stereo I2S output (about 48.2 kHz); the CDDA sample clock is approximately
 44.35 kHz rather than exactly 44.1 kHz. The CDDA FIFO is 6 KiB; firmware services
-it from the SD card through a 32-bit audio feed port. The CD unit supports
+it from the SD card through a 32-bit audio feed port. The SCSI CD-data FIFO is
+4 KiB (two sectors), implemented in BSRAM; its synchronous read uses a prefetch
+state before asserting SCSI REQ. The CD unit supports
 track selection, repeat, pause, GET SUBQ and register-controlled CDDA/ADPCM
 fade. The ADPCM nibble RAM is in SDRAM, not block RAM. CDDA and data playback
 have been exercised on hardware; the newly connected ADPCM memory path passed
 focused SDRAM simulation and Gowin place-and-route but still needs an audible
-on-board test. The standard Gowin synthesis report uses 43 of the 46 available
-BSRAM blocks.
+on-board test. The CD profile now uses 29 of the 46 available BSRAM blocks,
+including two blocks for the 4 KiB SCSI data FIFO.
 
 ### Clocks
 
@@ -359,33 +361,33 @@ BSRAM blocks.
 
 ## 6. Occupation
 
-The following figures come from the standard Gowin V1.9.11.03 synthesis report
-for the GW2AR-18. The device has a shared pool of `20,736` logic resources;
-Gowin reports `19,834` used (`95.6%`), leaving `902` (`4.4%`). LUT and ALU
-counts are shown separately, but the report does not give independent device
-limits or remaining counts for either resource.
+The following figures come from the compatibility-superset Gowin V1.9.11.03
+synthesis report for the GW2AR-18. The device has a shared pool of `20,736`
+logic resources; this build reports `18,104` used (`87.3%`), leaving `2,632`
+(`12.7%`). LUT and ALU counts are shown separately, but the report does not
+give independent device limits or remaining counts for either resource.
 
 | Resource | Used | Capacity reported | Utilization / share | Remaining | Main consumers in the hierarchy report |
 | --- | ---: | ---: | ---: | ---: | --- |
-| LUT | 14,170 | Shared logic pool: 20,736 | 68.3% of pool | Not reported separately | PCE core 9,392; PicoRV32/OSD I/O system 2,522; memory controller 819; DVI 721 |
-| ALU | 2,939 | Shared logic pool: 20,736 | 14.2% of pool | Not reported separately | PCE core 1,759; I/O system 316; memory controller 194; audio tone 180; color mixer 175 |
-| Logic resources, total | 19,834 | 20,736 | 95.6% | 902 (4.4%) | Shared device logic pool |
-| BSRAM | 43 blocks | 46 blocks | 93.5% | 3 blocks (6.5%) | PCE core 40; scandoubler line buffers 2; OSD font 1 |
-| SSRAM | 438 cells | Not reported | Not reported | Not reported | PCE core 284 (including SCSI FIFO 256); I/O system 112; DVI audio packets 32; scandoubler 2; memory controller 8 |
+| LUT | 13,729 | Shared logic pool: 20,736 | 66.2% of pool | Not reported separately | Superset profile |
+| ALU | 3,283 | Shared logic pool: 20,736 | 15.8% of pool | Not reported separately | Superset profile |
+| Logic resources, total | 18,104 | 20,736 | 87.3% | 2,632 (12.7%) | Shared device logic pool |
+| BSRAM | 45 blocks | 46 blocks | 97.8% | 1 block (2.2%) | Superset profile |
+| SSRAM | 182 cells | Not reported | Not reported | Not reported | Superset profile; SCSI data FIFO is in BSRAM |
 
 The profile builds produced these additional synthesis results:
 
 | Profile | LUT | ALU | Total logic | BSRAM | BSRAM remaining |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| PCE, one VDC with BSRAM VRAM, Game Genie (8 patches) | 12,946 | 1,879 | 15,839 / 20,736 (77%) | 46 / 46 | 0 |
-| SuperGrafx, Game Genie (32 patches) | 10,377 | 2,759 | 14,180 / 20,736 (69%) | 39 / 46 | 7 |
-| CD, VDC1 active / VPC off, Game Genie (4 patches) | 12,770 | 2,334 | 17,702 / 20,736 (86%) | 27 / 46 | 19 |
-| Superset, Game Genie (32 patches) | 14,243 | 3,274 | 20,145 / 20,736 (98%) | 43 / 46 | 3 |
+| PCE, one VDC with BSRAM VRAM, Game Genie (8 patches) | 12,958 | 1,878 | 15,850 / 20,736 (77%) | 46 / 46 | 0 |
+| SuperGrafx, Game Genie (32 patches) | 10,524 | 2,761 | 14,329 / 20,736 (69%) | 39 / 46 | 7 |
+| CD, VDC1 active / VPC off, Game Genie (4 patches) | 12,000 | 2,337 | 15,399 / 20,736 (74%) | 29 / 46 | 17 |
+| Superset, Game Genie (32 patches) | 13,729 | 3,283 | 18,104 / 20,736 (87%) | 45 / 46 | 1 |
 
 The LUT column counts LUT cells only; inverter cells are reported separately
 (the exact inverter counts vary with synthesis optimization). Current worst
-setup slack is `+0.084 ns` for PCE, `+0.004 ns` for SGX, `+0.013 ns` for CD,
-and `-5.391 ns` for Superset. CD keeps VDC1's SDRAM activity, which was needed
+setup slack is `+0.123 ns` for PCE, `-1.346 ns` for SGX, `+0.096 ns` for CD,
+and `-1.977 ns` for Superset. CD keeps VDC1's SDRAM activity, which was needed
 for reliable CD startup, while SGX CPU address decoding and the VPC remain off.
 The CD Game Genie table is limited to four address/value patches; PCE is limited
 to eight, and the firmware refuses activations that exceed the profile limit.

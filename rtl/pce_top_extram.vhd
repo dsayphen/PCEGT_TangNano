@@ -264,6 +264,7 @@ signal CPU_PRE_RD	: std_logic;
 signal CPU_PRE_WR	: std_logic;
 signal CD_RAM_CS_N: std_logic;
 signal CD_BRAM_EN	: std_logic;
+signal AC_RAM_CS_N_ROM: std_logic := '0';
 
 signal BORDER		: std_logic;
 signal GRID			: std_logic_vector(1 downto 0);
@@ -728,7 +729,18 @@ ROM_A <=   "00000"&CPU_A(16 downto 0)                                       when
           &(CPU_A(19) and not rombank(0))&CPU_A(18 downto 0)                when rom_sz = X"28" -- SF2
       else "00"&CPU_A(19 downto 0);                                                             -- 1MB and others
 
-ROM_RD    <= CPU_PRE_RD and not CPU_ROM_SEL_N and CPU_PRAM_SEL_N and ((AC_RAM_CS_N and CD_RAM_CS_N) or not CD_EN);
+process(CLK)
+begin
+	if rising_edge(CLK) then
+		if RESET = '1' then
+			AC_RAM_CS_N_ROM <= '0';
+		else
+			AC_RAM_CS_N_ROM <= AC_RAM_CS_N;
+		end if;
+	end if;
+end process;
+
+ROM_RD    <= CPU_PRE_RD and not CPU_ROM_SEL_N and CPU_PRAM_SEL_N and ((AC_RAM_CS_N_ROM and CD_RAM_CS_N) or not CD_EN);
 ROM_CLKEN <= CPU_CLKEN;
 
 process( CLK ) begin

@@ -16,6 +16,8 @@
 
 int sd_initialized = 0;
 volatile int sd_trace_enabled = 0;
+static int sd_trace_was_enabled;
+static unsigned sd_trace_reads_left;
 int sd_writesector(uint32_t start_block, const uint8_t *buffer, uint32_t sector_count);
 
 DSTATUS disk_status (BYTE pdrv)
@@ -42,17 +44,27 @@ DSTATUS disk_initialize (BYTE pdrv)
 DRESULT disk_read (BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
 {
     int ok;
+    int trace_read = 0;
+
+    if (sd_trace_enabled && !sd_trace_was_enabled)
+        sd_trace_reads_left = 12;
+    sd_trace_was_enabled = sd_trace_enabled;
 
     if (pdrv != DEV_SD)
         return RES_PARERR;
     if (!sd_initialized)
         return RES_NOTRDY;
 
-    if (sd_trace_enabled)
+    if (sd_trace_enabled && sd_trace_reads_left != 0) {
         uart_printf("sd: read begin sector=%d count=%d\n", (int)sector, (int)count);
+        sd_trace_reads_left--;
+        trace_read = 1;
+    }
     ok = sd_readsector((uint32_t)sector, (uint8_t *)buff, count);
-    if (sd_trace_enabled)
+    if (sd_trace_enabled && trace_read)
         uart_printf("sd: read end result=%d\n", ok);
+    else if (sd_trace_enabled && !ok)
+        uart_printf("sd: read fail sector=%d count=%d\n", (int)sector, (int)count);
     return ok ? RES_OK : RES_ERROR;
 }
 

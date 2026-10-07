@@ -481,6 +481,7 @@ int find_cd_cue(char *cue_name, size_t cue_len) {
 
 void cd_service(void) {
     static int service_logged = 0;
+    static int first_data_seek_traced = 0;
     uint32_t events = reg_cd_events;
     if (!cd_active)
         return;
@@ -588,10 +589,11 @@ void cd_service(void) {
                 uint32_t offset = frame * cd_track_sector_size[t] +
                                   cd_track_data_offset[t];
                 UINT br;
-                sd_trace_enabled = 0;
+                sd_trace_enabled = !first_data_seek_traced;
                 FRESULT seek_result = f_lseek(&cd_image, offset);
+                sd_trace_enabled = 0;
+                first_data_seek_traced = 1;
                 if (seek_result != FR_OK) {
-                    sd_trace_enabled = 0;
                     uart_printf("cd: seek failed res=%d offset=%d size=%d pos=%d\n",
                                 (int)seek_result, (int)offset,
                                 (int)f_size(&cd_image), (int)f_tell(&cd_image));
@@ -599,7 +601,6 @@ void cd_service(void) {
                     break;
                 }
                 FRESULT read_result = f_read(&cd_image, io_buf, 2048, &br);
-                sd_trace_enabled = 0;
                 if (read_result != FR_OK || br != 2048) {
                     uart_printf("cd: short read at sector %d\n", (int)sector);
                     ok = 0;
