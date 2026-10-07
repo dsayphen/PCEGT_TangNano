@@ -18,6 +18,7 @@ int video_scanline = 0;   // hardware reset default: off
 int game_pad_mode = 0;    // hardware reset default: 2 buttons
 int video_color = 0;      // hardware reset default: raw RGB
 int cheat_cd_enabled = 0;
+int vdc_sprites_double = 0;
 
 static int open_game_config(FIL *file, const char *game_name) {
     char path[PWD_SIZE + NAME_MAX + 16];
@@ -431,21 +432,30 @@ void audio_config_save(void) {
 
 #define SYSTEM_CFG_FILE   "/config/system.cfg"
 
+void vdc_options_apply(void) {
+    reg_vdc_options = vdc_sprites_double ? 1u : 0u;
+}
+
 void system_config_load(void) {
     FIL file;
     char line[64];
 
-    if (f_open(&file, SYSTEM_CFG_FILE, FA_READ) != FR_OK)
+    if (f_open(&file, SYSTEM_CFG_FILE, FA_READ) != FR_OK) {
+        vdc_options_apply();
         return;
+    }
 
     while (f_gets(line, sizeof(line), &file)) {
         if (starts_with(line, "debug_uart="))
             debug_uart = parse_u8(line + 11) ? 1 : 0;
         else if (starts_with(line, "cheat_cd="))
             cheat_cd_enabled = parse_u8(line + 9) ? 1 : 0;
+        else if (starts_with(line, "sprites_double="))
+            vdc_sprites_double = parse_u8(line + 15) ? 1 : 0;
     }
 
     f_close(&file);
+    vdc_options_apply();
 }
 
 void system_config_save(void) {
@@ -455,6 +465,7 @@ void system_config_save(void) {
         "# PCEngine / SuperGrafx System Settings\n"
         "# debug_uart : 0 = off, 1 = debug traces on the UART\n"
         "# cheat_cd : 0 = off, 1 = experimental CD cheats\n"
+        "# sprites_double : 0 = 16 sprites/line, 1 = 32 sprites/line\n"
         "debug_uart=";
 
     f_mkdir("/config");
@@ -466,5 +477,7 @@ void system_config_save(void) {
     f_write(&file, debug_uart ? "1\n" : "0\n", 2, &bw);
     f_write(&file, "cheat_cd=", 9, &bw);
     f_write(&file, cheat_cd_enabled ? "1\n" : "0\n", 2, &bw);
+    f_write(&file, "sprites_double=", 15, &bw);
+    f_write(&file, vdc_sprites_double ? "1\n" : "0\n", 2, &bw);
     f_close(&file);
 }

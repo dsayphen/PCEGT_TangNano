@@ -60,6 +60,7 @@ entity pce_top is
 		GG_AVAIL    : out std_logic;
 
 		SP64        : in  std_logic;
+		SPRITES_DOUBLE : in std_logic := '0';
 		SGX         : in  std_logic;
 
 		JOY_OUT     : out std_logic_vector(1 downto 0);
@@ -495,6 +496,7 @@ port map(
 	CLK 		=> CLK,
 	RST_N		=> RESET_N,
 	CLR_MEM  => COLD_RESET,
+	SPRITES_DOUBLE => SPRITES_DOUBLE,
 
 	-- CPU Interface
 	CPU_CE	=> CPU_CE,
@@ -565,6 +567,7 @@ generate_VDC1: if (VDC1_SUPPORT /= 0) generate begin
 		CLK 		=> CLK,
 		CLR_MEM  => COLD_RESET,
 		RST_N		=> RESET_N,
+		SPRITES_DOUBLE => SPRITES_DOUBLE,
 
 		-- CPU Interface
 		CPU_CE	=> CPU_CE,

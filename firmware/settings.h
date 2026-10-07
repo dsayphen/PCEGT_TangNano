@@ -10,6 +10,7 @@ extern int video_scanline;
 extern int game_pad_mode;
 extern int video_color;
 extern int cheat_cd_enabled;
+extern int vdc_sprites_double;
 
 extern int audio_volume;
 extern int audio_bass;
@@ -32,5 +33,6 @@ void audio_config_load(void);
 void audio_config_save(void);
 void system_config_load(void);
 void system_config_save(void);
+void vdc_options_apply(void);
 
 #endif

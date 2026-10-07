@@ -24,8 +24,7 @@ module top_tang_nano20k #(
     parameter CORE_EXTRA_SGX = 0,
     parameter CORE_EXTRA_VDC1 = 0,
     parameter CORE_EXTRA_CHEATS = 0,
-    parameter CORE_CHEAT_MAX_CODES = CORE_PROFILE == 2'd2 ? 4 :
-        CORE_PROFILE == 2'd0 ? 8 : 32,
+    parameter CORE_CHEAT_MAX_CODES = 4,
     parameter CORE_VDC1_MEMORY = 1
 ) (
     input  wire        sys_clk,        // 27 MHz crystal
@@ -214,6 +213,7 @@ wire [3:0]  audio_treble;
 wire        audio_hdmi;
 wire        audio_cdda_enable;
 wire        audio_adpcm_enable;
+wire        vdc_sprites_double;
 
 // ---- softcore / menu ------------------------------------------------------
 wire        rv_ld_wr;
@@ -335,6 +335,7 @@ iosys #(
     .audio_hdmi       (audio_hdmi),
     .audio_cdda_enable (audio_cdda_enable),
     .audio_adpcm_enable (audio_adpcm_enable),
+    .vdc_sprites_double (vdc_sprites_double),
     .brm_host_q       (brm_host_q),
     .brm_host_addr    (brm_host_addr),
     .brm_host_data    (brm_host_data),
@@ -653,6 +654,7 @@ pce_core #(
     .cd_audio_hold (cd_audio_hold),
     .cd_audio_enabled (audio_cdda_enable),
     .adpcm_audio_enabled (audio_adpcm_enable),
+    .sprites_double (vdc_sprites_double),
     .rom_pop    (rv_rom_pop),
     .brm_host_addr (brm_host_addr),
     .brm_host_data (brm_host_data),

@@ -35,6 +35,7 @@
 #define reg_pad_mode       (*(volatile uint32_t*)0x02000058)
 #define reg_color_mode     (*(volatile uint32_t*)0x0200005c)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
+#define reg_vdc_options    (*(volatile uint32_t*)0x020000d0)
 #define CORE_PROFILE_PCE      0u
 #define CORE_PROFILE_SGX      1u
 #define CORE_PROFILE_CD       2u

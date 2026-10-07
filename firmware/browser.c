@@ -48,7 +48,8 @@ static uint32_t required_profile(const char *name) {
 static int profile_supports(uint32_t required) {
     uint32_t active = CORE_PROFILE_ID;
 
-    return active == required || active == CORE_PROFILE_SUPERSET;
+    return active == required || active == CORE_PROFILE_SUPERSET ||
+           (required == CORE_PROFILE_PCE && active == CORE_PROFILE_SGX);
 }
 
 static int check_entry_profile(const char *name) {

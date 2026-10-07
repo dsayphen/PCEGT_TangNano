@@ -33,7 +33,7 @@ SNES pad -> HuC6280 / VDC / VCE -> line doubler -> DVI over HDMI
 | CD-ROM² / Super CD | experimental CUE/BIN, System Card, CDDA, SCSI data and ADPCM |
 | Arcade Card | enabled in CD mode; 2 MiB SDRAM tested in simulation, game compatibility not yet tested on hardware |
 | SuperGrafx (second VDC / VPC) | yes (`SGX_SUPPORT = 1`) |
-| Game Genie / cheat engine | user `.cht` files; up to 32 active address patches |
+| Game Genie / cheat engine | user `.cht` files; up to 4 active address patches on every profile |
 | Backup RAM (BRAM), Populous SRAM | saved per game on microSD at firmware-menu entry (not on power loss) |
 | Multitap, mouse, MB128 | not implemented |
 | OSD / menu | microSD browser, in-game pause, audio and video settings |
@@ -163,6 +163,7 @@ can still be reset with S1.
 In the firmware browser, Up/Down select a file, Left/Right change pages, A
 opens a directory or loads a `.pce`, `.sgx` or `.cue`, and B goes to the parent
 directory. A folder ending in `(CD)` automatically opens its first CUE file.
+The SuperGrafx profile can also load standard `.pce` HuCard games.
 During a game, Select+Start opens the firmware pause menu (Resume, Reset,
 Return to browser, gamepad mode and video/audio settings). Hold Select for
 500 ms before using Select+Up/Down for zoom or Select+Left/Right for scanlines.
@@ -213,6 +214,10 @@ or HDMI (`1`). The current game's 2/6-button mode lives in
 `/config/<game>.cfg`, without the image extension; the previous name remains a
 read fallback.
 
+Browser **Options** also provides a sprite limit of 16 or 32 per scanline,
+saved in `/config/system.cfg`; it is intentionally not exposed in the in-game
+pause menu. The Tang Nano wrapper keeps the VDC `SP64` fetch mode disabled.
+
 ### User cheat files
 
 Place a cheat file beside the SD card's hidden `cheats` directory, using the
@@ -245,7 +250,8 @@ encodings are not claimed to work. Blank lines and `#` comments are ignored.
 Missing required fields or invalid code values make the file invalid; invalid
 or out-of-range saved indices are ignored with a UART diagnostic. Up to 64
 groups can be listed, but the total patches in enabled groups must not exceed
-the hardware limit of 32. A selection above that limit is rejected as a whole.
+the hardware limit of 4 on every profile. A selection above that limit is
+rejected as a whole.
 
 The pause menu's `Cheats (x/y)` entry opens a scrollable list; A toggles a group
 and B returns. `.cht` `cheatN_enable` values seed the state unless
@@ -363,36 +369,36 @@ including two blocks for the 4 KiB SCSI data FIFO.
 
 The following figures come from the compatibility-superset Gowin V1.9.11.03
 synthesis report for the GW2AR-18. The device has a shared pool of `20,736`
-logic resources; this build reports `18,104` used (`87.3%`), leaving `2,632`
-(`12.7%`). LUT and ALU counts are shown separately, but the report does not
+logic resources; this build reports `18,225` used (`87.9%`), leaving `2,511`
+(`12.1%`). LUT and ALU counts are shown separately, but the report does not
 give independent device limits or remaining counts for either resource.
 
 | Resource | Used | Capacity reported | Utilization / share | Remaining | Main consumers in the hierarchy report |
 | --- | ---: | ---: | ---: | ---: | --- |
-| LUT | 13,729 | Shared logic pool: 20,736 | 66.2% of pool | Not reported separately | Superset profile |
-| ALU | 3,283 | Shared logic pool: 20,736 | 15.8% of pool | Not reported separately | Superset profile |
-| Logic resources, total | 18,104 | 20,736 | 87.3% | 2,632 (12.7%) | Shared device logic pool |
-| BSRAM | 45 blocks | 46 blocks | 97.8% | 1 block (2.2%) | Superset profile |
-| SSRAM | 182 cells | Not reported | Not reported | Not reported | Superset profile; SCSI data FIFO is in BSRAM |
+| LUT | 13,926 | Shared logic pool: 20,736 | 67.1% of pool | Not reported separately | Superset profile |
+| ALU | 3,279 | Shared logic pool: 20,736 | 15.8% of pool | Not reported separately | Superset profile |
+| Logic resources, total | 18,225 | 20,736 | 87.9% | 2,511 (12.1%) | Shared device logic pool |
+| BSRAM | 46 blocks | 46 blocks | 100% | 0 | Superset profile |
+| SSRAM | 170 cells | Not reported | Not reported | Not reported | Superset profile; SCSI data FIFO is in BSRAM |
 
 The profile builds produced these additional synthesis results:
 
 | Profile | LUT | ALU | Total logic | BSRAM | BSRAM remaining |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| PCE, one VDC with BSRAM VRAM, Game Genie (8 patches) | 12,958 | 1,878 | 15,850 / 20,736 (77%) | 46 / 46 | 0 |
-| SuperGrafx, Game Genie (32 patches) | 10,524 | 2,761 | 14,329 / 20,736 (69%) | 39 / 46 | 7 |
-| CD, VDC1 active / VPC off, Game Genie (4 patches) | 12,000 | 2,337 | 15,399 / 20,736 (74%) | 29 / 46 | 17 |
-| Superset, Game Genie (32 patches) | 13,729 | 3,283 | 18,104 / 20,736 (87%) | 45 / 46 | 1 |
+| PCE | 13,250 | 1,788 | 16,016 / 20,736 (78%) | 46 / 46 | 0 |
+| SuperGrafx | 10,297 | 2,110 | 13,379 / 20,736 (65%) | 43 / 46 | 3 |
+| CD, VDC1 active / VPC off | 12,275 | 2,333 | 15,634 / 20,736 (75%) | 31 / 46 | 15 |
+| Superset | 13,653 | 2,627 | 17,300 / 20,736 (84%) | 46 / 46 | 0 |
 
 The LUT column counts LUT cells only; inverter cells are reported separately
 (the exact inverter counts vary with synthesis optimization). Current worst
-setup slack is `+0.123 ns` for PCE, `-1.346 ns` for SGX, `+0.096 ns` for CD,
-and `-1.977 ns` for Superset. CD keeps VDC1's SDRAM activity, which was needed
+setup slack is `+0.486 ns` for PCE, `+0.490 ns` for SGX, `+0.270 ns` for CD,
+and `+0.003 ns` for Superset. CD keeps VDC1's SDRAM activity, which was needed
 for reliable CD startup, while SGX CPU address decoding and the VPC remain off.
 The CD Game Genie table is limited to four address/value patches; PCE is limited
 to eight, and the firmware refuses activations that exceed the profile limit.
-PCE and CD timing margins are positive but extremely small. Superset does not
-meet setup timing in this build. The PCE BSRAM profile uses every BSRAM block
+All four profiles meet setup timing, although Superset has virtually no margin.
+The PCE BSRAM profile uses every BSRAM block
 and has no memory-block headroom. Generated profile binaries are `907,418`
 bytes each. These are build measurements, not hardware validation of automatic
 Multi-Boot switching.

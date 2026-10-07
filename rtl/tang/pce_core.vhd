@@ -23,6 +23,7 @@ entity pce_core is
 		AC_SUPPORT  : integer := 1;
 		CHEAT_SUPPORT : integer := 1;
 		CHEAT_MAX_CODES : integer := 32;
+		MAX_SPRITES : integer := 32;
 		VDC1_SUPPORT : integer := SGX_SUPPORT;
 		INTERNAL_VRAM : integer := 0
 	);
@@ -45,6 +46,7 @@ entity pce_core is
 		sgx_mode   : in  std_logic;
 		cd_enable  : in  std_logic;
 		cd_audio_hold : in std_logic;
+		sprites_double : in std_logic := '0';
 		cd_audio_enabled : in std_logic := '1';
 		adpcm_audio_enabled : in std_logic := '1';
 		rom_pop    : in  std_logic;
@@ -228,7 +230,7 @@ begin
 		CHEAT_SUPPORT    => CHEAT_SUPPORT,
 		CHEAT_MAX_CODES  => CHEAT_MAX_CODES,
 		PSG_O_WIDTH      => 20,
-		MAX_SPRITES      => 16,
+		MAX_SPRITES      => MAX_SPRITES,
 		USE_INTERNAL_RAM => 1,
 		CD_SUPPORT       => CD_SUPPORT,
 		AC_SUPPORT       => AC_SUPPORT,
@@ -271,6 +273,7 @@ begin
 		GG_AVAIL    => open,
 
 		SP64        => '0',
+		SPRITES_DOUBLE => sprites_double,
 		SGX         => sgx_i,
 
 		JOY_OUT     => joy_out,

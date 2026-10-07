@@ -113,6 +113,7 @@ module iosys #(
     output reg         audio_hdmi,
     output reg         audio_cdda_enable,
     output reg         audio_adpcm_enable,
+    output reg         vdc_sprites_double,
 
     // Save-RAM service port. The CPU is paused while firmware accesses BRAM.
     input  wire [7:0]  brm_host_q,
@@ -336,6 +337,7 @@ wire pad_mode_sel  = mem_valid && (mem_addr == 32'h0200_0058);
 wire color_mode_sel= mem_valid && (mem_addr == 32'h0200_005c);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 wire audio_sel     = mem_valid && (mem_addr == 32'h0200_0064);
+wire vdc_options_sel = mem_valid && (mem_addr == 32'h0200_00d0);
 wire rl_status_sel  = mem_valid && (mem_addr == 32'h0200_0068);
 wire rl_debug_sel   = mem_valid && (mem_addr == 32'h0200_006c);
 wire cd_event_sel  = mem_valid && (mem_addr == 32'h0200_0070);
@@ -436,7 +438,7 @@ wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
 assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
-                   game_ctrl_sel || rl_status_sel || rl_debug_sel ||
+                   game_ctrl_sel || rl_status_sel || rl_debug_sel || vdc_options_sel ||
                    time_sel || pad_mode_sel || color_mode_sel || id_sel || audio_sel ||
                    cd_event_sel || cd_stat_sel || cd_cmd0_sel || cd_cmd1_sel || cd_cmd2_sel ||
                    cd_data0_sel || cd_data1_sel || cd_data2_sel ||
@@ -464,6 +466,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
                    audio_sel    ? {17'b0, audio_adpcm_enable, audio_cdda_enable,
                                    audio_hdmi, audio_treble, audio_bass, audio_volume} :
+                   vdc_options_sel ? {31'b0, vdc_sprites_double} :
                    rl_status_sel ? {30'b0, image_valid, loading} :
                    rl_debug_sel ? {2'b0, rl_timeout, rl_cnt, ld_idle, ld_busy, ld_wr,
                                    rl_clearing, rl_finishing, image_valid, loading} :
@@ -766,6 +769,10 @@ always @(posedge clk) begin
         audio_adpcm_enable <= mem_wdata[14];
     end
 
+    if (vdc_options_sel && (mem_wstrb != 4'b0)) begin
+        vdc_sprites_double <= mem_wdata[0];
+    end
+
     // ---- end of transfer: wait for the SDRAM to really drain -------------
     if (rl_finishing) begin
         rl_timeout <= rl_timeout + 20'd1;
@@ -807,6 +814,7 @@ always @(posedge clk) begin
         audio_hdmi   <= 1'b0;
         audio_cdda_enable <= 1'b1;
         audio_adpcm_enable <= 1'b1;
+        vdc_sprites_double <= 1'b0;
         brm_host_addr <= 11'd0;
         brm_host_data <= 8'd0;
         brm_host_we   <= 1'b0;

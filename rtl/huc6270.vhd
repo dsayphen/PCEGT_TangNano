@@ -33,6 +33,7 @@ entity HUC6270 is
 		HSYNC_R	: in std_logic;
 		VSYNC_F	: in std_logic;
 		VSYNC_R	: in std_logic;
+		SPRITES_DOUBLE : in std_logic := '0';
 		VD			: out std_logic_vector(8 downto 0);
 		BORDER	: out std_logic;
 		GRID		: out std_logic_vector(1 downto 0);
@@ -391,7 +392,7 @@ begin
 	
 	FDOT_CNT <= DOT_CNT when SP64 = '0' else FETCH_DOT;
 	SPR_CE   <= DCK_CE  when SP64 = '0' else FETCH_CE;
-	SPR_MAX  <= 15      when SP64 = '0' else MAX_SPRITES-1;
+	SPR_MAX  <= MAX_SPRITES-1 when SPRITES_DOUBLE = '1' else 15;
 
 	HSW_END_POS <= "00"&unsigned(HSW) + ("000000"&unsigned(RES7M));
 	HDS_END_POS <= ("00"&unsigned(HSW)) + ("000000"&unsigned(RES7M)) + 1 + unsigned(HDS);
