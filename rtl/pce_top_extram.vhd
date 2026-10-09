@@ -142,7 +142,7 @@ entity pce_top is
 		VIDEO_VCE_CR_DBG : out std_logic_vector(7 downto 0);
 		VIDEO_VCE_WR_DBG : out std_logic_vector(15 downto 0);
 		CD_PHASE_DBG  : out std_logic_vector(7 downto 0);
-		CDDA_USEDW_DBG : out std_logic_vector(12 downto 0);
+		CDDA_USEDW_DBG : out std_logic_vector(13 downto 0);
 		ADPCM_DBG : out std_logic_vector(7 downto 0)
 	);
 end pce_top;

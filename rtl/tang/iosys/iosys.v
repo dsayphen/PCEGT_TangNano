@@ -139,7 +139,7 @@ module iosys #(
     output reg         cd_ack,
     output reg         cd_audio_hold,
     input  wire [7:0]  cd_phase_dbg,
-    input  wire [12:0] cdda_usedw_dbg,
+    input  wire [13:0] cdda_usedw_dbg,
     input  wire [7:0]  adpcm_dbg,
     // Maximum number of pending SDRAM refreshes since reset.
     // Piggybacked onto reg_cd_adpcm bits 15:8, no new address decode.
@@ -478,7 +478,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    cd_data1_sel ? cd_dout_reg[63:32] :
                    cd_data2_sel ? {16'b0, cd_dout_reg[79:64]} :
                    cd_phase_sel ? {24'b0, cd_phase_dbg} :
-                   cd_usedw_sel ? {19'b0, cdda_usedw_dbg} :
+                   cd_usedw_sel ? {18'b0, cdda_usedw_dbg} :
                    cd_adpcm_sel ? {16'b0, refresh_gap_dbg, adpcm_dbg} :
                    rom_pop_sel  ? {5'b0, vce_wr_q, vid_px_q, rom_pop} :
                    brm_data_sel ? {24'b0, brm_host_q} :

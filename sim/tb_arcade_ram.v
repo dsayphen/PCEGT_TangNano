@@ -101,6 +101,33 @@ task read_byte;
     end
 endtask
 
+task read_hit;
+    input [21:0] address;
+    input [7:0] expected;
+    integer i;
+    begin
+        @(negedge clk);
+        cd_addr = address;
+        cd_rd = 1;
+        // the CPU samples WAIT_N five clocks after its address changes
+        for (i = 0; i < 6; i = i + 1) begin
+            @(posedge clk);
+            if (!cd_rdy) begin
+                $display("FAIL %h: expected cache hit, got a stall", address);
+                errors = errors + 1;
+                wait (cd_rdy);
+            end
+        end
+        #1;
+        if (cd_dout !== expected) begin
+            $display("FAIL hit %h: got %h, expected %h", address, cd_dout, expected);
+            errors = errors + 1;
+        end
+        @(negedge clk);
+        cd_rd = 0;
+    end
+endtask
+
 initial begin
     #100;
     resetn = 1;
@@ -116,6 +143,17 @@ initial begin
     read_byte(22'h040000, 8'h33);
     read_byte(22'h1fffff, 8'h44);
     read_byte(22'h000000, 8'h11);
+
+    // filled line is served without a stall; a write hit updates it in place
+    write_byte(22'h200001, 8'h77);
+    read_byte(22'h200001, 8'h77);
+    read_hit(22'h200000, 8'h55);
+    read_hit(22'h200001, 8'h77);
+    write_byte(22'h200001, 8'h66);
+    read_hit(22'h200001, 8'h66);
+    read_hit(22'h200000, 8'h55);
+    // the other alias of the same SDRAM word shares the line
+    read_hit(22'h3c0001, 8'h66);
 
     // Back-to-back PicoRV32 traffic must not starve a cold CD-RAM fetch.
     @(negedge clk);

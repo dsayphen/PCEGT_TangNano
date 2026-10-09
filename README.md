@@ -341,16 +341,18 @@ unchanged, and HDMI playback still needs verification on a physical display.
 
 The HuC6280 PSG, CDDA and decoded ADPCM are mixed before the board's 16-bit
 stereo I2S output (about 48.2 kHz); the CDDA sample clock is approximately
-44.35 kHz rather than exactly 44.1 kHz. The CDDA FIFO is 6 KiB; firmware services
-it from the SD card through a 32-bit audio feed port. The SCSI CD-data FIFO is
+44.35 kHz rather than exactly 44.1 kHz. The CDDA FIFO is 12 KiB (about 70 ms,
+8 BSRAM blocks); firmware services it from the SD card through a 32-bit audio
+feed port and stops feeding once it is half full. The SCSI CD-data FIFO is
 4 KiB (two sectors), implemented in BSRAM; its synchronous read uses a prefetch
 state before asserting SCSI REQ. The CD unit supports
 track selection, repeat, pause, GET SUBQ and register-controlled CDDA/ADPCM
 fade. The ADPCM nibble RAM is in SDRAM, not block RAM. CDDA and data playback
 have been exercised on hardware; the newly connected ADPCM memory path passed
 focused SDRAM simulation and Gowin place-and-route but still needs an audible
-on-board test. The CD profile now uses 29 of the 46 available BSRAM blocks,
-including two blocks for the 4 KiB SCSI data FIFO.
+on-board test. The CD profile now uses 41 of the 46 available BSRAM blocks,
+including two blocks for the 4 KiB SCSI data FIFO, eight for the CDDA FIFO and
+six for the CD RAM cache (see section 6).
 
 ### Clocks
 
@@ -387,12 +389,14 @@ The profile builds produced these additional synthesis results:
 | --- | ---: | ---: | ---: | ---: | ---: |
 | PCE | 13,250 | 1,788 | 16,016 / 20,736 (78%) | 46 / 46 | 0 |
 | SuperGrafx | 10,297 | 2,110 | 13,379 / 20,736 (65%) | 43 / 46 | 3 |
-| CD, VDC1 active / VPC off | 12,275 | 2,333 | 15,634 / 20,736 (75%) | 31 / 46 | 15 |
+| CD, VDC1 active / VPC off | 12,058 | 2,064 | 15,100 / 20,736 (73%) | 41 / 46 | 5 |
 | Superset | 13,653 | 2,627 | 17,300 / 20,736 (84%) | 46 / 46 | 0 |
 
 The LUT column counts LUT cells only; inverter cells are reported separately
 (the exact inverter counts vary with synthesis optimization). Current worst
-setup slack is `+0.486 ns` for PCE, `+0.490 ns` for SGX, `+0.270 ns` for CD,
+setup slack is `+0.486 ns` for PCE, `+0.490 ns` for SGX, `+0.117 ns` for CD
+(with `Place_Option` 1; the default placement left the clk_sys to clk_mem
+VDC1 request path at `-1.268 ns`),
 and `+0.003 ns` for Superset. CD keeps VDC1's SDRAM activity, which was needed
 for reliable CD startup, while SGX CPU address decoding and the VPC remain off.
 The CD Game Genie table is limited to four address/value patches; PCE is limited
@@ -430,6 +434,14 @@ The four bank-2 allocations total 2 MiB (25%). The SDRAM runs at 86.4 MHz;
 (2) PicoRV32/CD/Arcade/ADPCM or VDC1 and (3) VDC0. Its eight-cycle schedule
 returns VRAM data within one fastest PCE pixel period. Refresh is distributed
 across idle slots and is also allowed while the console is held in reset.
+
+CD scratch RAM and Arcade Card RAM share the PicoRV32 SDRAM channel, so CPU
+accesses go through a direct-mapped, write-through cache of 32-bit SDRAM words
+(`CDRAM_CACHE_IDX`). Profiles with the CD logic and no extra SGX get 2,048
+lines (8 KiB, 6 BSRAM blocks); the others keep 16 lines in distributed RAM.
+Hits never stall the CPU; misses and every write wait for the SDRAM round trip.
+Firmware writes into the CD RAM window invalidate the matching line, and a ROM
+load clears the whole cache.
 
 ---
 
@@ -505,7 +517,8 @@ The original core is adapted to Gowin and the board interfaces:
 * `rtl/tang/iosys/` and `firmware/` — PicoRV32 firmware, microSD/FatFs browser,
   CD SCSI command handling, audio streaming and per-game save persistence.
 * `rtl/tang/pce_sdram_ctrl_3ch.v` — SDRAM arbitration, HuCard/VRAM bridges,
-  shared four-way CD/Arcade RAM read cache and the nibble-oriented ADPCM bridge.
+  direct-mapped CD/Arcade RAM cache (8 KiB in BSRAM on the CD profiles) and
+  the nibble-oriented ADPCM bridge.
 * `rtl/huc6270.vhd` — one-character fix in the `SPR_CACHE` reset aggregate,
   where the 4-bit `PAL` record element was initialised with a 2-bit literal.
 * `rtl/huc6260.vhd` — power-up values for the free running video counters

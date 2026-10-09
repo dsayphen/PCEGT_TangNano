@@ -115,7 +115,7 @@ entity pce_core is
 		cd_dm         : in  std_logic;
 		cd_fifo_halffull : out std_logic;
 		cd_phase_dbg     : out std_logic_vector(7 downto 0);
-		cdda_usedw_dbg   : out std_logic_vector(12 downto 0);
+		cdda_usedw_dbg   : out std_logic_vector(13 downto 0);
 		adpcm_dbg        : out std_logic_vector(7 downto 0);
 		adram_a          : out std_logic_vector(16 downto 0);
 		adram_di         : out std_logic_vector(3 downto 0);
@@ -170,6 +170,8 @@ architecture rtl of pce_core is
 	signal cdda_mix_l : signed(19 downto 0);
 	signal cdda_mix_r : signed(19 downto 0);
 	signal adpcm_mix : signed(15 downto 0);
+	signal adram_we_core : std_logic;
+	signal adram_rd_core : std_logic;
 
 	function saturate_audio(value : signed(21 downto 0)) return signed is
 		variable result : signed(19 downto 0);
@@ -293,8 +295,8 @@ begin
 		ADRAM_A     => adram_a,
 		ADRAM_DI    => adram_di,
 		ADRAM_DO    => adram_do,
-		ADRAM_WE    => adram_we,
-		ADRAM_RD    => adram_rd,
+		ADRAM_WE    => adram_we_core,
+		ADRAM_RD    => adram_rd_core,
 		ADRAM_CLKEN => adram_clken,
 
 		CD_STAT     => cd_stat(7 downto 0),
@@ -359,6 +361,9 @@ begin
 	cdda_mix_l <= cdda_l when cd_audio_enabled = '1' else (others => '0');
 	cdda_mix_r <= cdda_r when cd_audio_enabled = '1' else (others => '0');
 	adpcm_mix <= adpcm_nc when adpcm_audio_enabled = '1' else (others => '0');
+	-- ADPCM disabled: no SDRAM traffic at all; the decoder still runs so game timing/IRQs are kept
+	adram_we <= adram_we_core and adpcm_audio_enabled;
+	adram_rd <= adram_rd_core and adpcm_audio_enabled;
 	aud_mix_l <= resize(psg_l, aud_mix_l'length) +
 		      resize(cdda_mix_l, aud_mix_l'length) +
 		      shift_left(resize(adpcm_mix, aud_mix_l'length), 4);

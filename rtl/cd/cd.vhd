@@ -62,7 +62,7 @@ entity cd is
 		AD_S			: out signed(15 downto 0);
 
 		PHASE_DBG	: out std_logic_vector(7 downto 0);
-		CDDA_USEDW_DBG : out std_logic_vector(12 downto 0);
+		CDDA_USEDW_DBG : out std_logic_vector(13 downto 0);
 		ADPCM_DBG : out std_logic_vector(7 downto 0)
 	);
 end cd;
@@ -176,7 +176,7 @@ architecture rtl of cd is
 	signal FIFO_WR_REQ		: std_logic;
 	signal FIFO_D 				: std_logic_vector(31 downto 0);
 	signal FIFO_Q 				: std_logic_vector(31 downto 0);
-	signal FIFO_USEDW       : std_logic_vector(12 downto 0);
+	signal FIFO_USEDW       : std_logic_vector(13 downto 0);
 	signal SAMPLE_CE 			: std_logic;
 	signal ADPCM_CE             : std_logic;
 	signal OUTL 				: signed(25 downto 0);
@@ -677,7 +677,7 @@ begin
 		end if;
 	end process;
 
-	CD_FIFO_HALFFULL <= '1' when unsigned(FIFO_USEDW) >= 3072 else '0';
+	CD_FIFO_HALFFULL <= '1' when unsigned(FIFO_USEDW) >= 6144 else '0';
 	CDDA_USEDW_DBG <= FIFO_USEDW;
 	ADPCM_DBG <= ADPCM_PLAY & ADPCM_END_EN & ADPCM_HALF_EN & ADPCM_DMA_EN & ADPCM_CTRL(3 downto 0);
 

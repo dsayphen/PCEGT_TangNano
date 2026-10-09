@@ -255,7 +255,7 @@ wire        cd_dm;
 wire        cd_fifo_halffull;
 wire        cd_audio_hold;
 wire [7:0]  cd_phase_dbg;
-wire [12:0] cdda_usedw_dbg;
+wire [13:0] cdda_usedw_dbg;
 wire [7:0]  adpcm_dbg;
 wire [16:0] adram_a;
 wire [3:0]  adram_di, adram_do;
@@ -486,7 +486,9 @@ wire        vid_vbl;
 wire        vram_refresh_window;
 
 pce_sdram_ctrl_3ch #(
-    .FREQ (86_400_000)
+    .FREQ (86_400_000),
+    // 8 KiB BSRAM cache only where the BSRAM budget allows it
+    .CDRAM_CACHE_IDX ((CORE_LOGIC_PROFILE == PROFILE_CD && CORE_EXTRA_SGX == 0) ? 11 : 4)
 ) u_mem (
     .clk           (clk_sys),
     .clk_mem       (clk_mem),

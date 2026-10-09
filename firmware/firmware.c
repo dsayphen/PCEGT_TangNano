@@ -208,7 +208,7 @@ int main(void) {
         }
         if (!cd_audio_playing)
             delay(20);
-        else if (reg_cd_usedw >= 3072)
+        else if (reg_cd_usedw >= 6144)
             delay(2);
 
         if (cd_needs_resume) {
