@@ -532,3 +532,7 @@ The original core is adapted to Gowin and the board interfaces:
   specification.
 * Everything else under `rtl/tang/`, `constraints/` and `tools/` was written for
   this port and is released under the same terms as the core it is part of.
+
+## 10. Support
+
+* Tips are welcome : https://ko-fi.com/tawyy
