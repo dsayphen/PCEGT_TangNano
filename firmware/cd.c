@@ -425,7 +425,7 @@ int open_cd_image(const char *cue_name) {
         message("No data track in CUE", cue_name);
         return -1;
     }
-    if (cheat_cd_enabled) {
+    if (cheats_enabled) {
         uart_print("cd: loading CD cheats\n");
         cheats_load(current_game_name, CHEAT_GAME_CD);
         uart_print("cd: cheats step done\n");

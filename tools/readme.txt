@@ -1,0 +1,1 @@
+.\build_profiles.ps1 -Profile sgx

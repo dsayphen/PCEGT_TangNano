@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('pce', 'sgx', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'superset', 'all')]
+    [ValidateSet('pce', 'sgx', 'sgx_no_hdmi_audio', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'superset', 'all')]
     [string]$Profile = 'all',
     [string]$GowinShell
 )
@@ -26,6 +26,7 @@ if (-not (Test-Path $GowinShell)) {
 $profileIds = @{
     pce = 0
     sgx = 1
+    sgx_no_hdmi_audio = 1
     cd  = 2
     cdprobe = 2
     cd_sgx = 2
@@ -97,6 +98,12 @@ foreach ($name in $profiles) {
                 'parameter CORE_VDC1_MEMORY = 1',
                 'parameter CORE_VDC1_MEMORY = 0',
                 1)
+        } elseif ($name -eq 'sgx_no_hdmi_audio') {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_HDMI_AUDIO = 1',
+                'parameter CORE_HDMI_AUDIO = 0',
+                1)
         }
         [System.IO.File]::WriteAllText(
             $profileTop,
@@ -115,6 +122,20 @@ foreach ($name in $profiles) {
             throw 'Expected exactly one top_tang_nano20k.v entry in PCE_GT_TangNano.gprj.'
         }
         $topFile[0].SetAttribute('path', 'impl/profile-build/top_tang_nano20k.v')
+        if ($name -eq 'sgx_no_hdmi_audio') {
+            $audioFiles = @($project.Project.FileList.File | Where-Object {
+                $_.GetAttribute('path') -in @(
+                    'rtl/tang/audio_sampler_48k.sv',
+                    'rtl/tang/hdmi_audio_packetizer.sv'
+                )
+            })
+            if ($audioFiles.Count -ne 2) {
+                throw 'Expected the HDMI audio sampler and packetizer project entries.'
+            }
+            foreach ($audioFile in $audioFiles) {
+                [void]$project.Project.FileList.RemoveChild($audioFile)
+            }
+        }
         $project.Save($projectCopy)
 
         Add-Type -AssemblyName System.Web.Extensions

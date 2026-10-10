@@ -13,7 +13,9 @@ module pce_sdram_ctrl_3ch #(
     parameter FREQ = 86_400_000,
     // log2 of the CD RAM cache line count (one 32-bit word per line);
     // 12 = 16 KiB data in 10 BSRAM blocks, below 8 uses distributed RAM
-    parameter CDRAM_CACHE_IDX = 12
+    parameter CDRAM_CACHE_IDX = 12,
+    // SGX cannot tolerate urgent refresh stealing a VDC fetch slot.
+    parameter SGX_REFRESH_GUARD = 0
 ) (
     input  wire        clk,
     input  wire        clk_mem,
@@ -690,7 +692,8 @@ always @(posedge clk) begin
 end
 
 pce_sdram_interleaved #(
-    .FREQ(FREQ)
+    .FREQ(FREQ),
+    .SGX_REFRESH_GUARD(SGX_REFRESH_GUARD)
 ) memory (
     .SDRAM_DQ(IO_sdram_dq),
     .SDRAM_A(O_sdram_addr),
@@ -743,7 +746,8 @@ endmodule
 
 
 module pce_sdram_interleaved #(
-    parameter FREQ = 86_400_000
+    parameter FREQ = 86_400_000,
+    parameter SGX_REFRESH_GUARD = 0
 ) (
     inout  wire [31:0] SDRAM_DQ,
     output wire [10:0] SDRAM_A,
@@ -871,6 +875,9 @@ localparam CHANNEL1_VRAM1 = 2'd2;
 localparam integer RFRSH_CYCLES = FREQ / 128_000;
 wire       vram_pending  = (vram_req  != vram_ack);
 wire       vram1_pending = (vram1_req != vram1_ack);
+wire       refresh_vram_idle = !vram_pending && !vram1_pending;
+wire       refresh_allowed = in_reset_window || refresh_vram_idle ||
+                             (refresh_urgent && !SGX_REFRESH_GUARD);
 always @(posedge clk)
     rw_sync <= {rw_sync[0], refresh_window};
 // Decided at cycle 1 of the first pass, when the registered activity flags of
@@ -902,8 +909,7 @@ wire       chan1_busy_vdc1 = active[1] && (channel1_port == CHANNEL1_VRAM1);
 // (visible as sprite/tile glitches), so it must remain the exception.
 wire       refresh_now   = need_refresh && !refresh_block && slot_first &&
                             !active[0] && !chan1_busy_vdc1 && !active[2] &&
-                            (in_reset_window || refresh_urgent ||
-                             (!vram_pending && !vram1_pending));
+                            refresh_allowed;
 
 always @(posedge clk) begin
     if (!resetn) begin

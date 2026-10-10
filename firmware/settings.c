@@ -17,7 +17,7 @@ int video_zoom = 1;       // hardware reset default: stretch
 int video_scanline = 0;   // hardware reset default: off
 int game_pad_mode = 0;    // hardware reset default: 2 buttons
 int video_color = 0;      // hardware reset default: raw RGB
-int cheat_cd_enabled = 0;
+int cheats_enabled = 0;
 int vdc_sprites_double = 0;
 
 static int open_game_config(FIL *file, const char *game_name) {
@@ -448,8 +448,10 @@ void system_config_load(void) {
     while (f_gets(line, sizeof(line), &file)) {
         if (starts_with(line, "debug_uart="))
             debug_uart = parse_u8(line + 11) ? 1 : 0;
+        else if (starts_with(line, "cheats="))
+            cheats_enabled = parse_u8(line + 7) ? 1 : 0;
         else if (starts_with(line, "cheat_cd="))
-            cheat_cd_enabled = parse_u8(line + 9) ? 1 : 0;
+            cheats_enabled = parse_u8(line + 9) ? 1 : 0;
         else if (starts_with(line, "sprites_double="))
             vdc_sprites_double = parse_u8(line + 15) ? 1 : 0;
     }
@@ -464,7 +466,7 @@ void system_config_save(void) {
     static const char text[] =
         "# PCEngine / SuperGrafx System Settings\n"
         "# debug_uart : 0 = off, 1 = debug traces on the UART\n"
-        "# cheat_cd : 0 = off, 1 = experimental CD cheats\n"
+        "# cheats : 0 = off, 1 = PCE / SGX / CD cheats\n"
         "# sprites_double : 0 = 16 sprites/line, 1 = 32 sprites/line\n"
         "debug_uart=";
 
@@ -475,8 +477,8 @@ void system_config_save(void) {
 
     f_write(&file, text, sizeof(text) - 1, &bw);
     f_write(&file, debug_uart ? "1\n" : "0\n", 2, &bw);
-    f_write(&file, "cheat_cd=", 9, &bw);
-    f_write(&file, cheat_cd_enabled ? "1\n" : "0\n", 2, &bw);
+    f_write(&file, "cheats=", 7, &bw);
+    f_write(&file, cheats_enabled ? "1\n" : "0\n", 2, &bw);
     f_write(&file, "sprites_double=", 15, &bw);
     f_write(&file, vdc_sprites_double ? "1\n" : "0\n", 2, &bw);
     f_close(&file);

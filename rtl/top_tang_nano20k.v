@@ -25,7 +25,8 @@ module top_tang_nano20k #(
     parameter CORE_EXTRA_VDC1 = 0,
     parameter CORE_EXTRA_CHEATS = 0,
     parameter CORE_CHEAT_MAX_CODES = 4,
-    parameter CORE_VDC1_MEMORY = 1
+    parameter CORE_VDC1_MEMORY = 1,
+    parameter CORE_HDMI_AUDIO = 1
 ) (
     input  wire        sys_clk,        // 27 MHz crystal
 
@@ -488,7 +489,8 @@ wire        vram_refresh_window;
 pce_sdram_ctrl_3ch #(
     .FREQ (86_400_000),
     // 8 KiB BSRAM cache only where the BSRAM budget allows it
-    .CDRAM_CACHE_IDX ((CORE_LOGIC_PROFILE == PROFILE_CD && CORE_EXTRA_SGX == 0) ? 11 : 4)
+    .CDRAM_CACHE_IDX ((CORE_LOGIC_PROFILE == PROFILE_CD && CORE_EXTRA_SGX == 0) ? 11 : 4),
+    .SGX_REFRESH_GUARD (CORE_PROFILE == PROFILE_SGX)
 ) u_mem (
     .clk           (clk_sys),
     .clk_mem       (clk_mem),
@@ -843,7 +845,7 @@ wire [7:0] out_g = osd_on ? (osd_text ? osd_rgb[15:8] :
 wire [7:0] out_b = osd_on ? (osd_text ? osd_rgb[7:0] :
                              ({1'b0, osd_rgb[7:0]} + {1'b0, vga_b}) >> 1) : vga_b;
 
-dvi_tx u_dvi (
+dvi_tx #(.HDMI_AUDIO(CORE_HDMI_AUDIO)) u_dvi (
     .clk_pix    (clk_pix),
     .clk_pix5   (clk_pix5),
     .resetn     (pix_resetn),
@@ -880,15 +882,23 @@ audio_tone u_audio_tone (
     .out_r   (aud_r)
 );
 
-audio_sampler_48k u_audio_sampler (
-    .clk_sys     (clk_sys),
-    .resetn      (sys_resetn),
-    .audio_left  (aud_l),
-    .audio_right (aud_r),
-    .clk_audio   (clk_audio_48k),
-    .sample_left (audio_left_48k),
-    .sample_right(audio_right_48k)
-);
+generate
+    if (CORE_HDMI_AUDIO != 0) begin : g_hdmi_audio_sampler
+        audio_sampler_48k u_audio_sampler (
+            .clk_sys     (clk_sys),
+            .resetn      (sys_resetn),
+            .audio_left  (aud_l),
+            .audio_right (aud_r),
+            .clk_audio   (clk_audio_48k),
+            .sample_left (audio_left_48k),
+            .sample_right(audio_right_48k)
+        );
+    end else begin : g_no_hdmi_audio_sampler
+        assign clk_audio_48k = 1'b0;
+        assign audio_left_48k = 16'sd0;
+        assign audio_right_48k = 16'sd0;
+    end
+endgenerate
 
 i2s_tx #(.BCK_DIV(14)) u_i2s (
     .clk    (clk_sys),
@@ -900,7 +910,7 @@ i2s_tx #(.BCK_DIV(14)) u_i2s (
     .sd     (hp_din)
 );
 
-assign pa_en = ~audio_hdmi;
+assign pa_en = (CORE_HDMI_AUDIO != 0) ? ~audio_hdmi : 1'b1;
 
 // ===========================================================================
 // Status LEDs (active low)

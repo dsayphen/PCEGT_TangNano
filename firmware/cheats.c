@@ -255,8 +255,10 @@ void cheats_load(const char *game_name, enum cheat_game_type type) {
     cheats_clear();
     if (!game_name || !*game_name || type < CHEAT_GAME_PCE || type > CHEAT_GAME_CD)
         return;
-    if (type == CHEAT_GAME_CD && !cheat_cd_enabled)
+    if (!cheats_enabled) {
+        strcpy(status_text, "Cheats disabled");
         return;
+    }
     if (build_game_path(path, sizeof(path), directories[type], game_name,
                         ".cht", 1) != 0) {
         strcpy(status_text, "Cheat path too long");

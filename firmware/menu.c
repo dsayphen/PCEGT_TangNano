@@ -526,7 +526,7 @@ int pause_menu(void) {
 void options_menu(void) {
     static const char *items[6] = {
         "Video Settings >", "Audio Settings >", "Debug UART: ",
-        "Cheat CD (exp.): ", "Sprites: ", "Back"
+        "Cheats: ", "Sprites: ", "Back"
     };
     const int n_items = 6;
     int active = 0;
@@ -542,7 +542,7 @@ void options_menu(void) {
                 char label[32];
                 const char *value = i == 2
                     ? (debug_uart ? "On" : "Off")
-                    : i == 3 ? (cheat_cd_enabled ? "On" : "Off")
+                    : i == 3 ? (cheats_enabled ? "On" : "Off")
                     : vdc_sprites_double ? "32" : "16";
                 int j = 0;
                 for (const char *s = items[i]; *s; s++)
@@ -575,7 +575,7 @@ void options_menu(void) {
             debug_uart = !debug_uart;
             system_config_save();
         } else if ((e & JOY_A) && active == 3) {
-            cheat_cd_enabled = !cheat_cd_enabled;
+            cheats_enabled = !cheats_enabled;
             system_config_save();
         } else if ((e & JOY_A) && active == 4) {
             vdc_sprites_double = !vdc_sprites_double;

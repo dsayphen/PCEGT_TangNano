@@ -57,7 +57,10 @@ reg         clkref = 1'b0;
 
 wire        sdram_init_done;
 
-pce_sdram_ctrl_3ch #(.FREQ(86_400_000)) mem (
+pce_sdram_ctrl_3ch #(
+    .FREQ(86_400_000),
+    .SGX_REFRESH_GUARD(1)
+) mem (
     .clk           (clk),
     .clk_mem       (clk_mem),
     .clk_sdram     (clk_sdram),

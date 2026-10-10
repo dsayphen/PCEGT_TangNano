@@ -11,7 +11,9 @@
 // negative polarity, which is what a 640x480 style mode expects.
 //
 
-module dvi_tx (
+module dvi_tx #(
+    parameter HDMI_AUDIO = 1
+) (
     input  wire       clk_pix,      // 25.92 MHz
     input  wire       clk_pix5,     // 129.6 MHz
     input  wire       resetn,
@@ -46,7 +48,7 @@ always @(posedge clk_pix) begin
     else
         audio_enable_sync <= {audio_enable_sync[0], audio_enable};
 end
-wire hdmi_audio_on = audio_enable_sync[1];
+wire hdmi_audio_on = (HDMI_AUDIO != 0) && audio_enable_sync[1];
 
 // Rebase the scaler's 819x524/526 timing so the 640x480 active window starts
 // at (0,0), leaving its full horizontal blanking interval available for HDMI.
@@ -79,20 +81,31 @@ wire [11:0] island_data = {
     (cx != 0), packet_data[0], ~vsync, ~hsync
 };
 
-hdmi_audio_packetizer u_audio_packets (
-    .clk_pixel       (clk_pix),
-    .resetn          (resetn),
-    .audio_enable    (hdmi_audio_on),
-    .clk_audio       (clk_audio),
-    .sample_left     (audio_left),
-    .sample_right    (audio_right),
-    .packet_start    (packet_start),
-    .packet_period   (island_period),
-    .video_field_end (video_field_end),
-    .header          (packet_header),
-    .sub             (packet_sub),
-    .packet_data     (packet_data)
-);
+generate
+    if (HDMI_AUDIO != 0) begin : g_hdmi_audio
+        hdmi_audio_packetizer u_audio_packets (
+            .clk_pixel       (clk_pix),
+            .resetn          (resetn),
+            .audio_enable    (hdmi_audio_on),
+            .clk_audio       (clk_audio),
+            .sample_left     (audio_left),
+            .sample_right    (audio_right),
+            .packet_start    (packet_start),
+            .packet_period   (island_period),
+            .video_field_end (video_field_end),
+            .header          (packet_header),
+            .sub             (packet_sub),
+            .packet_data     (packet_data)
+        );
+    end else begin : g_no_hdmi_audio
+        assign packet_data = 9'd0;
+        assign packet_header = 24'd0;
+        assign packet_sub[0] = 56'd0;
+        assign packet_sub[1] = 56'd0;
+        assign packet_sub[2] = 56'd0;
+        assign packet_sub[3] = 56'd0;
+    end
+endgenerate
 
 tmds_encoder enc0 (
     .clk(clk_pix), .resetn(resetn),
