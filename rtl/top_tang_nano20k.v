@@ -26,7 +26,8 @@ module top_tang_nano20k #(
     parameter CORE_EXTRA_CHEATS = 0,
     parameter CORE_CHEAT_MAX_CODES = 4,
     parameter CORE_VDC1_MEMORY = 1,
-    parameter CORE_HDMI_AUDIO = 1
+    parameter CORE_HDMI_AUDIO = 1,
+    parameter CORE_RV_DIAGNOSTIC = 0
 ) (
     input  wire        sys_clk,        // 27 MHz crystal
 
@@ -236,6 +237,9 @@ wire        brm_host_access;
 
 wire        rv_valid;
 wire        rv_ready;
+wire [15:0] rv_scheduler_dbg;
+wire [15:0] loader_host_dbg;
+wire loader_uart_owner;
 wire [22:0] rv_addr;
 wire [31:0] rv_wdata;
 wire [3:0]  rv_wstrb;
@@ -291,7 +295,8 @@ iosys #(
     .FIRMWARE_FLASH_ADDR (FIRMWARE_FLASH_ADDR),
     .FIRMWARE_SIZE       (FIRMWARE_SIZE),
     .RV_BASE             (23'h40_0000),
-    .CORE_ID             (CORE_PROFILE)
+    .CORE_ID             (CORE_PROFILE),
+    .RV_DIAGNOSTIC       (CORE_RV_DIAGNOSTIC)
 ) u_iosys (
     .clk              (clk_sys),
     .resetn           (sys_resetn),
@@ -376,6 +381,9 @@ iosys #(
 
     .rv_valid         (rv_valid),
     .rv_ready         (rv_ready),
+    .rv_scheduler_dbg (rv_scheduler_dbg),
+    .loader_host_dbg (loader_host_dbg),
+    .loader_uart_owner (loader_uart_owner),
     .rv_addr          (rv_addr),
     .rv_wdata         (rv_wdata),
     .rv_wstrb         (rv_wstrb),
@@ -462,7 +470,7 @@ rom_source_arb u_arb (
     .rom_sz         (rom_sz),
     .rom_offset     (rom_offset),
     .sgx_mode       (sgx_mode),
-    .own_uart_o     ()
+    .own_uart_o     (loader_uart_owner)
 );
 
 wire        rom_rd;
@@ -490,7 +498,9 @@ pce_sdram_ctrl_3ch #(
     .FREQ (86_400_000),
     // 8 KiB BSRAM cache only where the BSRAM budget allows it
     .CDRAM_CACHE_IDX ((CORE_LOGIC_PROFILE == PROFILE_CD && CORE_EXTRA_SGX == 0) ? 11 : 4),
-    .SGX_REFRESH_GUARD (CORE_PROFILE == PROFILE_SGX)
+    .SGX_REFRESH_GUARD (CORE_PROFILE == PROFILE_SGX),
+    .RV_PRIORITY (0),
+    .FIXED_READ_CAPTURE (CORE_PROFILE == PROFILE_SGX)
 ) u_mem (
     .clk           (clk_sys),
     .clk_mem       (clk_mem),
@@ -537,6 +547,8 @@ pce_sdram_ctrl_3ch #(
 
     .rv_valid      (rv_valid),
     .rv_ready      (rv_ready),
+    .rv_scheduler_dbg (rv_scheduler_dbg),
+    .loader_host_dbg (loader_host_dbg),
     .rv_addr       (rv_addr),
     .rv_wdata      (rv_wdata),
     .rv_wstrb      (rv_wstrb),

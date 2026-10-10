@@ -79,8 +79,11 @@ if ($CROSS) {
 }
 
 # ---------------------------------------------------------------------------
-foreach ($tb in @('tb_textdisp', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vram_clear', 'tb_arcade_ram')) {
+foreach ($tb in @('tb_textdisp', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vram_clear', 'tb_arcade_ram', 'tb_rv_uart_diagnostic', 'tb_rv_x22', 'tb_rv_memory_probe')) {
     $files = switch ($tb) {
+        'tb_rv_memory_probe' { @('sim/tb_rv_memory_probe.v', 'rtl/tang/rv_memory_probe.v') }
+        'tb_rv_x22' { @('sim/tb_rv_x22.v', 'rtl/tang/iosys/picorv32.v') }
+        'tb_rv_uart_diagnostic' { @('sim/tb_rv_uart_diagnostic.v', 'rtl/tang/rv_uart_diagnostic.v', 'rtl/tang/iosys/simpleuart.v') }
         'tb_textdisp'       { @('sim/tb_textdisp.v', 'rtl/tang/iosys/textdisp.v', 'rtl/tang/iosys/font_rom.v') }
         'tb_rom_source_arb' { @('sim/tb_rom_source_arb.v', 'rtl/tang/rom_source_arb.v') }
         'tb_sprite_stream'  { @('sim/tb_sprite_stream.v', 'sim/sdram_model.v', 'rtl/tang/pce_sdram_ctrl_3ch.v') }

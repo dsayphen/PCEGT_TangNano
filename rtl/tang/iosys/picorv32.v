@@ -96,6 +96,10 @@ module picorv32 #(
 ) (
 	input clk, resetn,
 	output reg trap,
+	output wire debug_x22_write,
+	output wire [31:0] debug_x22_value,
+	output wire [31:0] debug_x22_pc,
+	output wire [31:0] debug_x22_opcode,
 
 	output reg        mem_valid,
 	output reg        mem_instr,
@@ -1308,6 +1312,10 @@ module picorv32 #(
 
 	reg cpuregs_write;
 	reg [31:0] cpuregs_wrdata;
+	assign debug_x22_write = resetn && cpuregs_write && latched_rd == 22;
+	assign debug_x22_value = cpuregs_wrdata;
+	assign debug_x22_pc = reg_pc;
+	assign debug_x22_opcode = dbg_insn_opcode;
 	reg [31:0] cpuregs_rs1;
 	reg [31:0] cpuregs_rs2;
 	reg [regindex_bits-1:0] decoded_rs;

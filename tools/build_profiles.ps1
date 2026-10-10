@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('pce', 'sgx', 'sgx_no_hdmi_audio', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'superset', 'all')]
+    [ValidateSet('pce', 'sgx', 'sgx_rv_diag', 'sgx_no_hdmi_audio', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'superset', 'all')]
     [string]$Profile = 'all',
     [string]$GowinShell
 )
@@ -26,6 +26,7 @@ if (-not (Test-Path $GowinShell)) {
 $profileIds = @{
     pce = 0
     sgx = 1
+    sgx_rv_diag = 1
     sgx_no_hdmi_audio = 1
     cd  = 2
     cdprobe = 2
@@ -58,7 +59,13 @@ foreach ($name in $profiles) {
             $parameterPattern,
             "parameter [1:0] CORE_PROFILE = 2'd$id",
             1)
-        if ($name -eq 'cdprobe') {
+        if ($name -eq 'sgx_rv_diag') {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_RV_DIAGNOSTIC = 0',
+                'parameter CORE_RV_DIAGNOSTIC = 1',
+                1)
+        } elseif ($name -eq 'cdprobe') {
             $profileSource = [regex]::Replace(
                 $profileSource,
                 'parameter \[1:0\] CORE_LOGIC_PROFILE = CORE_PROFILE',

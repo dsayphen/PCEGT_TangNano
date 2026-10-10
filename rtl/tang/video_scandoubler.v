@@ -344,6 +344,7 @@ endfunction
 reg [10:0] hds_skip;
 always @(*) begin
     case (hdw_sync)
+        7'd28:   hds_skip = 11'd26;    // 224 px a tester 
         7'd32:   hds_skip = 11'd11;    // 256 px OK
         7'd40:   hds_skip = 11'd23;   // 320 px OK
         7'd42:   hds_skip = 11'd16;    // 336 px OK

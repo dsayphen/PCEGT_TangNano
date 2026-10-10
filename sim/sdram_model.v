@@ -10,7 +10,9 @@
 // scheduler and its new 32 bit masked write, not the SDRAM AC timing (which is
 // unchanged and already proven on hardware).
 //
-module sdram_model (
+module sdram_model #(
+    parameter READ_HOLD_CYCLES = 3
+) (
     inout  wire [31:0] DQ,
     input  wire [10:0] A,
     input  wire [1:0]  BA,
@@ -83,7 +85,7 @@ always @(negedge clk) begin
     rd_a2 <= rd_a1;
     if (rd_v2) begin
         dq_data <= mem[rd_a2];
-        dq_hold <= 4'd3;
+        dq_hold <= READ_HOLD_CYCLES;
     end
 end
 

@@ -64,7 +64,8 @@ module iosys #(
     // base of the softcore's 2 MiB RAM window inside the 8 MiB SDRAM
     parameter [22:0] RV_BASE             = 23'h40_0000,
     parameter [31:0] ROM_MAX_SIZE        = 32'h0040_0000,
-    parameter [15:0] CORE_ID             = 16'd3          // 3 = pcetang
+    parameter [15:0] CORE_ID             = 16'd3,
+    parameter RV_DIAGNOSTIC = 0
 ) (
     input  wire        clk,               // clk_sys, 43.2 MHz
     input  wire        resetn,
@@ -188,6 +189,9 @@ module iosys #(
     output wire [3:0]  rv_wstrb,
     input  wire [31:0] rv_rdata,
     input  wire        ram_busy,          // high until the SDRAM is initialised
+    input  wire [15:0] rv_scheduler_dbg,
+    input  wire [15:0] loader_host_dbg,
+    input  wire loader_uart_owner,
 
     // ---- SPI flash holding the firmware ----------------------------------
     output wire        flash_spi_cs_n,
@@ -317,6 +321,22 @@ wire [31:0] mem_addr;
 wire [31:0] mem_wdata;
 wire [3:0]  mem_wstrb;
 wire [31:0] mem_rdata;
+wire mem_instr;
+wire rv_trap;
+wire x22_write;
+wire [31:0] x22_value;
+wire [31:0] x22_pc;
+wire [31:0] x22_opcode;
+wire probe_valid;
+wire [22:0] probe_addr;
+wire [127:0] probe_snapshot;
+wire probe_has_result;
+wire diag_uart_owned;
+wire diag_uart_write;
+wire [7:0] diag_uart_data;
+wire uart_tx_busy;
+wire uart_dat_wait_raw;
+assign uart_dat_wait = uart_dat_wait_raw || diag_uart_owned;
 
 wire ram_sel = mem_valid && (mem_addr[31:21] == 11'd0);
 
@@ -436,7 +456,8 @@ localparam [22:0] VRAM_CLEAR_SPAN  = 23'h01_0000;
 // start of a new load
 wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
-assign mem_ready = (ram_sel && rv_ready) || textdisp_sel || uart_div_sel ||
+assign mem_ready = (ram_sel && rv_ready && !probe_valid) || textdisp_sel ||
+                   (uart_div_sel && !diag_uart_owned) ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
                    game_ctrl_sel || rl_status_sel || rl_debug_sel || vdc_options_sel ||
                    time_sel || pad_mode_sel || color_mode_sel || id_sel || audio_sel ||
@@ -515,6 +536,12 @@ picorv32 #(
 ) u_rv32 (
     .clk       (clk),
     .resetn    (resetn & flash_loaded),
+    .trap      (rv_trap),
+    .debug_x22_write (x22_write),
+    .debug_x22_value (x22_value),
+    .debug_x22_pc (x22_pc),
+    .debug_x22_opcode (x22_opcode),
+    .mem_instr (mem_instr),
     .mem_valid (mem_valid),
     .mem_ready (mem_ready),
     .mem_addr  (mem_addr),
@@ -543,19 +570,96 @@ textdisp u_disp (
     .osd_text    (osd_text)
 );
 
-simpleuart u_uart (
+generate
+    if (RV_DIAGNOSTIC != 0) begin : g_rv_diagnostic
+        reg [31:0] completed_transactions;
+        reg [31:0] last_read_data;
+        reg [31:0] last_data_read_addr;
+        reg [127:0] last_x22_write;
+        wire [127:0] stack_snapshot;
+        rv_stack_watch stack_watch (
+            .clk(clk), .resetn(resetn && flash_loaded),
+            .completed(mem_valid && mem_ready), .address(mem_addr),
+            .write_data(mem_wdata), .read_data(mem_rdata),
+            .write_strobes(mem_wstrb), .instruction(mem_instr),
+            .snapshot(stack_snapshot)
+        );
+        always @(posedge clk) begin
+            if (!resetn || !flash_loaded) begin
+                last_data_read_addr <= 0;
+                last_x22_write <= 0;
+            end else begin
+                if (mem_valid && mem_ready && !mem_instr && mem_wstrb == 0)
+                    last_data_read_addr <= mem_addr;
+                if (x22_write)
+                    last_x22_write <= {x22_pc, x22_opcode, x22_value, last_data_read_addr};
+            end
+        end
+        wire [31:0] diag_status = {rv_scheduler_dbg, 5'd0, vid_dcc_dbg,
+                                  flash_loaded, rv_valid, rv_ready, ram_sel,
+                                  rv_trap, mem_instr, mem_ready, mem_valid,
+                                  |mem_wstrb};
+                    wire [31:0] diag_loader = {loader_host_dbg, 3'd0, loader_uart_owner,
+                                  rl_cnt, rl_clearing, rl_finishing,
+                                  loading, image_valid, ld_busy, ld_idle,
+                                  ld_wr, rl_data_ready, rl_clear_phase};
+        always @(posedge clk) begin
+            if (!resetn || !flash_loaded) begin
+                completed_transactions <= 32'd0;
+                last_read_data <= 32'd0;
+            end else if (mem_valid && mem_ready) begin
+                completed_transactions <= completed_transactions + 32'd1;
+                if (mem_wstrb == 0)
+                    last_read_data <= mem_rdata;
+            end
+        end
+        rv_uart_diagnostic #(.FREQ(FREQ), .X22_ENABLE(1), .STACK_ENABLE(1)) diagnostic (
+            .clk(clk), .resetn(resetn && flash_loaded),
+            .snapshot({mem_addr, diag_loader, completed_transactions, diag_status}),
+            .x22_snapshot(probe_has_result ? probe_snapshot : last_x22_write),
+            .extra_tag(probe_has_result ? "P" : "X"),
+            .stack_snapshot(stack_snapshot),
+            .transaction({mem_addr, (|mem_wstrb) ? mem_wdata : mem_rdata,
+                          completed_transactions,
+                          27'd0, mem_instr, mem_wstrb}),
+            .waiting(mem_valid && !mem_ready && !diag_uart_owned),
+            .completed(mem_valid && mem_ready), .trap(rv_trap),
+            .uart_busy(uart_tx_busy), .owned(diag_uart_owned),
+            .write_byte(diag_uart_write), .byte_data(diag_uart_data)
+        );
+        rv_memory_probe #(.WAIT_CYCLES(FREQ / 100), .ADDRESS(23'h59ff70)) probe (
+            .clk(clk), .resetn(resetn && flash_loaded && !flash_loading),
+            .stalled(mem_valid && !mem_ready && !ram_sel &&
+                     (mem_addr[31:12] != 20'h02000 || mem_addr[11:0] >= 12'h100)),
+            .ready(rv_ready), .rdata(rv_rdata), .valid(probe_valid),
+            .address(probe_addr), .snapshot(probe_snapshot), .has_result(probe_has_result)
+        );
+    end else begin : g_no_rv_diagnostic
+        assign diag_uart_owned = 1'b0;
+        assign diag_uart_write = 1'b0;
+        assign diag_uart_data = 8'd0;
+        assign probe_valid = 0;
+        assign probe_addr = 0;
+        assign probe_snapshot = 0;
+        assign probe_has_result = 0;
+    end
+endgenerate
+
+simpleuart #(.DEFAULT_DIV(RV_DIAGNOSTIC != 0 ? FREQ / 115200 : 1)) u_uart (
     .clk          (clk),
     .resetn       (resetn),
     .ser_tx       (uart_tx),
     .ser_rx       (uart_rx),
-    .reg_div_we   (uart_div_sel ? mem_wstrb : 4'b0000),
+    .reg_div_we   (uart_div_sel && !diag_uart_owned ? mem_wstrb : 4'b0000),
     .reg_div_di   (mem_wdata),
     .reg_div_do   (uart_div_do),
-    .reg_dat_we   (uart_dat_sel ? mem_wstrb[0] : 1'b0),
+    .reg_dat_we   (diag_uart_owned ? diag_uart_write :
+                  (uart_dat_sel ? mem_wstrb[0] : 1'b0)),
     .reg_dat_re   (uart_dat_sel && !mem_wstrb),
-    .reg_dat_di   (mem_wdata),
+    .reg_dat_di   (diag_uart_owned ? {24'd0, diag_uart_data} : mem_wdata),
     .reg_dat_do   (uart_dat_do),
-    .reg_dat_wait (uart_dat_wait)
+    .reg_dat_wait (uart_dat_wait_raw),
+    .tx_busy      (uart_tx_busy)
 );
 
 simplespimaster u_spi (
@@ -849,11 +953,11 @@ end
 // ===========================================================================
 // SDRAM port multiplexing: flash loader first, then the softcore
 // ===========================================================================
-assign rv_valid = flash_loading ? flash_wr : (mem_valid & ram_sel);
+assign rv_valid = flash_loading ? flash_wr : probe_valid ? 1'b1 : (mem_valid & ram_sel);
 assign rv_addr  = flash_loading ? (RV_BASE | {2'b00, flash_wr_addr})
-                                : (RV_BASE | {2'b00, mem_addr[20:0]});
+                                : probe_valid ? probe_addr : (RV_BASE | {2'b00, mem_addr[20:0]});
 assign rv_wdata = flash_loading ? {flash_d, flash_d, flash_d, flash_d} : mem_wdata;
-assign rv_wstrb = flash_loading ? flash_wstrb : mem_wstrb;
+assign rv_wstrb = flash_loading ? flash_wstrb : probe_valid ? 4'd0 : mem_wstrb;
 
 // ===========================================================================
 // Millisecond counter

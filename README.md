@@ -435,6 +435,21 @@ The four bank-2 allocations total 2 MiB (25%). The SDRAM runs at 86.4 MHz;
 returns VRAM data within one fastest PCE pixel period. Refresh is distributed
 across idle slots and is also allowed while the console is held in reset.
 
+Host accesses and VDC/RV accesses must not open different rows in the same
+bank concurrently. In particular, loader clears in bank 2 could previously
+issue host ACT at phase 7, then RV/VDC1 ACT at phase 1, followed by host WRITE
+at phase 2 using the replaced row. The scheduler now guards these shared-bank
+activations until the host access completes; bank-3 loader writes similarly
+exclude VDC0 activation. This is required for memory correctness independently
+of requester priority.
+
+The focused simulation uses `tb_sprite_stream` with `READ_HOLD_CYCLES=1` and
+`LOADER_BASE=23'h5e0000`, plus `+capture_test +transition_test +loader_test`.
+It exercises disjoint addresses in bank 2 with RV reads/writes, VRAM and ROM
+traffic during VCE transitions. The former scheduler fails loader verification;
+the guarded scheduler verifies all 1024 loader bytes. The one-cycle read window
+is an opt-in check, not a complete SDRAM electrical timing model.
+
 CD scratch RAM and Arcade Card RAM share the PicoRV32 SDRAM channel, so CPU
 accesses go through a direct-mapped, write-through cache of 32-bit SDRAM words
 (`CDRAM_CACHE_IDX`). Profiles with the CD logic and no extra SGX get 2,048
@@ -442,6 +457,95 @@ lines (8 KiB, 6 BSRAM blocks); the others keep 16 lines in distributed RAM.
 Hits never stall the CPU; misses and every write wait for the SDRAM round trip.
 Firmware writes into the CD RAM window invalidate the matching line, and a ROM
 load clears the whole cache.
+
+### RV hardware UART diagnostics
+
+Build `powershell -File tools/build_profiles.ps1 -Profile sgx_rv_diag` for a
+separate SGX diagnostic bitstream. It retains the existing SGX arbitration,
+video and audio configuration. No firmware update is required. Open the UART
+at the firmware baud rate (normally 115200, 8N1) before starting the game.
+
+The independent RTL monitor starts after firmware loading, reports every
+second, and also snapshots a bus wait or lack of completed transactions after
+10 ms, or a rising PicoRV32 `trap`. It shares the existing UART transmitter,
+waiting for the current character to finish and pausing firmware UART writes
+while its report is sent. Illegal-instruction detection remains unchanged.
+
+Each line is `RVD r aaaaaaaaddddddddccccccccssssssss` (hexadecimal):
+
+- `r`: event mask, bit 0 = bus wait, bit 1 = no completed transactions,
+  bit 2 = trap; zero means a periodic report without a recorded event.
+- `aaaaaaaa`: current RV bus address; `dddddddd`: loader/host debug state.
+- `cccccccc`: completed CPU bus transaction count since firmware startup.
+- `ssssssss`: status sampled when the report was triggered.
+
+Loader word bits: 31 = host active; 30 = host latched write; 29 = host CAS
+issued; 28 = host request (memory domain); 27 = host ACK (memory domain);
+26 = VDC0 request pending; 25:24 = host kind (0 none, 1 loader, 2 ROM);
+23 = host busy; 22 = queued loader byte; 21 = host write; 20 = host request
+(system domain); 19 = synchronized ACK; 18 = aggregate loading;
+17 = aggregate loader write; 16 = aggregate loader idle; 15:13 reserved;
+12 = UART owns loader; 11:9 = firmware loader byte count; 8 = clearing;
+7 = finishing; 6 = firmware loading; 5 = firmware image valid;
+4 = firmware loader busy; 3 = loader idle; 2 = firmware loader write;
+1 = loader data ready; 0 = clear phase. The last CPU read remains available
+in the `RVT` transaction history.
+
+Status bits: 31:28 = current refresh debt; 27:25 = SDRAM phase;
+24:22 = active channels; 21:20 = channel-1 owner (0 none, 1 RV, 2 VDC1);
+19 = memory RV request toggle; 18 = its ACK toggle; 17 = refresh block;
+16 = SDRAM initialized; 15:11 reserved; 10:9 = VCE dot-clock selection;
+8 = firmware loaded; 7 = SDRAM RV valid; 6 = SDRAM RV ready;
+5 = CPU RAM decode; 4 = trap; 3 = instruction fetch; 2 = CPU bus ready;
+1 = CPU bus valid; 0 = CPU write.
+
+The scheduler status crosses clock domains as a two-register debug sample,
+not an atomic transaction trace. A stopped counter with request != ACK suggests
+a memory wait; an unmapped CPU address suggests a bad access. An advancing
+counter without firmware `alive` output suggests continued execution, not
+necessarily correct execution. Save several reports before and after a stall.
+
+After a timeout or trap with recorded CPU activity, the monitor also sends
+eight or fewer lines `RVT i aaaaaaaaddddddddccccccccffffffff`, oldest first.
+These are the last completed CPU transactions before the event. `i` is the
+chronological index, `aaaaaaaa` the transaction address, `dddddddd` the read
+result or write data, and `cccccccc` the zero-based transaction number.
+In `ffffffff`, bit 4 indicates an instruction fetch and bits 3:0 are the byte
+write strobes (zero for a read). The ring is frozen during transmission;
+it rearms after the dump if CPU transactions resume without a trap. Thus a
+temporary loader wait does not permanently hide a subsequent fault. A CPU
+that remains stalled keeps its trace frozen. Capture all `RVT` lines as well
+as the `RVD` reports; the blocked transaction itself is shown by `RVD`, not
+by the completed-transaction history.
+
+Each `RVD` report is followed by `RVX 0 ppppppppoooooooovvvvvvvvaaaaaaaa`,
+capturing the last actual CPU register write to x22: instruction PC, opcode,
+new register value, and last completed non-instruction read address. The read
+address is useful for an LW restoration but is not meaningful as a source for
+LUI/ALU writes. RVX is frozen with its corresponding RVD snapshot. It observes
+the writeback bus, not an independent readback of the register RAM; corruption
+without a writeback is therefore not directly measured. RVT records are still
+sent after RVX on a stall. No CPU execution settings are changed.
+
+When a CPU transaction stalls for 10 ms at an address outside RAM and the
+MMIO page (or above offset 0x100 within that page), a read-only hardware probe
+requests four rereads of physical SDRAM address 0x59ff70 (CPU stack 0x19ff70). CPU responses are
+not forged; the invalid CPU access remains stalled. After all four replies,
+`RVP 0 vvvvvvvvwwwwwwwwxxxxxxxxyyyyyyyy` replaces RVX in subsequent reports,
+showing the four results oldest first. Compare them with the stack write and
+read values in RVS. The probe runs once per system
+reset and uses the same SDRAM scheduler as the CPU, not a second physical
+memory interface. A repeated value different from the saved stack word could
+be stored corruption or a repeatable controller error.
+
+Each report also includes `RVS 0 wwwwwwwwrrrrrrrrscccccccdddddddd` for CPU
+address 0x19ff70: last completed write data, last completed read data, last
+write strobe nibble, 28-bit write count, and 32-bit read count. Zero counts
+mean no matching transaction has been observed since firmware startup.
+Only completed non-instruction CPU accesses are recorded. Probe transactions
+do not update RVS. Partial writes retain their raw bus data and strobe mask,
+not a reconstructed memory word. RVS is frozen with its RVD snapshot and
+remains present when RVP replaces RVX after the rereads.
 
 ---
 

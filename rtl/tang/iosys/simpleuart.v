@@ -39,7 +39,8 @@ module simpleuart #(parameter integer DEFAULT_DIV = 1) (
 	input         reg_dat_re,
 	input  [31:0] reg_dat_di,
 	output [31:0] reg_dat_do,
-	output        reg_dat_wait
+	output        reg_dat_wait,
+	output        tx_busy
 );
 	reg [15:0] cfg_divider /* synthesis syn_keep=1 */;
 
@@ -55,6 +56,7 @@ module simpleuart #(parameter integer DEFAULT_DIV = 1) (
 	reg send_dummy;
 
 	assign reg_div_do = cfg_divider;
+	assign tx_busy = send_bitcnt != 0 || send_dummy;
 
 	assign reg_dat_wait = reg_dat_we && (send_bitcnt != 0 || send_dummy);
 	assign reg_dat_do = recv_buf_valid ? {24'b0, recv_buf_data} : ~0;

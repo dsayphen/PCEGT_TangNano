@@ -15,7 +15,9 @@ module pce_sdram_ctrl_3ch #(
     // 12 = 16 KiB data in 10 BSRAM blocks, below 8 uses distributed RAM
     parameter CDRAM_CACHE_IDX = 12,
     // SGX cannot tolerate urgent refresh stealing a VDC fetch slot.
-    parameter SGX_REFRESH_GUARD = 0
+    parameter SGX_REFRESH_GUARD = 0,
+    parameter RV_PRIORITY = 0,
+    parameter FIXED_READ_CAPTURE = 0
 ) (
     input  wire        clk,
     input  wire        clk_mem,
@@ -84,10 +86,30 @@ module pce_sdram_ctrl_3ch #(
     output reg         init_done,
 
     // Largest pending refresh debt since reset.
-    output wire [7:0]  refresh_gap_dbg
+    output wire [7:0]  refresh_gap_dbg,
+    output wire [15:0] rv_scheduler_dbg,
+    output wire [15:0] loader_host_dbg
 );
 
 wire [7:0] refresh_gap_mem;
+wire [15:0] scheduler_dbg_mem;
+reg [15:0] scheduler_dbg_sync0;
+reg [15:0] scheduler_dbg_sync1;
+always @(posedge clk) begin
+    scheduler_dbg_sync0 <= scheduler_dbg_mem;
+    scheduler_dbg_sync1 <= scheduler_dbg_sync0;
+end
+assign rv_scheduler_dbg = scheduler_dbg_sync1;
+wire [5:0] host_phase_dbg_mem;
+reg [5:0] host_phase_dbg_sync0;
+reg [5:0] host_phase_dbg_sync1;
+always @(posedge clk) begin
+    host_phase_dbg_sync0 <= host_phase_dbg_mem;
+    host_phase_dbg_sync1 <= host_phase_dbg_sync0;
+end
+assign loader_host_dbg = {host_phase_dbg_sync1, host_kind, host_busy,
+                          wr_pending, host_we, host_req, host_ack_sync[1],
+                          ld_active, ld_wr, ld_idle};
 reg  [7:0] refresh_gap_sync0;
 reg  [7:0] refresh_gap_sync1;
 always @(posedge clk) begin
@@ -693,7 +715,9 @@ end
 
 pce_sdram_interleaved #(
     .FREQ(FREQ),
-    .SGX_REFRESH_GUARD(SGX_REFRESH_GUARD)
+    .SGX_REFRESH_GUARD(SGX_REFRESH_GUARD),
+    .RV_PRIORITY(RV_PRIORITY),
+    .FIXED_READ_CAPTURE(FIXED_READ_CAPTURE)
 ) memory (
     .SDRAM_DQ(IO_sdram_dq),
     .SDRAM_A(O_sdram_addr),
@@ -739,6 +763,8 @@ pce_sdram_interleaved #(
     .vram1_we(vram1_we_r),
     .vram1_active(vram1_act_r),
     .init_done(init_done_mem),
+    .scheduler_dbg(scheduler_dbg_mem),
+    .host_phase_dbg(host_phase_dbg_mem),
     .refresh_gap_max_o(refresh_gap_mem)
 );
 
@@ -747,7 +773,9 @@ endmodule
 
 module pce_sdram_interleaved #(
     parameter FREQ = 86_400_000,
-    parameter SGX_REFRESH_GUARD = 0
+    parameter SGX_REFRESH_GUARD = 0,
+    parameter RV_PRIORITY = 0,
+    parameter FIXED_READ_CAPTURE = 0
 ) (
     inout  wire [31:0] SDRAM_DQ,
     output wire [10:0] SDRAM_A,
@@ -797,6 +825,8 @@ module pce_sdram_interleaved #(
     input  wire        vram1_we,
     input  wire        vram1_active,
     output wire [7:0]  refresh_gap_max_o,
+    output wire [15:0] scheduler_dbg,
+    output wire [5:0] host_phase_dbg,
     output reg         init_done
 );
 
@@ -859,6 +889,13 @@ reg [2:0]  we_latch;
 reg [2:0]  active;
 reg [1:0]  channel1_port;
 reg        host_cas_done;
+assign host_phase_dbg = {active[0], we_latch[0], host_cas_done,
+                         host_req, host_ack, vram_pending};
+reg [1:0] channel1_capture_delay;
+reg [1:0] vram_capture_delay;
+reg       channel1_req_latch;
+assign scheduler_dbg = {refresh_due, cycle, active, channel1_port,
+                        rv_req, rv_ack, refresh_block, init_done};
 
 localparam CHANNEL1_NONE  = 2'd0;
 localparam CHANNEL1_RV    = 2'd1;
@@ -909,6 +946,7 @@ wire       chan1_busy_vdc1 = active[1] && (channel1_port == CHANNEL1_VRAM1);
 // (visible as sprite/tile glitches), so it must remain the exception.
 wire       refresh_now   = need_refresh && !refresh_block && slot_first &&
                             !active[0] && !chan1_busy_vdc1 && !active[2] &&
+                            !(FIXED_READ_CAPTURE != 0 && active[1]) &&
                             refresh_allowed;
 
 always @(posedge clk) begin
@@ -944,6 +982,9 @@ always @(posedge clk) begin
         active        <= 3'b000;
         channel1_port <= CHANNEL1_NONE;
         host_cas_done <= 1'b0;
+        channel1_capture_delay <= 2'd0;
+        vram_capture_delay <= 2'd0;
+        channel1_req_latch <= 1'b0;
     end else begin
         cmd       <= CMD_NOP;
         SDRAM_DQM <= 4'b1111;
@@ -1048,11 +1089,15 @@ always @(posedge clk) begin
                 refresh_hold  <= 4'd8;
             end
 
-            // Channel 1: VDC1 has priority over PicoRV32.
-            if (cycle == 3'd1 && !refresh_block && !refresh_now) begin
-                if (vram1_req != vram1_ack && slot_first) begin
+            // Channel 1: RV_PRIORITY reverses the default VDC1 priority.
+            if (cycle == 3'd1 && !refresh_block && !refresh_now &&
+                !(FIXED_READ_CAPTURE != 0 && active[1])) begin
+                if (vram1_req != vram1_ack && slot_first &&
+                    !(active[0] && addr_latch[0][22:21] == 2'b10) &&
+                    !(RV_PRIORITY != 0 && rv_req != rv_ack)) begin
                     active[1]       <= 1'b1;
                     channel1_port   <= CHANNEL1_VRAM1;
+                    channel1_req_latch <= vram1_req;
                     addr_latch[1]   <= {7'b1011111, vram1_addr, 1'b0};
                     din_latch[1]    <= vram1_din;
                     ds_latch[1]     <= 2'b11;
@@ -1061,9 +1106,11 @@ always @(posedge clk) begin
                     addr_out        <= {5'b11111, vram1_addr[14:9]};
                     SDRAM_BA        <= 2'b10;
                     cmd             <= CMD_ACTIVATE;
-                end else if (rv_req != rv_ack && slot_first) begin
+                end else if (rv_req != rv_ack && slot_first &&
+                    !(active[0] && addr_latch[0][22:21] == rv_addr[22:21])) begin
                     active[1]     <= 1'b1;
                     channel1_port <= CHANNEL1_RV;
+                    channel1_req_latch <= rv_req;
                     addr_latch[1] <= rv_addr;
                     rv_din_latch  <= rv_din;
                     rv_ds_latch   <= rv_ds;
@@ -1081,7 +1128,9 @@ always @(posedge clk) begin
             end
 
             // VDC0 RAS at cycle 2.
-            if (cycle == 3'd2 && !refresh_block) begin
+            if (cycle == 3'd2 && !refresh_block &&
+                !(active[0] && addr_latch[0][22:21] == 2'b11) &&
+                !(FIXED_READ_CAPTURE != 0 && active[2])) begin
                 active[2] <= (vram_req != vram_ack) && slot_first;
                 if (vram_req != vram_ack && slot_first) begin
                     addr_latch[2] <= {7'b1111111, vram_addr, 1'b0};
@@ -1112,8 +1161,23 @@ always @(posedge clk) begin
                 end
             end
 
+            if (cycle == 3'd2 && !refresh_block && active[0] &&
+                addr_latch[0][22:21] == 2'b11 && we_latch[0] && !host_cas_done) begin
+                host_cas_done <= 1'b1;
+                cmd <= CMD_WRITE;
+                addr_out <= {3'b100, addr_latch[0][9:2]};
+                SDRAM_BA <= 2'b11;
+                dq_oen <= 1'b0;
+                dq_out <= {din_latch[0], din_latch[0]};
+                SDRAM_DQM <= addr_latch[0][1] ?
+                             {~ds_latch[0], 2'b11} : {2'b11, ~ds_latch[0]};
+            end
+
             // VDC1 / PicoRV32 CAS at cycle 3.
-            if (cycle == 3'd3 && active[1]) begin
+            if (cycle == 3'd3 && active[1] &&
+                !(FIXED_READ_CAPTURE != 0 && channel1_capture_delay != 0)) begin
+                if (FIXED_READ_CAPTURE != 0)
+                    channel1_capture_delay <= 2'd3;
                 if (channel1_port == CHANNEL1_VRAM1)
                     vram1_ack <= vram1_req;
                 cmd      <= we_latch[1] ? CMD_WRITE : CMD_READ;
@@ -1135,7 +1199,10 @@ always @(posedge clk) begin
             end
 
             // VDC0 CAS at cycle 4.
-            if (cycle == 3'd4 && active[2]) begin
+            if (cycle == 3'd4 && active[2] &&
+                !(FIXED_READ_CAPTURE != 0 && vram_capture_delay != 0)) begin
+                if (FIXED_READ_CAPTURE != 0)
+                    vram_capture_delay <= 2'd3;
                 vram_ack <= vram_req;
                 cmd      <= we_latch[2] ? CMD_WRITE : CMD_READ;
                 addr_out <= {3'b100, addr_latch[2][9:2]};
@@ -1159,12 +1226,18 @@ always @(posedge clk) begin
                 SDRAM_DQM     <= 4'b0000;
             end
 
-            // VDC1 / PicoRV32 read data at cycle 6.
-            if (cycle == 3'd6 && active[1]) begin
+            if (channel1_capture_delay != 0)
+                channel1_capture_delay <= channel1_capture_delay - 2'd1;
+            if (vram_capture_delay != 0)
+                vram_capture_delay <= vram_capture_delay - 2'd1;
+
+            // SGX captures three clocks after CAS, even across a dot resync.
+            if (active[1] && ((FIXED_READ_CAPTURE != 0) ?
+                channel1_capture_delay == 2'd1 : cycle == 3'd6)) begin
                 if (channel1_port == CHANNEL1_RV) begin
                     if (oe_latch[1])
                         rv_dout <= dq_in;
-                    rv_ack <= rv_req;
+                    rv_ack <= (FIXED_READ_CAPTURE != 0) ? channel1_req_latch : rv_req;
                 end else begin
                     if (oe_latch[1])
                         vram1_dout <= addr_latch[1][1] ?
@@ -1176,7 +1249,8 @@ always @(posedge clk) begin
             end
 
             // VDC0 read data and next host RAS at cycle 7.
-            if (cycle == 3'd7 && active[2]) begin
+            if (active[2] && ((FIXED_READ_CAPTURE != 0) ?
+                vram_capture_delay == 2'd1 : cycle == 3'd7)) begin
                 if (oe_latch[2])
                     vram_dout <= addr_latch[2][1] ?
                                  dq_in[31:16] : dq_in[15:0];
@@ -1186,6 +1260,8 @@ always @(posedge clk) begin
             end
             if (cycle == 3'd7 && !refresh_block &&
                 !(in_reset_window && refresh_urgent) && !active[0] &&
+                !(active[1] && addr_latch[1][22:21] == host_addr[22:21]) &&
+                !(active[2] && host_addr[22:21] == 2'b11) &&
                 host_req != host_ack) begin
                 active[0]     <= 1'b1;
                 addr_latch[0] <= host_addr;
