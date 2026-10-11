@@ -1,12 +1,14 @@
 module rv_memory_probe #(
     parameter WAIT_CYCLES = 432000,
-    parameter [22:0] ADDRESS = 23'h407194
+    parameter [22:0] ADDRESS = 23'h407194,
+    parameter DYNAMIC_ADDRESS = 0
 ) (
     input wire clk,
     input wire resetn,
     input wire stalled,
     input wire ready,
     input wire [31:0] rdata,
+    input wire [22:0] target_address,
     output reg valid,
     output wire [22:0] address,
     output reg [127:0] snapshot,
@@ -15,7 +17,7 @@ module rv_memory_probe #(
 reg [31:0] wait_count;
 reg [2:0] reply_gap;
 reg [2:0] read_count;
-assign address = ADDRESS;
+assign address = DYNAMIC_ADDRESS != 0 ? target_address : ADDRESS;
 assign has_result = read_count == 4;
 always @(posedge clk) begin
     if (!resetn) begin

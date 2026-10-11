@@ -4,7 +4,9 @@ module rv_uart_diagnostic #(
     parameter REPORT_CYCLES = FREQ,
     parameter TRACE_ENABLE = 1,
     parameter X22_ENABLE = 0,
-    parameter STACK_ENABLE = 0
+    parameter STACK_ENABLE = 0,
+    parameter READ_PATH_ENABLE = 0,
+    parameter HISTORY_DEPTH = 8
 ) (
     input wire clk,
     input wire resetn,
@@ -13,6 +15,7 @@ module rv_uart_diagnostic #(
     input wire [7:0] extra_tag,
     input wire [127:0] stack_snapshot,
     input wire [127:0] transaction,
+    input wire [95:0] read_path,
     input wire waiting,
     input wire completed,
     input wire trap,
@@ -37,13 +40,18 @@ reg x22_frame;
 reg [7:0] saved_extra_tag;
 reg [127:0] saved_stack;
 reg stack_frame;
-reg [127:0] trace_history [0:7];
-reg [2:0] trace_write_index;
+localparam HISTORY_INDEX_WIDTH = $clog2(HISTORY_DEPTH);
+reg [127:0] trace_history [0:HISTORY_DEPTH-1];
+reg [95:0] read_path_history [0:HISTORY_DEPTH-1];
+reg read_path_frame;
+reg [HISTORY_INDEX_WIDTH-1:0] trace_write_index;
 reg [3:0] trace_count;
 reg trace_frozen;
 reg trace_dump_pending;
 reg trace_frame;
-reg [2:0] trace_read_index;
+reg [HISTORY_INDEX_WIDTH-1:0] trace_read_index;
+wire [HISTORY_INDEX_WIDTH-1:0] oldest_trace_index = trace_write_index - trace_count;
+wire [HISTORY_INDEX_WIDTH-1:0] next_trace_index = trace_read_index + 1'b1;
 reg [3:0] trace_remaining;
 wire wait_event = waiting && wait_count == WAIT_CYCLES - 1;
 wire idle_event = !completed && idle_count == WAIT_CYCLES - 1;
@@ -63,7 +71,7 @@ always @* begin
         1: byte_data = 8'h0a;
         2: byte_data = "R";
         3: byte_data = "V";
-        4: byte_data = stack_frame ? "S" : x22_frame ? saved_extra_tag : trace_frame ? "T" : "D";
+        4: byte_data = read_path_frame ? "L" : stack_frame ? "S" : x22_frame ? saved_extra_tag : trace_frame ? "T" : "D";
         5, 7: byte_data = " ";
         40: byte_data = 8'h0d;
         41: byte_data = 8'h0a;
@@ -94,6 +102,7 @@ always @(posedge clk) begin
         trace_frozen <= 0;
         trace_dump_pending <= 0;
         trace_frame <= 0;
+        read_path_frame <= 0;
         trace_read_index <= 0;
         trace_remaining <= 0;
     end else begin
@@ -104,8 +113,10 @@ always @(posedge clk) begin
         end
         if (TRACE_ENABLE != 0 && completed && !trace_frozen && !freeze_event) begin
             trace_history[trace_write_index] <= transaction;
+            if (READ_PATH_ENABLE != 0)
+                read_path_history[trace_write_index] <= read_path;
             trace_write_index <= trace_write_index + 3'd1;
-            if (trace_count < 8)
+            if (trace_count < HISTORY_DEPTH)
                 trace_count <= trace_count + 4'd1;
         end
         if (freeze_event) begin
@@ -140,6 +151,7 @@ always @(posedge clk) begin
             trace_frame <= 0;
             x22_frame <= 0;
             stack_frame <= 0;
+            read_path_frame <= 0;
         end
         if (write_byte)
             byte_sent <= 1;
@@ -163,14 +175,20 @@ always @(posedge clk) begin
                     trace_dump_pending <= 0;
                     trace_frame <= 1;
                     trace_remaining <= trace_count;
-                    trace_read_index <= trace_write_index - trace_count[2:0];
-                    saved_snapshot <= trace_history[trace_write_index - trace_count[2:0]];
+                    trace_read_index <= oldest_trace_index;
+                    saved_snapshot <= trace_history[oldest_trace_index];
                     saved_reason <= 0;
                     byte_index <= 0;
+                end else if (trace_frame && !read_path_frame && READ_PATH_ENABLE != 0) begin
+                    read_path_frame <= 1;
+                    saved_snapshot <= {read_path_history[trace_read_index],
+                                       trace_history[trace_read_index][95:64]};
+                    byte_index <= 0;
                 end else if (trace_frame && trace_remaining > 1) begin
+                    read_path_frame <= 0;
                     trace_remaining <= trace_remaining - 4'd1;
-                    trace_read_index <= trace_read_index + 3'd1;
-                    saved_snapshot <= trace_history[trace_read_index + 3'd1];
+                    trace_read_index <= next_trace_index;
+                    saved_snapshot <= trace_history[next_trace_index];
                     saved_reason <= saved_reason + 4'd1;
                     byte_index <= 0;
                 end else begin
@@ -178,6 +196,7 @@ always @(posedge clk) begin
                     stack_frame <= 0;
                     trace_frame <= 0;
                     x22_frame <= 0;
+                    read_path_frame <= 0;
                 end
             end else
                 byte_index <= byte_index + 1;

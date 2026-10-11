@@ -188,6 +188,8 @@ module iosys #(
     output wire [31:0] rv_wdata,
     output wire [3:0]  rv_wstrb,
     input  wire [31:0] rv_rdata,
+    input  wire [63:0] rv_capture_dbg,
+    input  wire [127:0] rv_bus_dbg,
     input  wire        ram_busy,          // high until the SDRAM is initialised
     input  wire [15:0] rv_scheduler_dbg,
     input  wire [15:0] loader_host_dbg,
@@ -577,11 +579,18 @@ generate
         reg [31:0] last_data_read_addr;
         reg [127:0] last_x22_write;
         wire [127:0] stack_snapshot;
-        rv_stack_watch stack_watch (
+        wire [127:0] stack_read_path;
+        wire stack_has_read;
+        wire [22:0] suspect_address;
+        rv_stack_watch #(.BUS_TRACE(1), .SUSPECT_READ(1)) stack_watch (
             .clk(clk), .resetn(resetn && flash_loaded),
             .completed(mem_valid && mem_ready), .address(mem_addr),
             .write_data(mem_wdata), .read_data(mem_rdata),
             .write_strobes(mem_wstrb), .instruction(mem_instr),
+            .capture_data(rv_capture_dbg), .bridge_data(rv_rdata),
+            .bus_data(rv_bus_dbg),
+            .read_path(stack_read_path), .has_read(stack_has_read),
+            .suspect_address(suspect_address),
             .snapshot(stack_snapshot)
         );
         always @(posedge clk) begin
@@ -613,25 +622,28 @@ generate
                     last_read_data <= mem_rdata;
             end
         end
-        rv_uart_diagnostic #(.FREQ(FREQ), .X22_ENABLE(1), .STACK_ENABLE(1)) diagnostic (
+        rv_uart_diagnostic #(.FREQ(FREQ), .X22_ENABLE(1), .STACK_ENABLE(1), .READ_PATH_ENABLE(0), .HISTORY_DEPTH(4)) diagnostic (
             .clk(clk), .resetn(resetn && flash_loaded),
             .snapshot({mem_addr, diag_loader, completed_transactions, diag_status}),
-            .x22_snapshot(probe_has_result ? probe_snapshot : last_x22_write),
-            .extra_tag(probe_has_result ? "P" : "X"),
+            .x22_snapshot(probe_has_result ? probe_snapshot :
+                          stack_has_read ? stack_read_path : last_x22_write),
+            .extra_tag(probe_has_result ? "P" : stack_has_read ? "B" : "X"),
             .stack_snapshot(stack_snapshot),
             .transaction({mem_addr, (|mem_wstrb) ? mem_wdata : mem_rdata,
                           completed_transactions,
                           27'd0, mem_instr, mem_wstrb}),
+            .read_path({rv_capture_dbg, rv_rdata}),
             .waiting(mem_valid && !mem_ready && !diag_uart_owned),
             .completed(mem_valid && mem_ready), .trap(rv_trap),
             .uart_busy(uart_tx_busy), .owned(diag_uart_owned),
             .write_byte(diag_uart_write), .byte_data(diag_uart_data)
         );
-        rv_memory_probe #(.WAIT_CYCLES(FREQ / 100), .ADDRESS(23'h59ff70)) probe (
+        rv_memory_probe #(.WAIT_CYCLES(FREQ / 10), .DYNAMIC_ADDRESS(1)) probe (
             .clk(clk), .resetn(resetn && flash_loaded && !flash_loading),
-            .stalled(mem_valid && !mem_ready && !ram_sel &&
+            .stalled(stack_has_read && mem_valid && !mem_ready && !ram_sel &&
                      (mem_addr[31:12] != 20'h02000 || mem_addr[11:0] >= 12'h100)),
             .ready(rv_ready), .rdata(rv_rdata), .valid(probe_valid),
+            .target_address(suspect_address),
             .address(probe_addr), .snapshot(probe_snapshot), .has_result(probe_has_result)
         );
     end else begin : g_no_rv_diagnostic

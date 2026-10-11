@@ -37,7 +37,7 @@ always @(posedge clk) begin
     rv_valid <= rv_stream && !rv_ready && !(rv_valid && rv_ready);
 end
 
-pce_sdram_ctrl_3ch mem (
+pce_sdram_ctrl_3ch #(.RV_READ_WRITE_GUARD(1)) mem (
     .clk(clk), .clk_mem(clk_mem), .clk_sdram(clk_sdram),
     .clkref(clkref), .refresh_window(1'b0), .resetn(resetn),
     .O_sdram_clk(sclk), .O_sdram_cke(cke), .O_sdram_cs_n(cs_n),

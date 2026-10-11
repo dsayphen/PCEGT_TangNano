@@ -2,7 +2,9 @@
 module tb_rv_uart_diagnostic #(
     parameter TRACE_ENABLE = 0,
     parameter X22_ENABLE = 0,
-    parameter STACK_ENABLE = 0
+    parameter STACK_ENABLE = 0,
+    parameter READ_PATH_ENABLE = 0,
+    parameter HISTORY_DEPTH = 8
 );
 reg clk = 0;
 always #5 clk = ~clk;
@@ -20,9 +22,13 @@ wire serial;
 localparam [127:0] SNAPSHOT = 128'h01234567_89abcdef_fedcba98_76543210;
 reg [7:0] received [0:1023];
 reg [127:0] transaction = 0;
+reg [95:0] read_path = 0;
 reg [127:0] x22_snapshot = 128'h00001234_12345678_03c003c0_0019ff80;
 reg [127:0] stack_snapshot = 128'h00018000_03c003c0_f0000001_00000001;
 reg [127:0] expected_trace [0:7];
+reg [127:0] expected_read_path [0:7];
+localparam TRACE_STRIDE = READ_PATH_ENABLE != 0 ? 84 : 42;
+localparam TRACE_BASE = 42 * (1 + (X22_ENABLE != 0) + (STACK_ENABLE != 0));
 integer transaction_index;
 integer trace_index;
 integer received_count = 0;
@@ -31,9 +37,10 @@ integer char_index;
 reg [7:0] decoded;
 reg [3:0] nibble;
 
-rv_uart_diagnostic #(.WAIT_CYCLES(20), .REPORT_CYCLES(10000), .TRACE_ENABLE(TRACE_ENABLE), .X22_ENABLE(X22_ENABLE), .STACK_ENABLE(STACK_ENABLE)) diagnostic (
+rv_uart_diagnostic #(.WAIT_CYCLES(20), .REPORT_CYCLES(10000), .TRACE_ENABLE(TRACE_ENABLE), .X22_ENABLE(X22_ENABLE), .STACK_ENABLE(STACK_ENABLE), .READ_PATH_ENABLE(READ_PATH_ENABLE), .HISTORY_DEPTH(HISTORY_DEPTH)) diagnostic (
     .clk(clk), .resetn(resetn && diagnostic_enabled), .snapshot(SNAPSHOT),
     .transaction(transaction),
+    .read_path(read_path),
     .x22_snapshot(x22_snapshot),
     .extra_tag("X"),
     .stack_snapshot(stack_snapshot),
@@ -109,8 +116,13 @@ initial begin
                            32'hf0000000 + transaction_index,
                            32'd100 + transaction_index,
                            (transaction_index % 2 == 0) ? 32'h10 : 32'h0f};
-            if (transaction_index >= 4)
-                expected_trace[transaction_index - 4] = transaction;
+            read_path = {32'h400000 + transaction_index * 32'd4,
+                         32'ha0000000 + transaction_index,
+                         32'hb0000000 + transaction_index};
+            if (transaction_index >= 12 - HISTORY_DEPTH) begin
+                expected_trace[transaction_index - (12 - HISTORY_DEPTH)] = transaction;
+                expected_read_path[transaction_index - (12 - HISTORY_DEPTH)] = {read_path, transaction[95:64]};
+            end
             completed = 1;
             @(negedge clk);
             completed = 0;
@@ -119,18 +131,30 @@ initial begin
         wait (diagnostic.trace_frozen);
         @(negedge clk);
         transaction = 128'hdeadbeef_deadbeef_deadbeef_deadbeef;
+        read_path = 0;
         completed = 1;
         waiting = 0;
-        wait (received_count == 378);
-        for (trace_index = 0; trace_index < 8; trace_index = trace_index + 1) begin
-            if (received[42 + trace_index * 42 + 4] !== "T" ||
-                received[42 + trace_index * 42 + 6] !== 8'h30 + trace_index)
+        wait (received_count == TRACE_BASE + HISTORY_DEPTH * TRACE_STRIDE);
+        for (trace_index = 0; trace_index < HISTORY_DEPTH; trace_index = trace_index + 1) begin
+            if (received[TRACE_BASE + trace_index * TRACE_STRIDE + 4] !== "T" ||
+                received[TRACE_BASE + trace_index * TRACE_STRIDE + 6] !== 8'h30 + trace_index)
                 $fatal(1, "Trace frame header/order mismatch");
             for (char_index = 0; char_index < 32; char_index = char_index + 1) begin
                 nibble = expected_trace[trace_index] >> ((31 - char_index) * 4);
-                if (received[42 + trace_index * 42 + 8 + char_index] !==
+                if (received[TRACE_BASE + trace_index * TRACE_STRIDE + 8 + char_index] !==
                     (nibble < 10 ? 8'h30 + nibble : 8'h61 + nibble - 10))
                     $fatal(1, "Trace record %0d nibble %0d mismatch", trace_index, char_index);
+            end
+            if (READ_PATH_ENABLE != 0) begin
+                if (received[TRACE_BASE + 42 + trace_index * TRACE_STRIDE + 4] !== "L" ||
+                    received[TRACE_BASE + 42 + trace_index * TRACE_STRIDE + 6] !== 8'h30 + trace_index)
+                    $fatal(1, "Read path frame header/order mismatch");
+                for (char_index = 0; char_index < 32; char_index = char_index + 1) begin
+                    nibble = expected_read_path[trace_index] >> ((31 - char_index) * 4);
+                    if (received[TRACE_BASE + 42 + trace_index * TRACE_STRIDE + 8 + char_index] !==
+                        (nibble < 10 ? 8'h30 + nibble : 8'h61 + nibble - 10))
+                        $fatal(1, "Read path record %0d nibble %0d mismatch", trace_index, char_index);
+                end
             end
         end
         wait (!owned);

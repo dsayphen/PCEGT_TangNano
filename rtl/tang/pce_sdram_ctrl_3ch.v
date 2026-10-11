@@ -2,7 +2,8 @@
 //
 // The 8 MiB memory is partitioned by physical SDRAM bank:
 //   banks 0-1: HuCard ROM and loader writes
-//   bank 2:    PicoRV32 firmware/data, ADPCM RAM, CD scratch RAM, VDC1 VRAM
+//   bank 2:    PicoRV32 firmware/data, ADPCM RAM, CD scratch RAM
+//   VDC1 VRAM: last 64 KiB of bank 2 by default, bank 1 in SGX
 //   bank 3:    VDC0 VRAM (last 64 KiB, 0x7f0000-0x7fffff)
 //
 // The fixed eight-cycle schedule is derived from SNESTang's Nano 20K
@@ -17,7 +18,9 @@ module pce_sdram_ctrl_3ch #(
     // SGX cannot tolerate urgent refresh stealing a VDC fetch slot.
     parameter SGX_REFRESH_GUARD = 0,
     parameter RV_PRIORITY = 0,
-    parameter FIXED_READ_CAPTURE = 0
+    parameter FIXED_READ_CAPTURE = 0,
+    parameter RV_READ_WRITE_GUARD = FIXED_READ_CAPTURE,
+    parameter [1:0] VDC1_BANK = 2'd2
 ) (
     input  wire        clk,
     input  wire        clk_mem,
@@ -88,7 +91,9 @@ module pce_sdram_ctrl_3ch #(
     // Largest pending refresh debt since reset.
     output wire [7:0]  refresh_gap_dbg,
     output wire [15:0] rv_scheduler_dbg,
-    output wire [15:0] loader_host_dbg
+    output wire [15:0] loader_host_dbg,
+    output wire [63:0] rv_capture_dbg,
+    output wire [127:0] rv_bus_dbg
 );
 
 wire [7:0] refresh_gap_mem;
@@ -717,7 +722,9 @@ pce_sdram_interleaved #(
     .FREQ(FREQ),
     .SGX_REFRESH_GUARD(SGX_REFRESH_GUARD),
     .RV_PRIORITY(RV_PRIORITY),
-    .FIXED_READ_CAPTURE(FIXED_READ_CAPTURE)
+    .FIXED_READ_CAPTURE(FIXED_READ_CAPTURE),
+    .RV_READ_WRITE_GUARD(RV_READ_WRITE_GUARD),
+    .VDC1_BANK(VDC1_BANK)
 ) memory (
     .SDRAM_DQ(IO_sdram_dq),
     .SDRAM_A(O_sdram_addr),
@@ -765,6 +772,8 @@ pce_sdram_interleaved #(
     .init_done(init_done_mem),
     .scheduler_dbg(scheduler_dbg_mem),
     .host_phase_dbg(host_phase_dbg_mem),
+    .rv_capture_dbg(rv_capture_dbg),
+    .rv_bus_dbg(rv_bus_dbg),
     .refresh_gap_max_o(refresh_gap_mem)
 );
 
@@ -775,7 +784,9 @@ module pce_sdram_interleaved #(
     parameter FREQ = 86_400_000,
     parameter SGX_REFRESH_GUARD = 0,
     parameter RV_PRIORITY = 0,
-    parameter FIXED_READ_CAPTURE = 0
+    parameter FIXED_READ_CAPTURE = 0,
+    parameter RV_READ_WRITE_GUARD = FIXED_READ_CAPTURE,
+    parameter [1:0] VDC1_BANK = 2'd2
 ) (
     inout  wire [31:0] SDRAM_DQ,
     output wire [10:0] SDRAM_A,
@@ -827,6 +838,8 @@ module pce_sdram_interleaved #(
     output wire [7:0]  refresh_gap_max_o,
     output wire [15:0] scheduler_dbg,
     output wire [5:0] host_phase_dbg,
+    output wire [63:0] rv_capture_dbg,
+    output reg [127:0] rv_bus_dbg,
     output reg         init_done
 );
 
@@ -894,6 +907,12 @@ assign host_phase_dbg = {active[0], we_latch[0], host_cas_done,
 reg [1:0] channel1_capture_delay;
 reg [1:0] vram_capture_delay;
 reg       channel1_req_latch;
+reg [22:0] rv_capture_addr;
+reg [31:0] dq_previous;
+reg [31:0] dq_previous2;
+reg [11:0] command_history;
+reg [5:0] bank_history;
+assign rv_capture_dbg = {9'd0, rv_capture_addr, rv_dout};
 assign scheduler_dbg = {refresh_due, cycle, active, channel1_port,
                         rv_req, rv_ack, refresh_block, init_done};
 
@@ -985,7 +1004,17 @@ always @(posedge clk) begin
         channel1_capture_delay <= 2'd0;
         vram_capture_delay <= 2'd0;
         channel1_req_latch <= 1'b0;
+        rv_capture_addr <= 23'd0;
+        dq_previous <= 0;
+        dq_previous2 <= 0;
+        command_history <= 12'hfff;
+        bank_history <= 0;
+        rv_bus_dbg <= 0;
     end else begin
+        dq_previous <= dq_in;
+        dq_previous2 <= dq_previous;
+        command_history <= {command_history[7:0], cmd};
+        bank_history <= {bank_history[3:0], SDRAM_BA};
         cmd       <= CMD_NOP;
         SDRAM_DQM <= 4'b1111;
         dq_oen    <= 1'b1;
@@ -1093,20 +1122,21 @@ always @(posedge clk) begin
             if (cycle == 3'd1 && !refresh_block && !refresh_now &&
                 !(FIXED_READ_CAPTURE != 0 && active[1])) begin
                 if (vram1_req != vram1_ack && slot_first &&
-                    !(active[0] && addr_latch[0][22:21] == 2'b10) &&
+                    !(active[0] && addr_latch[0][22:21] == VDC1_BANK) &&
                     !(RV_PRIORITY != 0 && rv_req != rv_ack)) begin
                     active[1]       <= 1'b1;
                     channel1_port   <= CHANNEL1_VRAM1;
                     channel1_req_latch <= vram1_req;
-                    addr_latch[1]   <= {7'b1011111, vram1_addr, 1'b0};
+                    addr_latch[1]   <= {VDC1_BANK, 5'b11111, vram1_addr, 1'b0};
                     din_latch[1]    <= vram1_din;
                     ds_latch[1]     <= 2'b11;
                     we_latch[1]     <= vram1_we;
                     oe_latch[1]     <= !vram1_we;
                     addr_out        <= {5'b11111, vram1_addr[14:9]};
-                    SDRAM_BA        <= 2'b10;
+                    SDRAM_BA        <= VDC1_BANK;
                     cmd             <= CMD_ACTIVATE;
                 end else if (rv_req != rv_ack && slot_first &&
+                    !(RV_READ_WRITE_GUARD != 0 && vram_pending && vram_we && !rv_we) &&
                     !(active[0] && addr_latch[0][22:21] == rv_addr[22:21])) begin
                     active[1]     <= 1'b1;
                     channel1_port <= CHANNEL1_RV;
@@ -1235,8 +1265,13 @@ always @(posedge clk) begin
             if (active[1] && ((FIXED_READ_CAPTURE != 0) ?
                 channel1_capture_delay == 2'd1 : cycle == 3'd6)) begin
                 if (channel1_port == CHANNEL1_RV) begin
-                    if (oe_latch[1])
+                    if (oe_latch[1]) begin
                         rv_dout <= dq_in;
+                        rv_capture_addr <= addr_latch[1];
+                        rv_bus_dbg <= {2'b00, dq_oen, channel1_capture_delay, cycle,
+                                       bank_history, SDRAM_BA, command_history, cmd,
+                                       dq_previous2, dq_previous, dq_in};
+                    end
                     rv_ack <= (FIXED_READ_CAPTURE != 0) ? channel1_req_latch : rv_req;
                 end else begin
                     if (oe_latch[1])

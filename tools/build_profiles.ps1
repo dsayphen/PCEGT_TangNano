@@ -149,6 +149,9 @@ foreach ($name in $profiles) {
         $jsonSerializer = New-Object System.Web.Script.Serialization.JavaScriptSerializer
         $buildConfig = $jsonSerializer.DeserializeObject((Get-Content $configPath -Raw))
         $buildConfig['OUTPUT_BASE_NAME'] = $stem
+        if ($name -eq 'superset') {
+            $buildConfig['Route_Option'] = '1'
+        }
         [System.IO.File]::WriteAllText(
             $configCopy,
             $jsonSerializer.Serialize($buildConfig),

@@ -172,6 +172,7 @@ static void make_cheats_label(char *buf) {
 static void cheats_menu(void) {
     int active = 0;
     int first = 0;
+    int redraw = 1;
     const int visible_rows = 10;
     clear();
     print_field(5, 5, "Cheats", OSD_COLS - 2);
@@ -180,7 +181,7 @@ static void cheats_menu(void) {
     for (;;) {
         int count = cheats_count();
         int status = 0;
-        if (count > 0) {
+        if (redraw && count > 0) {
             if (active >= count)
                 active = count - 1;
             if (active < first)
@@ -210,23 +211,28 @@ static void cheats_menu(void) {
             status = *cheats_status() != '\0';
             print_field(1, 19, status ? cheats_status() : "A=Toggle  B=Back",
                         OSD_COLS - 2);
-        } else {
+        } else if (redraw) {
             for (int row = 0; row < visible_rows; row++)
                 clear_line(8 + row);
             print_field(2, 10, *cheats_status() ? cheats_status() : "No cheats found",
                         OSD_COLS - 4);
             print_field(1, 19, "B=Back", OSD_COLS - 2);
         }
+        redraw = 0;
 
         uint32_t e = joy_edge();
         if ((e & JOY_B) || (e & JOY_MENU))
             return;
-        if (count > 0 && (e & JOY_UP))
+        if (count > 0 && (e & JOY_UP)) {
             active = active ? active - 1 : count - 1;
-        else if (count > 0 && (e & JOY_DOWN))
+            redraw = 1;
+        } else if (count > 0 && (e & JOY_DOWN)) {
             active = active < count - 1 ? active + 1 : 0;
-        else if (count > 0 && (e & JOY_A))
+            redraw = 1;
+        } else if (count > 0 && (e & JOY_A)) {
             cheats_toggle(active);
+            redraw = 1;
+        }
         delay(20);
     }
 }

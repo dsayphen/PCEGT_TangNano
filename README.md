@@ -73,6 +73,62 @@ The browser reports the active profile and rejects incompatible ROM types, but
 runtime Multi-Boot switching is not enabled yet. Do not program the candidate
 flash slots until the GW2AR jump method and address alignment are validated.
 
+The SGX profiles currently test VDC1 VRAM in SDRAM bank 1
+(`0x3F0000..0x3FFFFF`), separate from the RV's bank 2. VDC0 remains in bank 3;
+other profiles keep VDC1 in bank 2. Do not load ROMs extending into the
+reserved bank-1 window in this SGX test build. The RV/VDC1 scheduler channel
+and VDC1 priority are unchanged. Use `-Profile sgx_rv_diag` for UART diagnostics.
+
+At 115200 baud, the SGX diagnostic emits paired `RVT n` and `RVL n` records
+for the last four completed CPU transfers around a stall. Each `RVL` payload
+contains four 32-bit hexadecimal fields: physical address of the last SDRAM
+RV read, data captured at that read, RV bridge output, and CPU transfer data
+(the same field as in `RVT`).
+Use the matching `RVT` address and flags to identify RAM reads before comparing
+the three data fields. For MMIO accesses and writes, the SDRAM capture refers
+to an earlier read. The `RVP` probe rereads the physical address captured for
+the first suspect RAM read four times after an invalid CPU access stalls.
+
+The current bus diagnostic freezes the first instruction read with low bits
+other than `11` (RV32I, no compressed ISA), or a read at code address `0x24C4`
+or `0x7194` differing from the current firmware's expected opcode `0x000187B7`.
+For data reads, the patterns `0x03C003C0`, `0x33CCCC33`, `0xCC3333CC` trigger
+only in the observed stack page `0x19F000..0x19FFFF`, not ordinary ROM buffers.
+Stack-pattern triggers remain heuristic and do not cover every possible
+corruption. Ordinary zero data and MMIO reads do not trigger it. The known
+opcodes must be rechecked if the firmware is rebuilt.
+`RVS` now contains CPU address, SDRAM captured data, bridge data and CPU data,
+not stack counters. `RVB` contains metadata followed by DQ sampled two
+`clk_mem` edges before capture, one edge before capture, and at capture.
+Metadata bits [15:0] contain four registered command codes (oldest first);
+bits [23:16] contain their bank numbers; bits [26:24] are the phase counter,
+[28:27] the capture-delay counter and [29] the controller DQ output-disable.
+This observes controller-side registered commands, not independent pin probes.
+After 100 ms of an invalid-access stall and a recorded suspect read, `RVP`
+rereads that event's physical address four times and takes report priority.
+The event stays frozen until system reset, including during later transfers.
+This build disables the per-transaction `RVL` reports to reduce placement
+pressure; four `RVT` records remain, and the suspect event's three data stages
+are retained in `RVS`.
+CAS 2 and the 180-degree SDRAM clock phase are unchanged.
+The SGX, CD and superset schedulers defer an RV-channel read when a VDC0 write is
+already pending for the same slot, avoiding a bank-3 WRITE one clock after
+the RV READ. The same guard also protects reads from CD/ADPCM requesters on
+this shared channel. `RV_READ_WRITE_GUARD` is independent of the SGX fixed
+capture mode; CD keeps its previous capture timing and VDC1 bank placement.
+`+write_turnaround` tests command spacing and VDC0 writes. Hardware tests
+reported no remaining RV freezes with the SGX guard; CD still needs testing
+on the board. Normal `-Profile sgx` and `-Profile cd` builds leave the RTL
+UART diagnostics disabled and keep CAS 2 and the 180-degree clock phase.
+Superset also enables the guard while retaining its original capture timing
+and VDC1 in bank 2; build it with `-Profile superset`.
+The profile script selects `Route_Option=1` for superset only; the default
+routing missed setup timing with this guard. Other profiles keep their
+existing build settings.
+The `+vm01` variant
+of `tb_sprite_stream` exercises alternating NOP/read VDC0 slots with zero
+address on NOP; it is not a complete HuC6270 VM timing model.
+
 The resulting FPGA bitstream is `impl/pnr/PCE_GT_TangNano.fs`. Program it
 with the Gowin Programmer or `openFPGALoader`:
 
@@ -529,22 +585,20 @@ sent after RVX on a stall. No CPU execution settings are changed.
 
 When a CPU transaction stalls for 10 ms at an address outside RAM and the
 MMIO page (or above offset 0x100 within that page), a read-only hardware probe
-requests four rereads of physical SDRAM address 0x59ff70 (CPU stack 0x19ff70). CPU responses are
+requests four rereads of the first suspect RAM read's captured physical address.
+Without a recorded suspect read the probe does not start. CPU responses are
 not forged; the invalid CPU access remains stalled. After all four replies,
 `RVP 0 vvvvvvvvwwwwwwwwxxxxxxxxyyyyyyyy` replaces RVX in subsequent reports,
-showing the four results oldest first. Compare them with the stack write and
-read values in RVS. The probe runs once per system
+showing the four results oldest first. Compare them with the captured data
+in RVS. The probe runs once per system
 reset and uses the same SDRAM scheduler as the CPU, not a second physical
 memory interface. A repeated value different from the saved stack word could
 be stored corruption or a repeatable controller error.
 
-Each report also includes `RVS 0 wwwwwwwwrrrrrrrrscccccccdddddddd` for CPU
-address 0x19ff70: last completed write data, last completed read data, last
-write strobe nibble, 28-bit write count, and 32-bit read count. Zero counts
-mean no matching transaction has been observed since firmware startup.
-Only completed non-instruction CPU accesses are recorded. Probe transactions
-do not update RVS. Partial writes retain their raw bus data and strobe mask,
-not a reconstructed memory word. RVS is frozen with its RVD snapshot and
+Each report also includes `RVS 0 aaaaaaaassssssssbbbbbbbbcccccccc`:
+CPU address, SDRAM captured data, bridge output and CPU read data for the
+first suspect RAM read. An all-zero record means no event was captured.
+Probe transactions do not update this record. RVS is frozen with its RVD snapshot and
 remains present when RVP replaces RVX after the rereads.
 
 ---

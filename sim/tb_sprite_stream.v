@@ -21,8 +21,11 @@
 
 module tb_sprite_stream #(
     parameter FIXED_READ_CAPTURE = 1,
+    parameter RV_READ_WRITE_GUARD = FIXED_READ_CAPTURE,
     parameter READ_HOLD_CYCLES = 3,
-    parameter [22:0] LOADER_BASE = 23'h020000
+    parameter [22:0] LOADER_BASE = 23'h020000,
+    parameter [1:0] VDC1_BANK = 2'd2,
+    parameter [21:0] ROM_BASE = 22'd0
 );
 
 reg clk = 0;
@@ -43,6 +46,7 @@ wire [3:0]  O_sdram_dqm;
 
 reg  [15:0] vram_addr = 16'd0;
 reg         vram_rd   = 1'b0;
+reg         vram_we   = 1'b0;
 wire [15:0] vram_dout;
 
 reg  [15:0] vram1_addr = 16'd0;
@@ -55,8 +59,10 @@ reg         rv_valid = 1'b0;
 wire        rv_ready;
 reg  [22:0] rv_addr  = 23'd0;
 wire [31:0] rv_rdata;
+wire [63:0] rv_capture_dbg;
+wire [127:0] rv_bus_dbg;
 reg rom_test_rd = 1'b0;
-reg [21:0] rom_test_addr = 22'd0;
+reg [21:0] rom_test_addr = ROM_BASE;
 wire [7:0] rom_test_data;
 wire rom_test_ready;
 reg rom_test_busy_seen = 1'b0;
@@ -83,7 +89,9 @@ wire        sdram_init_done;
 pce_sdram_ctrl_3ch #(
     .FREQ(86_400_000),
     .SGX_REFRESH_GUARD(1),
-    .FIXED_READ_CAPTURE(FIXED_READ_CAPTURE)
+    .FIXED_READ_CAPTURE(FIXED_READ_CAPTURE),
+    .RV_READ_WRITE_GUARD(RV_READ_WRITE_GUARD),
+    .VDC1_BANK(VDC1_BANK)
 ) mem (
     .clk           (clk),
     .clk_mem       (clk_mem),
@@ -117,10 +125,10 @@ pce_sdram_ctrl_3ch #(
     .rom_rdy       (rom_test_ready),
 
     .vram_addr     (vram_addr),
-    .vram_din      (16'd0),
+    .vram_din      (16'h03c0),
     .vram_dout     (vram_dout),
     .vram_rd       (vram_rd),
-    .vram_we       (1'b0),
+    .vram_we       (vram_we),
 
     .vram1_addr    (vram1_addr),
     .vram1_din     (vram1_din),
@@ -134,6 +142,8 @@ pce_sdram_ctrl_3ch #(
     .rv_wdata      (rv_test_wdata),
     .rv_wstrb      (rv_test_wstrb),
     .rv_rdata      (rv_rdata),
+    .rv_capture_dbg(rv_capture_dbg),
+    .rv_bus_dbg(rv_bus_dbg),
 
     .init_done     (sdram_init_done)
 );
@@ -170,13 +180,11 @@ function [20:0] phys_word_addr;
     end
 endfunction
 
-// Same fixed row/column pattern as VRAM0 but bank 2 (SDRAM_BA = 2'b10)
-// instead of bank 3, matching the vram1 bridge's address latch in
-// pce_sdram_ctrl_3ch.v ({7'b1011111, vram1_addr, 1'b0} / BA <= 2'b10).
+// Same fixed row/column pattern as VRAM0 in the selected VDC1 bank.
 function [20:0] phys_word_addr1;
     input [15:0] a;
     begin
-        phys_word_addr1 = 21'h17C000 + {6'd0, a[14:1]};
+        phys_word_addr1 = {VDC1_BANK, 19'h7C000} + {6'd0, a[14:1]};
     end
 endfunction
 
@@ -251,8 +259,29 @@ reg bg_rv  = 1'b0;
 reg bg_ref = 1'b0;
 integer capture_rv_replies = 0;
 integer capture_mem_edges = 0;
+integer last_rv_read_edge = -100;
 integer channel1_cas_edge = 0;
 integer vram_cas_edge = 0;
+always @(negedge clk_mem) begin
+    if ($test$plusargs("write_turnaround") && !O_sdram_cs_n) begin
+        if ({O_sdram_ras_n, O_sdram_cas_n, O_sdram_wen_n} == 3'b101 && O_sdram_ba == 2'd2)
+            last_rv_read_edge = capture_mem_edges;
+        if ({O_sdram_ras_n, O_sdram_cas_n, O_sdram_wen_n} == 3'b100 &&
+            O_sdram_ba == 2'd3 && capture_mem_edges - last_rv_read_edge < 3)
+            $fatal(1, "RV READ followed by bank-3 WRITE after %0d clocks",
+                   capture_mem_edges - last_rv_read_edge);
+    end
+end
+reg checking_vdc1_writes = 1'b0;
+always @(posedge clk_mem) begin
+    if ($test$plusargs("write_turnaround") && mem.memory.active[2] &&
+        ((FIXED_READ_CAPTURE != 0) ? mem.memory.vram_capture_delay == 1 :
+                        mem.memory.cycle == 7) && mem.memory.we_latch[2]) begin
+        if (((sd.mem[mem.memory.addr_latch[2] >> 2] >>
+            (mem.memory.addr_latch[2][1] ? 16 : 0)) & 32'hffff) !== 32'h03c0)
+            $fatal(1, "VDC0 write lost during RV turnaround");
+    end
+end
 
 always @(posedge clk_mem) begin
     capture_mem_edges = capture_mem_edges + 1;
@@ -286,16 +315,25 @@ always @(negedge clk) begin
                          sd.mem[rv_addr >> 2], rv_test_wdata);
                 errors = errors + 1;
             end
-        end else if (rv_rdata !== sd.mem[rv_addr >> 2]) begin
-            $display("FAIL RV addr=%h data=%h expected=%h", rv_addr,
-                     rv_rdata, sd.mem[rv_addr >> 2]);
-            errors = errors + 1;
+        end else begin
+            if (rv_rdata !== sd.mem[rv_addr >> 2]) begin
+                $display("FAIL RV addr=%h data=%h expected=%h", rv_addr,
+                         rv_rdata, sd.mem[rv_addr >> 2]);
+                errors = errors + 1;
+            end
+            if (rv_capture_dbg !== {9'd0, rv_addr[22:2], 2'b00, rv_rdata}) begin
+                $display("FAIL RV capture alignment addr=%h capture=%h data=%h",
+                         rv_addr, rv_capture_dbg, rv_rdata);
+                errors = errors + 1;
+            end
+            if (rv_bus_dbg[31:0] !== rv_rdata)
+                $fatal(1, "Bus trace does not match RV capture");
         end
     end
 end
 
 always @(posedge clk_mem) begin
-    if ($test$plusargs("capture_test") && mem.memory.active[2] &&
+    if ($test$plusargs("capture_test") && !$test$plusargs("write_turnaround") && mem.memory.active[2] &&
         ((FIXED_READ_CAPTURE != 0) ? mem.memory.vram_capture_delay == 1 :
                                     mem.memory.cycle == 7)) begin
         #1;
@@ -307,7 +345,7 @@ always @(posedge clk_mem) begin
 end
 
 always @(posedge clk_mem) begin
-    if ($test$plusargs("capture_test") && mem.memory.active[1] &&
+    if ($test$plusargs("capture_test") && !checking_vdc1_writes && mem.memory.active[1] &&
         mem.memory.channel1_port == 2 &&
         ((FIXED_READ_CAPTURE != 0) ? mem.memory.channel1_capture_delay == 1 :
                                     mem.memory.cycle == 6)) begin
@@ -358,7 +396,7 @@ always @(negedge clk) begin
                 $display("FAIL ROM addr=%h data=%h", rom_test_addr, rom_test_data);
                 errors = errors + 1;
             end
-            rom_test_addr <= (rom_test_addr + 22'd4) & 22'h0000fc;
+            rom_test_addr <= ROM_BASE | ((rom_test_addr + 22'd4) & 22'h0000fc);
         end
     end
 end
@@ -529,9 +567,12 @@ task stream_vce_transitions;
                 end
                 clkref <= dot_pulse;
                 if (dot_pulse) begin
-                    vram_addr <= (dot_index % 160) * 64;
+                    vram_addr <= $test$plusargs("vm01") && dot_index % 2 == 0 ?
+                                 0 : (dot_index % 160) * 64;
                     vram1_addr <= (dot_index % 160) * 64;
-                    vram_rd <= line_cycle < 2200;
+                    vram_we <= $test$plusargs("write_turnaround") && line_cycle < 2200 && dot_index % 2 != 0;
+                    vram_rd <= !$test$plusargs("write_turnaround") && line_cycle < 2200 &&
+                               (!$test$plusargs("vm01") || dot_index % 2 != 0);
                     vram1_rd <= line_cycle < 2200 && dot_index % 2 == 0;
                     dot_index = dot_index + 1;
                 end
@@ -540,6 +581,7 @@ task stream_vce_transitions;
         @(negedge clk);
         clkref = 1'b0;
         vram_rd = 1'b0;
+        vram_we = 1'b0;
         vram1_rd = 1'b0;
         repeat (100) @(negedge clk);
         bg_run = 1'b0;
@@ -562,6 +604,43 @@ always @(posedge clk) begin
         end
     end
 end
+
+task check_vdc1_writes;
+    integer write_index;
+    reg [15:0] write_value;
+    reg [31:0] stored_word;
+    begin
+        checking_vdc1_writes = 1'b1;
+        for (write_index = 0; write_index < 4; write_index = write_index + 1) begin
+            write_value = 16'hb120 + write_index;
+            @(negedge clk);
+            vram1_addr = 16'h7ff0 + write_index;
+            vram1_din = write_value;
+            vram1_we = 1'b1;
+            clkref = 1'b1;
+            @(negedge clk);
+            clkref = 1'b0;
+            repeat (12) @(negedge clk);
+            stored_word = sd.mem[phys_word_addr1(vram1_addr)];
+            if ((vram1_addr[0] ? stored_word[31:16] : stored_word[15:0]) !== write_value)
+                $fatal(1, "VDC1 write mismatch bank=%0d addr=%h data=%h",
+                       VDC1_BANK, vram1_addr, stored_word);
+            vram1_we = 1'b0;
+            vram1_rd = 1'b1;
+            clkref = 1'b1;
+            @(negedge clk);
+            clkref = 1'b0;
+            repeat (12) @(negedge clk);
+            if (vram1_dout !== write_value)
+                $fatal(1, "VDC1 readback mismatch addr=%h data=%h",
+                       vram1_addr, vram1_dout);
+            vram1_rd = 1'b0;
+            repeat (4) @(negedge clk);
+        end
+        checking_vdc1_writes = 1'b0;
+        $display("PASS VDC1 bank %0d writes/readback", VDC1_BANK);
+    end
+endtask
 
 task stream_capture_test;
     input integer dot_sys_cycles;
@@ -605,6 +684,7 @@ initial begin
 
     if ($test$plusargs("capture_test")) begin
         preload_all1;
+        check_vdc1_writes;
         for (t = 0; t < 64; t = t + 1)
             sd.mem[t] = 32'ha5c00000 + t;
         force mem.memory.need_refresh = 1'b0;
@@ -614,7 +694,7 @@ initial begin
             release mem.memory.need_refresh;
             for (t = 0; t < 64; t = t + 1) begin
                 sd.mem[21'h100000 + t] = 32'ha5c00000 + t;
-                sd.mem[t] = 32'h00000060 + t * 4;
+                sd.mem[(ROM_BASE >> 2) + t] = 32'h00000060 + t * 4;
             end
             stream_vce_transitions;
             if ($test$plusargs("loader_test")) begin

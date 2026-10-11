@@ -244,6 +244,8 @@ wire [22:0] rv_addr;
 wire [31:0] rv_wdata;
 wire [3:0]  rv_wstrb;
 wire [31:0] rv_rdata;
+wire [63:0] rv_capture_dbg;
+wire [127:0] rv_bus_dbg;
 
 wire [15:0] cd_stat;
 wire        cd_stat_get;
@@ -388,6 +390,8 @@ iosys #(
     .rv_wdata         (rv_wdata),
     .rv_wstrb         (rv_wstrb),
     .rv_rdata         (rv_rdata),
+    .rv_capture_dbg   (rv_capture_dbg),
+    .rv_bus_dbg       (rv_bus_dbg),
     .ram_busy         (~sdram_init_done),
 
     .flash_spi_cs_n   (flash_spi_cs_n),
@@ -500,7 +504,10 @@ pce_sdram_ctrl_3ch #(
     .CDRAM_CACHE_IDX ((CORE_LOGIC_PROFILE == PROFILE_CD && CORE_EXTRA_SGX == 0) ? 11 : 4),
     .SGX_REFRESH_GUARD (CORE_PROFILE == PROFILE_SGX),
     .RV_PRIORITY (0),
-    .FIXED_READ_CAPTURE (CORE_PROFILE == PROFILE_SGX)
+    .FIXED_READ_CAPTURE (CORE_PROFILE == PROFILE_SGX),
+    .RV_READ_WRITE_GUARD (CORE_PROFILE == PROFILE_SGX || CORE_PROFILE == PROFILE_CD ||
+                          CORE_PROFILE == PROFILE_SUPERSET),
+    .VDC1_BANK ((CORE_PROFILE == PROFILE_SGX) ? 2'd1 : 2'd2)
 ) u_mem (
     .clk           (clk_sys),
     .clk_mem       (clk_mem),
@@ -553,6 +560,8 @@ pce_sdram_ctrl_3ch #(
     .rv_wdata      (rv_wdata),
     .rv_wstrb      (rv_wstrb),
     .rv_rdata      (rv_rdata),
+    .rv_capture_dbg (rv_capture_dbg),
+    .rv_bus_dbg     (rv_bus_dbg),
 
     .cdram_rd      (ext_ram_rd),
     .cdram_wr      (ext_ram_wr),
