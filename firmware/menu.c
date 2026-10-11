@@ -10,6 +10,7 @@
 #include "cd.h"
 #include "menu.h"
 #include "cheats.h"
+#include "core.h"
 
 // Cycle the display zoom mode (2x -> stretch -> ...) and flash the new
 // setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
@@ -530,11 +531,11 @@ int pause_menu(void) {
 
 // Global options reached with Select from the ROM browser.
 void options_menu(void) {
-    static const char *items[6] = {
+    static const char *items[7] = {
         "Video Settings >", "Audio Settings >", "Debug UART: ",
-        "Cheats: ", "Sprites: ", "Back"
+        "Cheats: ", "Sprites: ", "Choose core >", "Back"
     };
-    const int n_items = 6;
+    const int n_items = 7;
     int active = 0;
 
     menu_header("Options", 0);
@@ -569,7 +570,7 @@ void options_menu(void) {
             active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {
             active = active < n_items - 1 ? active + 1 : 0;
-            } else if ((e & (JOY_B | JOY_SELECT)) || ((e & JOY_A) && active == 5)) {
+        } else if ((e & (JOY_B | JOY_SELECT)) || ((e & JOY_A) && active == 6)) {
             return;
         } else if ((e & JOY_A) && active == 0) {
             video_menu(0);
@@ -587,6 +588,9 @@ void options_menu(void) {
             vdc_sprites_double = !vdc_sprites_double;
             vdc_options_apply();
             system_config_save();
+        } else if ((e & JOY_A) && active == 5) {
+            core_menu();
+            menu_header("Options", 0);
         }
         delay(20);
     }

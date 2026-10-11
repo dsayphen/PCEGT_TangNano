@@ -67,11 +67,12 @@ To build the three profile variants from the same RTL sources, run:
 ```
 
 The script creates temporary Gowin project/config copies and stores each
-profile's bitstream, binary and reports under `impl/profiles/{pce,sgx,cd}/`.
-Each current `.bin` is about 887 KiB and fits the 1 MiB candidate flash slot.
-The browser reports the active profile and rejects incompatible ROM types, but
-runtime Multi-Boot switching is not enabled yet. Do not program the candidate
-flash slots until the GW2AR jump method and address alignment are validated.
+profile's bitstream, binary and reports under `impl/profiles/{sgx,cd,superset}/`.
+The `all` build selects `sgx` (HuCard, including ordinary PCE games), `cd`
+(CD-Rom), and `superset`; PCE is not offered by the core selection menu.
+Each current `.bin` is about 887 KiB and fits a 1 MiB flash slot. Core selection
+copies a stored slot to address zero and requires a power cycle; it does not
+use MSPI_JUMP, Multi-Boot address switching, or partial reconfiguration.
 
 The SGX profiles currently test VDC1 VRAM in SDRAM bank 1
 (`0x3F0000..0x3FFFFF`), separate from the RV's bank 2. VDC0 remains in bank 3;
@@ -90,8 +91,11 @@ to an earlier read. The `RVP` probe rereads the physical address captured for
 the first suspect RAM read four times after an invalid CPU access stalls.
 
 The current bus diagnostic freezes the first instruction read with low bits
-other than `11` (RV32I, no compressed ISA), or a read at code address `0x24C4`
-or `0x7194` differing from the current firmware's expected opcode `0x000187B7`.
+other than `11` (RV32I, no compressed ISA). The legacy checks expecting
+`0x000187B7` at code addresses `0x24C4` and `0x7194` are disabled by default
+because rebuilding the firmware changes those instructions. They can only be
+restored with `CHECK_LEGACY_OPCODES=1` after verifying those exact addresses
+and opcodes.
 For data reads, the patterns `0x03C003C0`, `0x33CCCC33`, `0xCC3333CC` trigger
 only in the observed stack page `0x19F000..0x19FFFF`, not ordinary ROM buffers.
 Stack-pattern triggers remain heuristic and do not cover every possible
@@ -148,6 +152,65 @@ Project settings that matter (already stored in
 * Top module: `top_tang_nano20k`
 * VHDL standard: **VHDL-93**
 * Verilog standard: Verilog-2001
+
+### Core selection from the browser
+
+Browser Options (Select) provides **Choose core > HuCard / CD-Rom / Superset**.
+Selecting a different core asks for confirmation, checks the source slot's
+profile, size and CRC32, then erases/programs/verifies the first 1 MiB of flash.
+The three source slots and the firmware at `0x500000` are not modified.
+When `Core ready` appears, switch power off and on. S1 only resets the console
+and does not load the newly installed FPGA configuration.
+
+Prepare the initial flash contents after rebuilding all three cores:
+
+```powershell
+& .\firmware\build.ps1
+& .\tools\build_profiles.ps1 -Profile all
+& .\tools\prepare_core_slots.ps1
+```
+
+| SPI flash address | Raw data to program |
+| --- | --- |
+| `0x000000` | Initial rebuilt FPGA configuration, programmed using the normal Gowin/openFPGALoader flow |
+| `0x100000` | `impl/core-slots/sgx_slot.bin` (HuCard) |
+| `0x200000` | `impl/core-slots/cd_slot.bin` (CD-Rom) |
+| `0x300000` | `impl/core-slots/superset_slot.bin` |
+| `0x500000` | `firmware/firmware.bin` |
+
+Program the three slot images as raw SPI flash data at the specified offsets,
+not as FPGA configuration downloads. They contain the existing Gowin `.bin`
+unchanged at the start, `0xFF` padding, and metadata in the final 32 bytes.
+The metadata is five little-endian 32-bit words: magic `0x50434543`, version
+`1`, profile ID (`1/2/3`), bitstream byte length, CRC32/ISO-HDLC of the bitstream.
+The remaining 12 bytes are `0xFF`. Do not program only the original `.bin` into
+a source slot: the firmware requires this metadata before erasing address zero.
+Use range/sector erase, never whole-chip erase when installing or updating
+slots, and verify the programmer's readback. All three stored cores and the
+initial core must include the new flash PIO interface; changing only the menu
+firmware cannot add this interface to old bitstreams.
+
+Launching a HuCard game from CD-Rom offers a switch to HuCard. Launching a CUE
+or a `(CD)` directory from HuCard offers a switch to CD-Rom. Accepting writes
+the exact game and directory to `/config/core_autorun.dat` on the SD card.
+After the successful copy and power cycle, the matching core consumes and
+deletes that request **before** loading the game; subsequent boots return to
+the browser. Superset launches either kind directly. Manual core selection
+does not create an autorun request. Cancelling a confirmation does not write
+flash or create an autorun request. Invalid requests, a wrong active profile,
+or a failed game load return to the browser instead of retrying indefinitely.
+
+**Hardware validation is still required before relying on this feature.**
+The latest builds generate all three images, but HuCard has a negative SETUP
+slack of `-0.515 ns` in the SDRAM address path; CD-Rom and Superset have positive
+minimum SETUP slacks (`+0.092 ns` and `+0.030 ns`). The dedicated NOR transaction
+test and 15 RISC-V autorun cases pass. The full simulation suite is not green
+(iosys timeout and OSD/SDRAM failures).
+NOR erase/program timing, board flash protection, startup from the copied raw
+Gowin `.bin`, and end-to-end SD autorun must be verified on the Tang Nano.
+Do not interrupt a copy. A failed or interrupted write can invalidate address
+zero; the preserved source slots do not provide automatic recovery. Restore
+the boot configuration using an external programmer in that situation.
 
 The **SDRAM pins are not in the `.cst` on purpose**: on the GW2AR the 64 Mbit
 SDRAM sits inside the package and the tools place the reserved

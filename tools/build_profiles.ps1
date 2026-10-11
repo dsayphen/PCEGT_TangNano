@@ -36,7 +36,7 @@ $profileIds = @{
     cd_vdc1_quiet = 2
     superset = 3
 }
-$profiles = if ($Profile -eq 'all') { @('pce', 'sgx', 'cd', 'superset') } else { @($Profile) }
+$profiles = if ($Profile -eq 'all') { @('sgx', 'cd', 'superset') } else { @($Profile) }
 $profileTop = Join-Path $workDir 'top_tang_nano20k.v'
 
 New-Item -ItemType Directory -Force -Path $workDir, $outputRoot | Out-Null

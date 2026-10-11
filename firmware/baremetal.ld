@@ -14,6 +14,8 @@
  *
  * Based on the SNESTang baremetal.ld (nand2mario, GPLv3).
  */
+ENTRY(_start)
+
 MEMORY
 {
     RAM (RWX) : ORIGIN = 0x00000, LENGTH = 0x1A0000

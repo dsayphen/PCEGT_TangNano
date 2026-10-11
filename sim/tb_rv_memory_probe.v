@@ -111,7 +111,7 @@ wire [127:0] path;
 wire has_read;
 wire [22:0] target;
 wire [22:0] probe_address;
-rv_stack_watch #(.SUSPECT_READ(1)) watch (
+rv_stack_watch #(.SUSPECT_READ(1), .CHECK_LEGACY_OPCODES(1)) watch (
     .clk(clk), .resetn(resetn), .completed(completed), .address(address),
     .write_data(32'd0), .read_data(data), .write_strobes(4'd0),
     .instruction(instruction), .capture_data({9'd0, 23'h59ff8c, 32'h03c003c0}),

@@ -242,7 +242,26 @@ wire [7:0] flash_dout;
 wire       flash_out_strb;
 
 assign flash_spi_hold_n = 1'b1;
-assign flash_spi_wp_n   = 1'b0;     // read only access, keep write protect on
+assign flash_spi_wp_n   = flash_pio_owned;
+
+wire flash_boot_cs_n, flash_boot_mosi, flash_boot_clk;
+wire flash_pio_owned, flash_pio_cs_n, flash_pio_mosi, flash_pio_clk;
+wire [31:0] flash_pio_status;
+wire [7:0] flash_pio_data;
+wire flash_ctrl_sel = mem_valid && (mem_addr == 32'h0200_00e0);
+wire flash_data_sel = mem_valid && (mem_addr == 32'h0200_00e4);
+assign flash_spi_cs_n = flash_pio_owned ? flash_pio_cs_n : flash_boot_cs_n;
+assign flash_spi_mosi = flash_pio_owned ? flash_pio_mosi : flash_boot_mosi;
+assign flash_spi_clk = flash_pio_owned ? flash_pio_clk : flash_boot_clk;
+
+flash_pio u_flash_pio (
+    .clk(clk), .resetn(resetn),
+    .ctrl_write(flash_loaded && flash_ctrl_sel && |mem_wstrb),
+    .data_write(flash_loaded && flash_data_sel && |mem_wstrb),
+    .wdata(mem_wdata), .status(flash_pio_status), .rdata(flash_pio_data),
+    .owned(flash_pio_owned), .cs_n(flash_pio_cs_n),
+    .sck(flash_pio_clk), .mosi(flash_pio_mosi), .miso(flash_spi_miso)
+);
 
 spiflash #(
     .ADDR (FIRMWARE_FLASH_ADDR),
@@ -250,10 +269,10 @@ spiflash #(
 ) u_flash (
     .clk       (clk),
     .resetn    (resetn),
-    .ncs       (flash_spi_cs_n),
+    .ncs       (flash_boot_cs_n),
     .miso      (flash_spi_miso),
-    .mosi      (flash_spi_mosi),
-    .sck       (flash_spi_clk),
+    .mosi      (flash_boot_mosi),
+    .sck       (flash_boot_clk),
     .start     (flash_start),
     .dout      (flash_dout),
     .dout_strb (flash_out_strb),
@@ -459,6 +478,7 @@ localparam [22:0] VRAM_CLEAR_SPAN  = 23'h01_0000;
 wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
 assign mem_ready = (ram_sel && rv_ready && !probe_valid) || textdisp_sel ||
+                   flash_ctrl_sel || flash_data_sel ||
                    (uart_div_sel && !diag_uart_owned) ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
                    game_ctrl_sel || rl_status_sel || rl_debug_sel || vdc_options_sel ||
@@ -478,6 +498,8 @@ assign mem_ready = (ram_sel && rv_ready && !probe_valid) || textdisp_sel ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
 
 assign mem_rdata = ram_sel      ? rv_rdata :
+                   flash_ctrl_sel ? flash_pio_status :
+                   flash_data_sel ? {24'd0, flash_pio_data} :
                    joy_sel      ? {20'b0, joy1} :
                    zoom_sel     ? {30'b0, video_zoom} :
                    scan_sel     ? {30'b0, scanline} :

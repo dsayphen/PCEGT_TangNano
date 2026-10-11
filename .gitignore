@@ -5,6 +5,7 @@ impl/temp/
 impl/gao/
 impl/profile-build/
 impl/profiles/
+impl/core-slots/
 *.fs
 *.rpt.html
 *.rpt.txt
@@ -26,6 +27,8 @@ __pycache__/
 firmware/firmware.bin
 sim/prog.bin
 sim/prog.hex
+sim/core_autorun_test.bin
+sim/core_autorun_test.hex
 sim/roms/*.pce
 sim/roms/*.sgx
 

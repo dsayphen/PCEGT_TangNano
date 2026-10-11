@@ -47,6 +47,27 @@ $CROSS = Find-RiscvPrefix
 if ($CROSS) {
     Write-Host "toolchain: $CROSS"
     Push-Location sim
+    try {
+        & "${CROSS}gcc" -x assembler-with-cpp -mabi=ilp32 -march=rv32i -c -o start.o ../firmware/start.S
+        if ($LASTEXITCODE) { throw 'assembling core_autorun_test startup failed' }
+        & "${CROSS}gcc" -Os -mabi=ilp32 -march=rv32i -ffreestanding -fno-builtin -ffunction-sections -fdata-sections `
+            -Dload_rom=unused_load_rom -c -o core_rom_filter.o ../firmware/rom.c
+        if ($LASTEXITCODE) { throw 'compiling core_autorun_test ROM filters failed' }
+        & "${CROSS}gcc" -Os -mabi=ilp32 -march=rv32i -ffreestanding -fno-builtin -ffunction-sections -fdata-sections `
+            '-Wl,--gc-sections,--build-id=none,-T,../firmware/baremetal.ld' -nostdlib `
+            -o core_autorun_test.elf start.o core_autorun_test.c ../firmware/picorv32.c core_rom_filter.o -lgcc
+        if ($LASTEXITCODE) { throw 'compiling core_autorun_test failed' }
+        & "${CROSS}objcopy" core_autorun_test.elf core_autorun_test.bin -O binary
+        if ($LASTEXITCODE) { throw 'objcopy core_autorun_test failed' }
+    } finally {
+        Pop-Location
+    }
+    python tools/bin2hex.py sim/core_autorun_test.bin sim/core_autorun_test.hex 131072
+    & $iverilog -g2005-sv -s tb_core_autorun -o sim/tb_core_autorun.vvp sim/tb_core_autorun.v rtl/tang/iosys/picorv32.v
+    if ($LASTEXITCODE) { throw 'iverilog core_autorun_test failed' }
+    & $vvp sim/tb_core_autorun.vvp
+    if ($LASTEXITCODE) { throw 'core_autorun_test failed' }
+    Push-Location sim
     & "${CROSS}gcc" -x assembler-with-cpp -mabi=ilp32 -march=rv32i -c -o start.o ../firmware/start.S
     & "${CROSS}gcc" -Os -mabi=ilp32 -march=rv32i -ffreestanding -fno-builtin -Wall -c -o prog.o prog.c
     & "${CROSS}gcc" -mabi=ilp32 -march=rv32i '-Wl,--build-id=none,-Bstatic,-T,../firmware/baremetal.ld,--strip-debug' `
@@ -79,9 +100,10 @@ if ($CROSS) {
 }
 
 # ---------------------------------------------------------------------------
-foreach ($tb in @('tb_textdisp', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vram_clear', 'tb_arcade_ram', 'tb_rv_uart_diagnostic', 'tb_rv_x22', 'tb_rv_memory_probe')) {
+foreach ($tb in @('tb_flash_pio', 'tb_textdisp', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vram_clear', 'tb_arcade_ram', 'tb_rv_uart_diagnostic', 'tb_rv_x22', 'tb_rv_memory_probe')) {
     $files = switch ($tb) {
-        'tb_rv_memory_probe' { @('sim/tb_rv_memory_probe.v', 'rtl/tang/rv_memory_probe.v') }
+    'tb_flash_pio' { @('sim/tb_flash_pio.v', 'rtl/tang/iosys/spiflash.v', 'rtl/tang/iosys/spi_master.v') }
+        'tb_rv_memory_probe' { @('sim/tb_rv_memory_probe.v', 'rtl/tang/rv_memory_probe.v', 'rtl/tang/rv_stack_watch.v') }
         'tb_rv_x22' { @('sim/tb_rv_x22.v', 'rtl/tang/iosys/picorv32.v') }
         'tb_rv_uart_diagnostic' { @('sim/tb_rv_uart_diagnostic.v', 'rtl/tang/rv_uart_diagnostic.v', 'rtl/tang/iosys/simpleuart.v') }
         'tb_textdisp'       { @('sim/tb_textdisp.v', 'rtl/tang/iosys/textdisp.v', 'rtl/tang/iosys/font_rom.v') }

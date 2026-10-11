@@ -8,6 +8,7 @@
 #include "cd.h"
 #include "browser.h"
 #include "menu.h"
+#include "core.h"
 
 char pwd[PWD_SIZE] = "/";
 static char names[PAGESIZE][NAME_MAX];
@@ -36,20 +37,13 @@ static int is_hidden_dir(const char *name) {
 }
 
 static uint32_t required_profile(const char *name) {
-    int length = (int)strlen(name);
-
-    if (is_cue(name))
-        return CORE_PROFILE_CD;
-    if (length >= 4 && strcasecmp(name + length - 4, ".sgx") == 0)
-        return CORE_PROFILE_SGX;
-    return CORE_PROFILE_PCE;
+    return is_cue(name) ? CORE_PROFILE_CD : CORE_PROFILE_SGX;
 }
 
 static int profile_supports(uint32_t required) {
     uint32_t active = CORE_PROFILE_ID;
 
-    return active == required || active == CORE_PROFILE_SUPERSET ||
-           (required == CORE_PROFILE_PCE && active == CORE_PROFILE_SGX);
+    return active == required || active == CORE_PROFILE_SUPERSET;
 }
 
 static int check_entry_profile(const char *name) {
@@ -58,12 +52,7 @@ static int check_entry_profile(const char *name) {
     if (profile_supports(required))
         return 1;
 
-    if (required == CORE_PROFILE_CD)
-        message("Needs CD-ROM core", name);
-    else if (required == CORE_PROFILE_SGX)
-        message("Needs SGX core", name);
-    else
-        message("Needs PCE core", name);
+    core_offer_switch(required, name);
     return 0;
 }
 
@@ -380,12 +369,6 @@ void browse(void) {
             if (!page_len)
                 continue;
             if (is_dir[active]) {
-                if (is_cd_dir(names[active]) &&
-                    !profile_supports(CORE_PROFILE_CD)) {
-                    message("Needs CD-ROM core", names[active]);
-                    need_redraw = 1;
-                    continue;
-                }
                 if (strlen(pwd) + strlen(names[active]) + 2 < PWD_SIZE) {
                     if (pwd[1] != '\0')
                         strncat(pwd, "/", PWD_SIZE);
@@ -394,6 +377,7 @@ void browse(void) {
                     if (is_cd_dir(names[active])) {
                         char cue_name[NAME_MAX];
                         if (find_cd_cue(cue_name, sizeof(cue_name)) == 0 &&
+                            check_entry_profile(cue_name) &&
                             open_cd_image(cue_name) == 0) {
                             overlay(0);
                             uart_printf("browser: CD started, overlay=%d\n", overlay_status());

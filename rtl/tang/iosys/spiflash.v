@@ -106,3 +106,61 @@ end
 
 endmodule
 
+module flash_pio (
+    input wire clk,
+    input wire resetn,
+    input wire ctrl_write,
+    input wire data_write,
+    input wire [31:0] wdata,
+    output wire [31:0] status,
+    output wire [7:0] rdata,
+    output reg owned,
+    output reg cs_n,
+    output wire sck,
+    output wire mosi,
+    input wire miso
+);
+reg [1:0] state;
+reg [7:0] tx_byte;
+reg [7:0] rx_byte;
+wire spi_ready;
+wire rx_valid;
+wire [7:0] spi_rx;
+assign status = {16'h4653, 7'd0, owned, 7'd0, (state != 0)};
+assign rdata = rx_byte;
+
+SPI_Master #(.CLKS_PER_HALF_BIT(2)) spi_programmer (
+    .i_Clk(clk), .i_Rst_L(resetn),
+    .i_TX_Byte(tx_byte), .i_TX_DV(state == 1),
+    .o_TX_Ready(spi_ready), .o_RX_DV(rx_valid), .o_RX_Byte(spi_rx),
+    .o_SPI_Clk(sck), .i_SPI_MISO(miso), .o_SPI_MOSI(mosi)
+);
+
+always @(posedge clk) begin
+    if (!resetn) begin
+        owned <= 0;
+        cs_n <= 1;
+        state <= 0;
+        tx_byte <= 0;
+        rx_byte <= 0;
+    end else begin
+        if (ctrl_write && state == 0) begin
+            owned <= wdata[1];
+            cs_n <= wdata[0];
+        end
+        case (state)
+            0: if (data_write && owned && spi_ready) begin
+                tx_byte <= wdata[7:0];
+                state <= 1;
+            end
+            1: state <= 2;
+            2: if (rx_valid) begin
+                rx_byte <= spi_rx;
+                state <= 3;
+            end
+            3: if (spi_ready) state <= 0;
+        endcase
+    end
+end
+endmodule
+

@@ -38,6 +38,7 @@
 #include "browser.h"
 #include "menu.h"
 #include "cd.h"
+#include "core.h"
 
 static FATFS fs;
 
@@ -94,7 +95,8 @@ int main(void) {
     audio_config_load();
 
     uart_print("main: entering browser\n");
-    browse();
+    if (!core_autorun())
+        browse();
     uart_print("main: browser returned\n");
 
     // The console is running now.  Stay alive so the user can bring the menu

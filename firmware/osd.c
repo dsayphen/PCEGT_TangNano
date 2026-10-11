@@ -31,7 +31,7 @@ void title(void) {
         profile = "CD-ROM";
         break;
     case CORE_PROFILE_SUPERSET:
-        profile = "PCE/SGX/CD";
+        profile = "Superset";
         break;
     default:
         profile = "Unknown core";
