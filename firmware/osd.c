@@ -22,10 +22,10 @@ void title(void) {
 
     switch (CORE_PROFILE_ID) {
     case CORE_PROFILE_PCE:
-        profile = "PC Engine";
+        profile = "PCEngine";
         break;
     case CORE_PROFILE_SGX:
-        profile = "SuperGrafx";
+        profile = "HuCard";
         break;
     case CORE_PROFILE_CD:
         profile = "CD-ROM";
