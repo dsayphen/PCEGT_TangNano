@@ -51,6 +51,15 @@ entity dpram is
 	PORT
 	(
 		clock			: in  STD_LOGIC ;
+		ss_hold : in std_logic := '0';
+		ss_load : in std_logic := '0';
+		ss_data : in std_logic_vector(2*data_width-1 downto 0) := (others => '0');
+		ss_q : out std_logic_vector(2*data_width-1 downto 0) := (others => '0');
+		ss_mem_req : in std_logic := '0';
+		ss_mem_we : in std_logic := '0';
+		ss_mem_addr : in std_logic_vector(addr_width-1 downto 0) := (others => '0');
+		ss_mem_di : in std_logic_vector(data_width-1 downto 0) := (others => '0');
+		ss_mem_q : out std_logic_vector(data_width-1 downto 0) := (others => '0');
 		address_a	: in  STD_LOGIC_VECTOR (addr_width-1 DOWNTO 0);
 		data_a		: in  STD_LOGIC_VECTOR (data_width-1 DOWNTO 0) := (others => '0');
 		enable_a		: in  STD_LOGIC := '1';
@@ -93,14 +102,43 @@ ARCHITECTURE SYN OF dpram IS
 
 	signal q0 : std_logic_vector((data_width - 1) downto 0);
 	signal q1 : std_logic_vector((data_width - 1) downto 0);
+	signal saved_q0, saved_q1, visible_q0, visible_q1 : std_logic_vector(data_width-1 downto 0);
+	signal saved_valid0, saved_valid1 : std_logic := '0';
+	signal hold_previous : std_logic := '0';
 
 BEGIN
-	q_a<= q0 when cs_a = '1' else (others => disable_value);
-	q_b<= q1 when cs_b = '1' else (others => disable_value);
+	visible_q0 <= saved_q0 when saved_valid0 = '1' else q0;
+	visible_q1 <= saved_q1 when saved_valid1 = '1' else q1;
+	q_a<= visible_q0 when cs_a = '1' else (others => disable_value);
+	q_b<= visible_q1 when cs_b = '1' else (others => disable_value);
+	ss_q <= visible_q1 & visible_q0;
+	ss_mem_q <= q0;
+
+	process(clock)
+	begin
+		if rising_edge(clock) then
+			hold_previous <= ss_hold;
+			if ss_hold = '1' and ss_load = '1' then
+				saved_q0 <= ss_data(data_width-1 downto 0);
+				saved_q1 <= ss_data(2*data_width-1 downto data_width);
+				saved_valid0 <= '1';
+				saved_valid1 <= '1';
+			elsif ss_hold = '1' and hold_previous = '0' then
+				saved_q0 <= visible_q0;
+				saved_q1 <= visible_q1;
+				saved_valid0 <= '1';
+				saved_valid1 <= '1';
+			elsif ss_hold = '0' then
+				if enable_a = '1' then saved_valid0 <= '0'; end if;
+				if enable_b = '1' then saved_valid1 <= '0'; end if;
+			end if;
+		end if;
+	end process;
 
 	process (clock)
 	begin
 		if rising_edge(clock) then
+			if ss_hold = '0' then
 			-- Port A: write-first / bypass preserved (CPU-facing back-to-back
 			-- read-modify-write correctness relies on this).
 			if enable_a = '1' then
@@ -119,6 +157,14 @@ BEGIN
 					ram(to_integer(unsigned(address_b))) <= data_b;
 				end if;
 				q1 <= ram(to_integer(unsigned(address_b)));
+			end if;
+			elsif ss_mem_req = '1' then
+				if ss_mem_we = '1' then
+					ram(to_integer(unsigned(ss_mem_addr))) <= ss_mem_di;
+					q0 <= ss_mem_di;
+				else
+					q0 <= ram(to_integer(unsigned(ss_mem_addr)));
+				end if;
 			end if;
 		end if;
 	end process;

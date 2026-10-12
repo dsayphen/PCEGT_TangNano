@@ -9,6 +9,10 @@ entity HUC6280_CPU is
 		CLK		: in std_logic;
 		RST_N		: in std_logic;
 		CE			: in std_logic;
+		SS_HOLD : in std_logic := '0';
+		SS_LOAD : in std_logic := '0';
+		SS_DATA : in std_logic_vector(255 downto 0) := (others => '0');
+		SS_Q : out std_logic_vector(255 downto 0) := (others => '0');
 		  
 		A_OUT		: out std_logic_vector(20 downto 0);
 		DI			: in std_logic_vector(7 downto 0);
@@ -83,10 +87,21 @@ architecture rtl of HUC6280_CPU is
 	signal OLD_NMI_N 		: std_logic;
 	signal NMI_SYNC 		: std_logic;
 	signal NMI_ACTIVE 	: std_logic;
+	signal CS_STATE : std_logic;
+	signal AG_STATE : std_logic_vector(32 downto 0);
+	signal ALU_STATE : std_logic;
+	signal MC_STATE : std_logic_vector(41 downto 0);
 
 begin
 	
-	EN <= RDY and CE;
+	EN <= RDY and CE and not SS_HOLD;
+	CS <= CS_STATE;
+	SS_Q <= "0000" & MC_STATE & ALU_STATE & AG_STATE & CS_STATE &
+	        NMI_ACTIVE & GOT_INT & IRQT_INT & IRQ2_INT & IRQ1_INT &
+	        NMI_INT & RES_INT & NMI_SYNC & OLD_NMI_N & TALT &
+	        std_logic_vector(STATE) & IR & MPR_LAST &
+	        MPR(7) & MPR(6) & MPR(5) & MPR(4) & MPR(3) & MPR(2) & MPR(1) & MPR(0) &
+	        LH & DH & SH & DR & T & P & SP & Y & X & A;
 
 	NEXT_IR <= IR when (STATE /= "00000") else
 				 x"00" when GOT_INT = '1' else 
@@ -161,7 +176,10 @@ begin
 			IR <= (others=>'0');
 			STATE <= (others=>'0');
 		elsif rising_edge(CLK) then
-			if EN = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				IR <= SS_DATA(159 downto 152);
+				STATE <= unsigned(SS_DATA(164 downto 160));
+			elsif EN = '1' then
 				IR <= NEXT_IR;
 				STATE <= NEXT_STATE;
 			end if;
@@ -175,7 +193,9 @@ begin
 		if RST_N = '0' then
 			TALT <= '0';
 		elsif rising_edge(CLK) then
-			if EN = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				TALT <= SS_DATA(165);
+			elsif EN = '1' then
 				if STATE = "01101" then
 					TALT <= '0';
 				elsif STATE = "10011" then
@@ -190,6 +210,10 @@ begin
 		CLK		=> CLK,
 		RST_N		=> RST_N,
 		EN			=> EN,
+		SS_HOLD => SS_HOLD,
+		SS_LOAD => SS_LOAD,
+		SS_DATA => SS_DATA(251 downto 210),
+		SS_Q => MC_STATE,
 		IR			=> NEXT_IR,
 		STATE		=> NEXT_STATE,
 		M			=> MC
@@ -237,6 +261,10 @@ begin
 	port map (
 		CLK		=> CLK,
 		EN			=> EN,
+		SS_HOLD => SS_HOLD,
+		SS_LOAD => SS_LOAD,
+		SS_DATA => SS_DATA(209),
+		SS_Q => ALU_STATE,
 		L     	=> ALU_L,
 		R     	=> DI,
 		CTRL   	=> ALU_CTRL,
@@ -259,7 +287,11 @@ begin
 			X <= (others=>'0');
 			Y <= (others=>'0');
 		elsif rising_edge(CLK) then
-			if EN = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				A <= SS_DATA(7 downto 0);
+				X <= SS_DATA(15 downto 8);
+				Y <= SS_DATA(23 downto 16);
+			elsif EN = '1' then
 				if MC.AXY_CTRL(0) = '1' then
 					A <= ALU_OUT;
 				end if; 
@@ -278,7 +310,9 @@ begin
 		if RST_N = '0' then
 			T <= (others=>'0');
 		elsif rising_edge(CLK) then
-			if EN = '1' then 
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				T <= SS_DATA(47 downto 40);
+			elsif EN = '1' then
 				case MC.LOAD_T is
 					when "001" => T <= ALU_OUT;
 					when "010" => T <= X;
@@ -295,7 +329,9 @@ begin
 		if RST_N = '0' then
 			SP <= (others=>'0');
 		elsif rising_edge(CLK) then
-			if EN = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				SP <= SS_DATA(31 downto 24);
+			elsif EN = '1' then
 				case MC.LOAD_SP is
 					when "001" => 
 						SP <= ALU_OUT;
@@ -315,7 +351,9 @@ begin
 		if RST_N = '0' then
 			P <= "00000100";
 		elsif rising_edge(CLK) then
-			if EN = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				P <= SS_DATA(39 downto 32);
+			elsif EN = '1' then
 				case MC.LOAD_P is
 					when "001" =>  -- ALU
 						P(FLAG_Z) <= ZO; 
@@ -359,7 +397,11 @@ begin
 			DH <= (others=>'0');
 			LH <= (others=>'0');
 		elsif rising_edge(CLK) then
-			if EN = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				SH <= SS_DATA(63 downto 56);
+				DH <= SS_DATA(71 downto 64);
+				LH <= SS_DATA(79 downto 72);
+			elsif EN = '1' then
 				case MC.LOAD_SDLH is
 					when "01" => SH <= ALU_OUT;
 					when "10" => DH <= ALU_OUT;
@@ -382,7 +424,12 @@ begin
 			MPR(6) <= (others=>'0');
 			MPR(7) <= (others=>'0');
 		elsif rising_edge(CLK) then
-			if EN = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				for index in 0 to 7 loop
+					MPR(index) <= SS_DATA(87 + index * 8 downto 80 + index * 8);
+				end loop;
+				MPR_LAST <= SS_DATA(151 downto 144);
+			elsif EN = '1' then
 				if IR = x"53" and LAST_CYCLE = '1' then	--TAMi
 					for i in 0 to 7 loop
 						if T(i) = '1' then
@@ -429,7 +476,9 @@ begin
 		if RST_N = '0' then
 			DR <= (others=>'0');
 		elsif rising_edge(CLK) then
-			if EN = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				DR <= SS_DATA(55 downto 48);
+			elsif EN = '1' then
 				DR <= DI;
 			end if; 
 		end if;
@@ -440,6 +489,10 @@ begin
 		CLK   		=> CLK,
 		RST_N   		=> RST_N,
 		CE   			=> EN,
+		SS_HOLD => SS_HOLD,
+		SS_LOAD => SS_LOAD,
+		SS_DATA => SS_DATA(208 downto 176),
+		SS_Q => AG_STATE,
 		PC_CTRL   	=> MC.LOAD_PC,
 		ADDR_CTRL	=> MC.ADDR_CTRL,
 		GOT_INT		=> GOT_INT,
@@ -458,7 +511,10 @@ begin
 			OLD_NMI_N <= '1';
 			NMI_SYNC <= '0';
 		elsif rising_edge(CLK) then
-			if CE = '1' and RES_INT = '0' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				OLD_NMI_N <= SS_DATA(166);
+				NMI_SYNC <= SS_DATA(167);
+			elsif CE = '1' and RES_INT = '0' and SS_HOLD = '0' then
 				OLD_NMI_N <= NMI_N;
 				if NMI_N = '0' and OLD_NMI_N = '1' and NMI_SYNC = '0' then
 					NMI_SYNC <= '1';
@@ -480,7 +536,15 @@ begin
 			GOT_INT <= '1';
 			NMI_ACTIVE <= '0';
 		elsif rising_edge(CLK) then
-			if RDY = '1' and CE = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				RES_INT <= SS_DATA(168);
+				NMI_INT <= SS_DATA(169);
+				IRQ1_INT <= SS_DATA(170);
+				IRQ2_INT <= SS_DATA(171);
+				IRQT_INT <= SS_DATA(172);
+				GOT_INT <= SS_DATA(173);
+				NMI_ACTIVE <= SS_DATA(174);
+			elsif RDY = '1' and CE = '1' and SS_HOLD = '0' then
 				NMI_ACTIVE <= NMI_SYNC;
 				
 				if LAST_CYCLE = '1' and EN = '1' then
@@ -555,11 +619,13 @@ begin
 	process(CLK, RST_N)
 	begin
 		if RST_N = '0' then
-			CS <= '0';
+			CS_STATE <= '0';
 		elsif rising_edge(CLK) then
-			if EN = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				CS_STATE <= SS_DATA(175);
+			elsif EN = '1' then
 				if IR(6 downto 0) = "1010100" and STATE = "00001" then
-					CS <= IR(7);
+					CS_STATE <= IR(7);
 				end if; 
 			end if; 
 		end if;

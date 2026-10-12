@@ -8,6 +8,10 @@ entity ALU is
 	port( 
 		CLK 	: in std_logic;
 		EN 	: in std_logic;
+		SS_HOLD : in std_logic := '0';
+		SS_LOAD : in std_logic := '0';
+		SS_DATA : in std_logic := '0';
+		SS_Q : out std_logic := '0';
 		L   	: in std_logic_vector(7 downto 0); 
 		R		: in std_logic_vector(7 downto 0); 
 		CTRL	: in ALUCtrl_r;
@@ -39,6 +43,7 @@ architecture rtl of ALU is
 	signal Result 	: std_logic_vector(7 downto 0);
 
 begin
+	SS_Q <= SavedC;
 	
 	process(CTRL, CI, L, R, BCD, SavedC)
 	begin
@@ -98,7 +103,9 @@ begin
 	process(CLK)
 	begin
 		if rising_edge(CLK) then
-			if EN = '1' then
+			if SS_HOLD = '1' and SS_LOAD = '1' then
+				SavedC <= SS_DATA;
+			elsif EN = '1' and SS_HOLD = '0' then
 				SavedC <= AddCO;
 			end if;
 		end if;
