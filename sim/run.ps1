@@ -33,14 +33,29 @@ if ($CpuSavestate) {
             'rtl/HUC6280/HUC6280_MC.vhd', 'rtl/HUC6280/HUC6280_CPU.vhd',
             'rtl/mem_init_pkg.vhd', 'rtl/dpram.vhd',
             'rtl/huc6202.vhd', 'rtl/huc6260.vhd',
+            'sim/gowin_dp_model.vhd', 'rtl/dpram_ip.vhd', 'rtl/dpram_ip_9x10.vhd',
+            'rtl/huc6270.vhd', 'sim/tb_vdc_savestate.vhd',
             'rtl/HUC6280/psg_mixer.vhd', 'rtl/HUC6280/psg.vhd',
             'rtl/HUC6280/HUC6280.vhd',
+            'rtl/pce_top_extram.vhd', 'rtl/tang/pce_core.vhd', 'sim/tb_state_portal.vhd',
             'sim/tb_cpu_savestate.vhd'
         )
         & $ghdl -a --std=08 -fsynopsys -frelaxed-rules "--workdir=$work" @sources
         if ($LASTEXITCODE) { throw 'CPU savestate analysis failed' }
         & $ghdl --elab-run --std=08 -fsynopsys -frelaxed-rules "--workdir=$work" tb_cpu_savestate --assert-level=error --ieee-asserts=disable --stop-time=1ms
         if ($LASTEXITCODE) { throw 'CPU savestate simulation failed' }
+        & $ghdl --elab-run --std=08 -fsynopsys -frelaxed-rules "--workdir=$work" tb_vdc_savestate --assert-level=error --ieee-asserts=disable
+        if ($LASTEXITCODE) { throw 'VDC savestate simulation failed' }
+        & $ghdl --elab-run --std=08 -fsynopsys -frelaxed-rules "--workdir=$work" tb_state_portal --assert-level=error --ieee-asserts=disable
+        if ($LASTEXITCODE) { throw 'State portal simulation failed' }
+        $toolDirs = @($env:IVERILOG_BIN, 'C:\iverilog\bin', 'C:\Program Files\iverilog\bin') | Where-Object { $_ }
+        $iverilog = Find-Tool 'iverilog' $toolDirs
+        $vvp = Find-Tool 'vvp' $toolDirs
+        $bridgeTest = Join-Path $work 'tb_state_bridge.vvp'
+        & $iverilog -g2012 -s tb_state_bridge -o $bridgeTest sim/tb_state_bridge.sv rtl/tang/state_bridge.v
+        if ($LASTEXITCODE) { throw 'State bridge compilation failed' }
+        & $vvp $bridgeTest
+        if ($LASTEXITCODE) { throw 'State bridge simulation failed' }
     } finally {
         Remove-Item -Recurse -Force $work
     }

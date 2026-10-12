@@ -28,6 +28,11 @@ entity pce_top is
 		RESET       : in  std_logic;
 		COLD_RESET  : in  std_logic;
 		CLK         : in  std_logic;
+		SS_HOLD : in std_logic := '0';
+		SS_WRITE : in std_logic := '0';
+		SS_ADDR : in std_logic_vector(19 downto 0) := (others => '0');
+		SS_DATA : in std_logic_vector(31 downto 0) := (others => '0');
+		SS_Q : out std_logic_vector(31 downto 0) := (others => '0');
 
 		ROM_RD      : out std_logic;
 		ROM_RDY     : in  std_logic;
@@ -350,14 +355,101 @@ component cd is
 
 		CD_SL			: out signed(CDDA_O_WIDTH-1 downto 0);
 		CD_SR			: out signed(CDDA_O_WIDTH-1 downto 0);
-		AD_S			: out signed(15 downto 0)
+		AD_S			: out signed(15 downto 0);
+		PHASE_DBG : out std_logic_vector(7 downto 0);
+		CDDA_USEDW_DBG : out std_logic_vector(13 downto 0);
+		ADPCM_DBG : out std_logic_vector(7 downto 0)
 	);
 end component;
 
 --attribute syn_ramstyle : string;
 --attribute syn_ramstyle of RAM : label is "block_ram";
 
+signal ss_cpu_q, ss_cpu_data : std_logic_vector(351 downto 0);
+signal ss_audio_q, ss_audio_data : std_logic_vector(2116+2*PSG_O_WIDTH downto 0);
+signal ss_vce_q, ss_vce_data : std_logic_vector(319 downto 0);
+signal ss_vpc_q, ss_vpc_data : std_logic_vector(63 downto 0);
+signal ss_vdc0_q, ss_vdc0_data, ss_vdc1_q, ss_vdc1_data : std_logic_vector(8191 downto 0);
+signal ss_misc_q, ss_misc_data : std_logic_vector(63 downto 0);
+signal ss_ram_q : std_logic_vector(15 downto 0);
+signal ss_ram_read : std_logic_vector(7 downto 0);
+signal ss_palette_read : std_logic_vector(8 downto 0);
+signal ss_vdc0_read, ss_vdc1_read : std_logic_vector(15 downto 0);
+signal ss_bank : unsigned(3 downto 0);
+signal ss_index : unsigned(15 downto 0);
+signal ss_cpu_load, ss_vce_load, ss_vpc_load, ss_vdc0_load, ss_vdc1_load, ss_misc_load : std_logic;
+signal ss_ram_req, ss_palette_req, ss_vdc0_req, ss_vdc1_req : std_logic;
+signal ss_vdc_memory_select : std_logic_vector(1 downto 0);
+
+function state_word(value : std_logic_vector; word_index : unsigned) return std_logic_vector is
+	variable result : std_logic_vector(31 downto 0) := (others => '0');
+	variable position : integer;
+	variable selected : std_logic;
 begin
+	for word_number in 0 to (value'length+31)/32-1 loop
+		selected := '0';
+		if word_index = word_number then selected := '1'; end if;
+		for bit_index in 0 to 31 loop
+			position := word_number*32 + bit_index;
+			if position < value'length then
+				result(bit_index) := result(bit_index) or (value(value'low+position) and selected);
+			end if;
+		end loop;
+	end loop;
+	return result;
+end function;
+
+function patch_state(value : std_logic_vector; word_index : unsigned;
+					 incoming : std_logic_vector(31 downto 0)) return std_logic_vector is
+	variable result : std_logic_vector(value'range);
+begin
+	result := value;
+	for bit_index in value'range loop
+		if bit_index/32 = to_integer(word_index) then
+			result(bit_index) := incoming(bit_index mod 32);
+		end if;
+	end loop;
+	return result;
+end function;
+
+begin
+
+ss_bank <= unsigned(SS_ADDR(19 downto 16));
+ss_index <= unsigned(SS_ADDR(15 downto 0));
+ss_cpu_data <= patch_state(ss_cpu_q, ss_index, SS_DATA) when ss_bank = 0 else ss_cpu_q;
+ss_audio_data <= patch_state(ss_audio_q, ss_index, SS_DATA) when ss_bank = 1 else ss_audio_q;
+ss_vce_data <= patch_state(ss_vce_q, ss_index, SS_DATA);
+ss_vpc_data <= patch_state(ss_vpc_q, ss_index, SS_DATA);
+ss_vdc0_data <= patch_state(ss_vdc0_q, ss_index, SS_DATA);
+ss_vdc1_data <= patch_state(ss_vdc1_q, ss_index, SS_DATA);
+ss_misc_data <= patch_state(ss_misc_q, ss_index, SS_DATA);
+ss_cpu_load <= SS_WRITE and SS_HOLD when ss_bank = 0 or ss_bank = 1 else '0';
+ss_vce_load <= SS_WRITE and SS_HOLD when ss_bank = 2 else '0';
+ss_vpc_load <= SS_WRITE and SS_HOLD when ss_bank = 3 else '0';
+ss_vdc0_load <= SS_WRITE and SS_HOLD when ss_bank = 4 else '0';
+ss_vdc1_load <= SS_WRITE and SS_HOLD when ss_bank = 5 else '0';
+ss_misc_load <= SS_WRITE and SS_HOLD when ss_bank = 14 else '0';
+ss_ram_req <= SS_HOLD when ss_bank = 6 else '0';
+ss_palette_req <= SS_HOLD when ss_bank = 7 else '0';
+ss_vdc0_req <= SS_HOLD when ss_bank >= 8 and ss_bank <= 10 else '0';
+ss_vdc1_req <= SS_HOLD when ss_bank >= 11 and ss_bank <= 13 else '0';
+ss_vdc_memory_select <= std_logic_vector(to_unsigned(to_integer(ss_bank)-8, 2)) when ss_bank >= 8 and ss_bank <= 10 else
+						std_logic_vector(to_unsigned(to_integer(ss_bank)-11, 2)) when ss_bank >= 11 and ss_bank <= 13 else "00";
+ss_misc_q <= (63 downto 40 => '0') & ss_ram_q & RESET_N & AC_RAM_CS_N_ROM &
+			 GRID & BORDER & CLR_WE & CLR_A & rombank & CPU_CLKEN;
+with to_integer(ss_bank) select SS_Q <=
+	state_word(ss_cpu_q, ss_index) when 0,
+	state_word(ss_audio_q, ss_index) when 1,
+	state_word(ss_vce_q, ss_index) when 2,
+	state_word(ss_vpc_q, ss_index) when 3,
+	state_word(ss_vdc0_q, ss_index) when 4,
+	state_word(ss_vdc1_q, ss_index) when 5,
+	x"000000" & ss_ram_read when 6,
+	(31 downto 9 => '0') & ss_palette_read when 7,
+	x"0000" & ss_vdc0_read when 8 | 9 | 10,
+	x"0000" & ss_vdc1_read when 11 | 12 | 13,
+	state_word(ss_misc_q, ss_index) when 14,
+	(others => '0') when others;
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
@@ -402,6 +494,9 @@ generic map (
 port map(
 	CLK 		=> CLK,
 	RST_N		=> RESET_N,
+	SS_HOLD => SS_HOLD, SS_LOAD => ss_cpu_load,
+	SS_DATA => ss_cpu_data, SS_Q => ss_cpu_q,
+	SS_AUDIO_DATA => ss_audio_data, SS_AUDIO_Q => ss_audio_q,
 	WAIT_N	=> ROM_RDY and EXT_RAM_RDY and not CPU_PAUSE_EN,
 
 	IRQ1_N	=> VDC0_IRQ_N and VDC1_IRQ_N,
@@ -435,7 +530,14 @@ port map(
 
 JOY_OUT <= CPU_IO_DO(1 downto 0);
 
-CPU_CLKEN <= CPU_CE when rising_edge( CLK );
+process(CLK)
+begin
+	if rising_edge(CLK) then
+		if ss_misc_load = '1' then CPU_CLKEN <= ss_misc_data(0);
+		elsif SS_HOLD = '0' then CPU_CLKEN <= CPU_CE;
+		end if;
+	end if;
+end process;
 
 VIDEO_CE <= VDC_CLKEN;
 VIDEO_VS <= not VS_N;
@@ -445,6 +547,10 @@ VCE : entity work.huc6260
 port map(
 	CLK 		=> CLK,
 	RESET_N	=> RESET_N,
+	SS_HOLD => SS_HOLD, SS_LOAD => ss_vce_load,
+	SS_DATA => ss_vce_data, SS_Q => ss_vce_q,
+	SS_MEM_REQ => ss_palette_req, SS_MEM_WE => SS_WRITE,
+	SS_MEM_ADDR => SS_ADDR(8 downto 0), SS_MEM_DI => SS_DATA(8 downto 0), SS_MEM_Q => ss_palette_read,
 
 	-- CPU Interface
 	A			=> CPU_A(2 downto 0),
@@ -483,8 +589,8 @@ port map(
 	VBL		=> VIDEO_VBL
 );
 
-VRAM0_RD <= VRAM0_READ and not VRAM0_ADDR(15);
-VRAM0_WE <= VRAM0_WRITE and not VRAM0_ADDR(15);
+VRAM0_RD <= VRAM0_READ and not VRAM0_ADDR(15) and not SS_HOLD;
+VRAM0_WE <= VRAM0_WRITE and not VRAM0_ADDR(15) and not SS_HOLD;
 VRAM0_A <= VRAM0_ADDR;
 
 VDC0 : entity work.HUC6270
@@ -496,6 +602,10 @@ port map(
 	CLK 		=> CLK,
 	RST_N		=> RESET_N,
 	CLR_MEM  => COLD_RESET,
+	SS_HOLD => SS_HOLD, SS_LOAD => ss_vdc0_load,
+	SS_DATA => ss_vdc0_data, SS_Q => ss_vdc0_q,
+	SS_MEM_REQ => ss_vdc0_req, SS_MEM_WE => SS_WRITE, SS_MEM_SELECT => ss_vdc_memory_select,
+	SS_MEM_ADDR => SS_ADDR(8 downto 0), SS_MEM_DI => SS_DATA(15 downto 0), SS_MEM_Q => ss_vdc0_read,
 	SPRITES_DOUBLE => SPRITES_DOUBLE,
 
 	-- CPU Interface
@@ -550,13 +660,23 @@ VIDEO_VDS_DBG <= VDC0_VDS_DBG;
 VIDEO_VDW_DBG <= VDC0_VDW_DBG;
 VIDEO_VCR_DBG <= VDC0_VCR_DBG;
 
-CLR_A  <= CLR_A + 1  when rising_edge(CLK);
-CLR_WE <= COLD_RESET when rising_edge(CLK);
+process(CLK)
+begin
+	if rising_edge(CLK) then
+		if ss_misc_load = '1' then
+			CLR_A <= ss_misc_data(17 downto 3);
+			CLR_WE <= ss_misc_data(18);
+		elsif SS_HOLD = '0' then
+			CLR_A <= CLR_A + 1;
+			CLR_WE <= COLD_RESET;
+		end if;
+	end if;
+end process;
 
 generate_VDC1: if (VDC1_SUPPORT /= 0) generate begin
 	-- Keep VRAM1 within the 32K-word physical range.
-	VRAM1_RD <= VRAM1_READ;
-	VRAM1_WE <= VRAM1_WRITE and not VRAM1_ADDR(15);
+	VRAM1_RD <= VRAM1_READ and not SS_HOLD;
+	VRAM1_WE <= VRAM1_WRITE and not VRAM1_ADDR(15) and not SS_HOLD;
 	VRAM1_A  <= '0' & VRAM1_ADDR(14 downto 0);
 
 	VDC1 : entity work.HUC6270
@@ -567,6 +687,10 @@ generate_VDC1: if (VDC1_SUPPORT /= 0) generate begin
 		CLK 		=> CLK,
 		CLR_MEM  => COLD_RESET,
 		RST_N		=> RESET_N,
+		SS_HOLD => SS_HOLD, SS_LOAD => ss_vdc1_load,
+		SS_DATA => ss_vdc1_data, SS_Q => ss_vdc1_q,
+		SS_MEM_REQ => ss_vdc1_req, SS_MEM_WE => SS_WRITE, SS_MEM_SELECT => ss_vdc_memory_select,
+		SS_MEM_ADDR => SS_ADDR(8 downto 0), SS_MEM_DI => SS_DATA(15 downto 0), SS_MEM_Q => ss_vdc1_read,
 		SPRITES_DOUBLE => SPRITES_DOUBLE,
 
 		-- CPU Interface
@@ -604,6 +728,8 @@ generate_VDC1: if (VDC1_SUPPORT /= 0) generate begin
 end generate;
 
 generate_NO_VDC1: if (VDC1_SUPPORT = 0) generate begin
+	ss_vdc1_q <= (others => '0');
+	ss_vdc1_read <= (others => '0');
 	VRAM1_A  <= (others => '0');
 	VRAM1_DO <= (others => '0');
 	VRAM1_RD <= '0';
@@ -620,6 +746,8 @@ generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 		CLK 		=> CLK,
 		CLKEN		=> VDC_CLKEN,
 		RESET_N	=> RESET_N,
+		SS_HOLD => SS_HOLD, SS_LOAD => ss_vpc_load,
+		SS_DATA => ss_vpc_data, SS_Q => ss_vpc_q,
 
 		-- CPU Interface
 		A			=> CPU_A(2 downto 0),
@@ -644,7 +772,10 @@ generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 	process( CLK )
 	begin
 		if rising_edge( CLK ) then
-			if VDC_CLKEN = '1' then
+			if ss_misc_load = '1' then
+				BORDER <= ss_misc_data(19);
+				GRID <= ss_misc_data(21 downto 20);
+			elsif VDC_CLKEN = '1' and SS_HOLD = '0' then
 				BORDER <= VDC0_BORDER;
 				GRID <= VDC0_GRID;
 			end if;
@@ -654,6 +785,7 @@ generate_SGX: if (SGX_SUPPORT /= 0) generate begin
 end generate;
 
 generate_NOSGX: if (SGX_SUPPORT = 0) generate begin
+	ss_vpc_q <= (others => '0');
 
 	CPU_VDC0_SEL_N <= CPU_VDC_SEL_N;
 	CPU_VDC1_SEL_N <= '1';
@@ -737,20 +869,24 @@ begin
 	if rising_edge(CLK) then
 		if RESET = '1' then
 			AC_RAM_CS_N_ROM <= '0';
-		else
+		elsif ss_misc_load = '1' then
+			AC_RAM_CS_N_ROM <= ss_misc_data(22);
+		elsif SS_HOLD = '0' then
 			AC_RAM_CS_N_ROM <= AC_RAM_CS_N;
 		end if;
 	end if;
 end process;
 
-ROM_RD    <= CPU_PRE_RD and not CPU_ROM_SEL_N and CPU_PRAM_SEL_N and ((AC_RAM_CS_N_ROM and CD_RAM_CS_N) or not CD_EN);
+ROM_RD    <= CPU_PRE_RD and not CPU_ROM_SEL_N and CPU_PRAM_SEL_N and ((AC_RAM_CS_N_ROM and CD_RAM_CS_N) or not CD_EN) and not SS_HOLD;
 ROM_CLKEN <= CPU_CLKEN;
 
 process( CLK ) begin
 	if rising_edge( CLK ) then
 		if RESET = '1' then
 			rombank <= "00";
-		elsif CPU_CE = '1' then
+		elsif ss_misc_load = '1' then
+			rombank <= ss_misc_data(2 downto 1);
+		elsif CPU_CE = '1' and SS_HOLD = '0' then
 			-- CPU_A(12 downto 2) = X"7FC" means CPU_A & 0x1FFC = 0x1FF0
 			if CPU_A(20) = '0' and ('0' & CPU_A(12 downto 2)) = X"7FC" and CPU_WR_N = '0' then
 				rombank <= CPU_A(1 downto 0);
@@ -765,6 +901,10 @@ CPU_PRAM_SEL_N <= CPU_A(20) or not CPU_A(19) or not ROM_POP;
 RAM : entity work.dpram generic map (15,8)
 port map (
 	clock		=> CLK,
+	ss_hold => SS_HOLD, ss_load => ss_misc_load,
+	ss_data => ss_misc_data(39 downto 24), ss_q => ss_ram_q,
+	ss_mem_req => ss_ram_req, ss_mem_we => SS_WRITE,
+	ss_mem_addr => SS_ADDR(14 downto 0), ss_mem_di => SS_DATA(7 downto 0), ss_mem_q => ss_ram_read,
 	address_a=> RAM_A,
 	data_a	=> CPU_DO,
 	wren_a	=> CPU_CE and INT_RAM_SEL and not CPU_WR_N,
@@ -787,7 +927,7 @@ BRM_WE <= CPU_CE and not CPU_BRM_SEL_N and not CPU_WR_N;
 
 generate_CD: if (CD_SUPPORT /= 0) generate begin
 
-CD_UNIT : entity work.cd
+CD_UNIT : component cd
 generic map(
 	CDDA_O_WIDTH => PSG_O_WIDTH
 )

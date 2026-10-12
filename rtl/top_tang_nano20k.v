@@ -20,6 +20,7 @@
 
 module top_tang_nano20k #(
     parameter [1:0] CORE_PROFILE = 2'd3,
+    parameter CORE_SAVESTATES = 0,
     parameter [1:0] CORE_LOGIC_PROFILE = CORE_PROFILE,
     parameter CORE_EXTRA_SGX = 0,
     parameter CORE_EXTRA_VDC1 = 0,
@@ -203,6 +204,48 @@ wire        sgx_mode;
 wire [1:0]  video_zoom;
 wire [1:0]  scanline;
 wire        game_pause;
+wire        state_mmio_valid, state_mmio_ready;
+wire [1:0]  state_mmio_address;
+wire [31:0] state_mmio_wdata, state_mmio_rdata;
+wire [3:0]  state_mmio_wstrb;
+wire        state_hold, state_write;
+wire [19:0] state_address;
+wire [31:0] state_data, state_core_q;
+wire [22:0] state_raw_base;
+reg [2:0] state_video_history = 3'd0;
+reg [2:0] state_memory_ref = 3'd0;
+reg [15:0] state_vram0_saved, state_vram1_saved;
+reg state_hold_previous;
+reg state_memory_restored;
+wire [31:0] state_q = state_address == 20'he0003 ? {state_vram1_saved, state_vram0_saved} : state_core_q;
+always @(posedge clk_sys) begin
+    state_video_history <= {state_video_history[1:0], vid_ce};
+    state_memory_ref <= state_memory_ref + 1'b1;
+    state_hold_previous <= state_hold;
+    if (!sys_resetn || core_reset) begin
+        state_hold_previous <= 0;
+        state_memory_restored <= 0;
+    end else if (state_hold && !state_hold_previous) begin
+        state_vram0_saved <= vram0_di;
+        state_vram1_saved <= vram1_di;
+        state_memory_restored <= 1;
+    end else if (state_hold && state_write && state_address == 20'he0003) begin
+        state_vram0_saved <= state_data[15:0];
+        state_vram1_saved <= state_data[31:16];
+        state_memory_restored <= 1;
+    end else if (!state_hold) begin
+        state_memory_restored <= 0;
+    end
+end
+state_bridge #(.SUPPORTED(CORE_SAVESTATES && CORE_PROFILE == PROFILE_SGX)) u_state_bridge (
+    .clk(clk_sys), .resetn(sys_resetn), .core_reset(core_reset || rv_cd_mode || rv_rom_pop),
+    .safe_to_hold(rom_rdy && !vid_ce && state_video_history[1:0] == 0),
+    .valid(state_mmio_valid), .address(state_mmio_address),
+    .write_data(state_mmio_wdata), .write_strobe(state_mmio_wstrb),
+    .ready(state_mmio_ready), .read_data(state_mmio_rdata),
+    .hold_core(state_hold), .state_write(state_write), .state_address(state_address),
+    .state_data(state_data), .state_q(state_q), .raw_base(state_raw_base)
+);
 wire        game_reset;
 wire        pad_mode;
 wire        cheat_apply;
@@ -382,6 +425,14 @@ iosys #(
     .refresh_gap_dbg  (refresh_gap_dbg),
 
     .rv_valid         (rv_valid),
+    .state_valid      (state_mmio_valid),
+    .state_address    (state_mmio_address),
+    .state_wdata      (state_mmio_wdata),
+    .state_wstrb      (state_mmio_wstrb),
+    .state_ready      (state_mmio_ready),
+    .state_rdata      (state_mmio_rdata),
+    .state_hold       (state_hold),
+    .state_raw_base   (state_raw_base),
     .rv_ready         (rv_ready),
     .rv_scheduler_dbg (rv_scheduler_dbg),
     .loader_host_dbg (loader_host_dbg),
@@ -512,7 +563,7 @@ pce_sdram_ctrl_3ch #(
     .clk           (clk_sys),
     .clk_mem       (clk_mem),
     .clk_sdram     (clk_sdram),
-    .clkref        (vid_ce),
+    .clkref        (state_hold ? state_memory_ref[2] : vid_ce),
     .refresh_window(vram_refresh_window),
     .resetn        (sys_resetn),
 
@@ -623,7 +674,7 @@ end
 
 wire core_reset = ~rst_cnt[16];
 // refresh may ignore the VDCs only while the core (and so both VDCs) is held in reset
-assign vram_refresh_window = core_reset;
+assign vram_refresh_window = core_reset || state_hold;
 
 // ===========================================================================
 // The console
@@ -665,6 +716,11 @@ pce_core #(
     .reset      (core_reset),
     .cold_reset (core_reset),
     .cpu_pause  (game_pause),
+    .ss_hold    (state_hold),
+    .ss_write   (state_write),
+    .ss_addr    (state_address),
+    .ss_data    (state_data),
+    .ss_q       (state_core_q),
     .cheat_apply (cheat_apply),
     .cheat_reset (cheat_reset),
     .cheat_code  (cheat_code),
@@ -689,13 +745,13 @@ pce_core #(
 
     .vram0_a    (vram0_a),
     .vram0_do   (vram0_do),
-    .vram0_di   (vram0_di),
+    .vram0_di   (state_memory_restored ? state_vram0_saved : vram0_di),
     .vram0_rd   (vram0_rd),
     .vram0_we   (vram0_we),
 
     .vram1_a    (vram1_a),
     .vram1_do   (vram1_do),
-    .vram1_di   (vram1_di),
+    .vram1_di   (state_memory_restored ? state_vram1_saved : vram1_di),
     .vram1_rd   (vram1_rd),
     .vram1_we   (vram1_we),
 

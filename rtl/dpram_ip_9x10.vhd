@@ -23,6 +23,15 @@ entity dpram_ip_9x10 is
 	PORT
 	(
 		clock			: in  STD_LOGIC;
+		ss_hold : in std_logic := '0';
+		ss_load : in std_logic := '0';
+		ss_data : in std_logic_vector(19 downto 0) := (others => '0');
+		ss_q : out std_logic_vector(19 downto 0) := (others => '0');
+		ss_mem_req : in std_logic := '0';
+		ss_mem_we : in std_logic := '0';
+		ss_mem_addr : in std_logic_vector(8 downto 0) := (others => '0');
+		ss_mem_di : in std_logic_vector(9 downto 0) := (others => '0');
+		ss_mem_q : out std_logic_vector(9 downto 0) := (others => '0');
 		address_a	: in  STD_LOGIC_VECTOR (8 DOWNTO 0);
 		data_a		: in  STD_LOGIC_VECTOR (9 DOWNTO 0) := (others => '0');
 		enable_a		: in  STD_LOGIC := '1';
@@ -63,28 +72,58 @@ architecture STRUCT of dpram_ip_9x10 is
 	end component;
 
 	signal douta_i, doutb_i : std_logic_vector(9 downto 0);
+	signal saved_a, saved_b, visible_a, visible_b : std_logic_vector(9 downto 0);
+	signal valid_a, valid_b, hold_previous : std_logic := '0';
+	signal addr_a : std_logic_vector(8 downto 0);
+	signal data_in : std_logic_vector(9 downto 0);
+	signal enable_port_a, enable_port_b, write_port_a : std_logic;
 
 begin
 
-	q_a <= douta_i when cs_a = '1' else (others => disable_value);
-	q_b <= doutb_i when cs_b = '1' else (others => disable_value);
+	visible_a <= saved_a when valid_a = '1' else douta_i;
+	visible_b <= saved_b when valid_b = '1' else doutb_i;
+	q_a <= visible_a when cs_a = '1' else (others => disable_value);
+	q_b <= visible_b when cs_b = '1' else (others => disable_value);
+	ss_q <= visible_b & visible_a;
+	ss_mem_q <= douta_i;
+	addr_a <= ss_mem_addr when ss_hold = '1' else address_a;
+	data_in <= ss_mem_di when ss_hold = '1' else data_a;
+	enable_port_a <= ss_mem_req when ss_hold = '1' else enable_a and cs_a;
+	enable_port_b <= enable_b and cs_b and not ss_hold;
+	write_port_a <= ss_mem_we when ss_hold = '1' else wren_a and cs_a;
+	process(clock)
+	begin
+		if rising_edge(clock) then
+			hold_previous <= ss_hold;
+			if ss_hold = '1' and ss_load = '1' then
+				saved_a <= ss_data(9 downto 0); saved_b <= ss_data(19 downto 10);
+				valid_a <= '1'; valid_b <= '1';
+			elsif ss_hold = '1' and hold_previous = '0' then
+				saved_a <= visible_a; saved_b <= visible_b;
+				valid_a <= '1'; valid_b <= '1';
+			elsif ss_hold = '0' then
+				if enable_port_a = '1' then valid_a <= '0'; end if;
+				if enable_port_b = '1' then valid_b <= '0'; end if;
+			end if;
+		end if;
+	end process;
 
 	u_dp : Gowin_DP_line
 	port map (
 		douta  => douta_i,
 		doutb  => doutb_i,
 		clka   => clock,
-		ocea   => enable_a,
-		cea    => enable_a and cs_a,
+		ocea   => enable_port_a,
+		cea    => enable_port_a,
 		reseta => '0',
-		wrea   => wren_a and cs_a,
+		wrea   => write_port_a,
 		clkb   => clock,
-		oceb   => enable_b,
-		ceb    => enable_b and cs_b,
+		oceb   => enable_port_b,
+		ceb    => enable_port_b,
 		resetb => '0',
 		wreb   => wren_b and cs_b,
-		ada    => address_a,
-		dina   => data_a,
+		ada    => addr_a,
+		dina   => data_in,
 		adb    => address_b,
 		dinb   => data_b
 	);

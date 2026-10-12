@@ -183,6 +183,14 @@ module iosys #(
 
     // ---- 32 bit SDRAM port for the softcore ------------------------------
     output wire        rv_valid,
+    output wire        state_valid,
+    output wire [1:0]  state_address,
+    output wire [31:0] state_wdata,
+    output wire [3:0] state_wstrb,
+    input wire         state_ready,
+    input wire [31:0]  state_rdata,
+    input wire         state_hold,
+    input wire [22:0]  state_raw_base,
     input  wire        rv_ready,
     output wire [22:0] rv_addr,
     output wire [31:0] rv_wdata,
@@ -404,6 +412,12 @@ wire cheat_ctrl_sel = mem_valid && (mem_addr == 32'h0200_00c0);
 wire cheat_addr_sel = mem_valid && (mem_addr == 32'h0200_00c4);
 wire cheat_value_sel= mem_valid && (mem_addr == 32'h0200_00c8);
 wire cheat_push_sel = mem_valid && (mem_addr == 32'h0200_00cc);
+wire state_sel = mem_valid && (mem_addr[31:4] == 28'h0200010);
+wire raw_state_sel = mem_valid && (mem_addr[31:17] == 15'h0180);
+assign state_valid = state_sel;
+assign state_address = mem_addr[3:2];
+assign state_wdata = mem_wdata;
+assign state_wstrb = mem_wstrb;
 
 wire [31:0] uart_div_do;
 wire [31:0] uart_dat_do;
@@ -478,6 +492,8 @@ localparam [22:0] VRAM_CLEAR_SPAN  = 23'h01_0000;
 wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
 assign mem_ready = (ram_sel && rv_ready && !probe_valid) || textdisp_sel ||
+                   (state_sel && state_ready) ||
+                   (raw_state_sel && (!state_hold || rv_ready)) ||
                    flash_ctrl_sel || flash_data_sel ||
                    (uart_div_sel && !diag_uart_owned) ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
@@ -498,6 +514,8 @@ assign mem_ready = (ram_sel && rv_ready && !probe_valid) || textdisp_sel ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
 
 assign mem_rdata = ram_sel      ? rv_rdata :
+                   state_sel ? state_rdata :
+                   raw_state_sel ? (state_hold ? rv_rdata : 32'd0) :
                    flash_ctrl_sel ? flash_pio_status :
                    flash_data_sel ? {24'd0, flash_pio_data} :
                    joy_sel      ? {20'b0, joy1} :
@@ -987,9 +1005,12 @@ end
 // ===========================================================================
 // SDRAM port multiplexing: flash loader first, then the softcore
 // ===========================================================================
-assign rv_valid = flash_loading ? flash_wr : probe_valid ? 1'b1 : (mem_valid & ram_sel);
+assign rv_valid = flash_loading ? flash_wr : probe_valid ? 1'b1 :
+                                    ((mem_valid & ram_sel) || (raw_state_sel && state_hold));
 assign rv_addr  = flash_loading ? (RV_BASE | {2'b00, flash_wr_addr})
-                                : probe_valid ? probe_addr : (RV_BASE | {2'b00, mem_addr[20:0]});
+                                                                : probe_valid ? probe_addr :
+                                                                    raw_state_sel ? (state_raw_base + {6'd0, mem_addr[16:0]}) :
+                                                                    (RV_BASE | {2'b00, mem_addr[20:0]});
 assign rv_wdata = flash_loading ? {flash_d, flash_d, flash_d, flash_d} : mem_wdata;
 assign rv_wstrb = flash_loading ? flash_wstrb : probe_valid ? 4'd0 : mem_wstrb;
 

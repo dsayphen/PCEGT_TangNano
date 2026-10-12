@@ -17,6 +17,16 @@ entity HUC6270 is
 		CLK		: in std_logic;
 		RST_N		: in std_logic;
 		CLR_MEM	: in std_logic;
+        SS_HOLD : in std_logic := '0';
+        SS_LOAD : in std_logic := '0';
+        SS_DATA : in std_logic_vector(8191 downto 0) := (others => '0');
+        SS_Q : out std_logic_vector(8191 downto 0) := (others => '0');
+		SS_MEM_REQ : in std_logic := '0';
+		SS_MEM_WE : in std_logic := '0';
+		SS_MEM_SELECT : in std_logic_vector(1 downto 0) := (others => '0');
+		SS_MEM_ADDR : in std_logic_vector(8 downto 0) := (others => '0');
+		SS_MEM_DI : in std_logic_vector(15 downto 0) := (others => '0');
+		SS_MEM_Q : out std_logic_vector(15 downto 0) := (others => '0');
 		  
 		CPU_CE	: in std_logic;
 		A			: in std_logic_vector(1 downto 0);
@@ -318,7 +328,193 @@ architecture rtl of HUC6270 is
 --	attribute syn_ramstyle of SPR_LINE_BUF1 : label is "distributed_ram";
 
 
+signal sat_state : std_logic_vector(31 downto 0);
+signal line_state0, line_state1 : std_logic_vector(19 downto 0);
+signal sat_host_req, line_host_req0, line_host_req1 : std_logic;
+signal sat_host_q : std_logic_vector(15 downto 0);
+signal line_host_q0, line_host_q1 : std_logic_vector(9 downto 0);
+signal ss_fetch_cnt : std_logic_vector(1 downto 0) := (others => '0');
+signal ss_RC_CNT_UPDATED : std_logic_vector(0 downto 0) := (others => '0');
+signal ss_SPR_TILE_PIX : std_logic_vector(3 downto 0) := (others => '0');
+signal ss_RENDER_STATE : std_logic_vector(1 downto 0) := (others => '0');
 begin
+SS_Q(0 + 4 downto 0) <= AR;
+SS_Q(5) <= BB;
+SS_Q(6 + 11 downto 6) <= BG_BAT_CC;
+SS_Q(18 + 3 downto 18) <= BG_BAT_COL;
+SS_Q(22 + 7 downto 22) <= BG_CH0;
+SS_Q(30 + 7 downto 30) <= BG_CH1;
+ss_BG_COLOR_map : for state_index in 0 to 7 generate
+SS_Q((38 + state_index * 8) + 7 downto (38 + state_index * 8)) <= BG_COLOR(state_index);
+end generate;
+SS_Q(102) <= BG_FETCH;
+SS_Q(103) <= BG_OUT;
+SS_Q(104 + 9 downto 104) <= std_logic_vector(BG_OUT_X);
+SS_Q(114 + 15 downto 114) <= BG_SR0;
+SS_Q(130 + 15 downto 130) <= BG_SR1;
+SS_Q(146 + 15 downto 146) <= BG_SR2;
+SS_Q(162 + 15 downto 162) <= BG_SR3;
+ss_BG_SRC_map : for state_index in 0 to 1 generate
+SS_Q((178 + state_index * 4) + 3 downto (178 + state_index * 4)) <= BG_SRC(state_index);
+end generate;
+SS_Q(186 + 9 downto 186) <= std_logic_vector(BG_X);
+SS_Q(196) <= BG_X_SKIP;
+SS_Q(197 + 7 downto 197) <= BORD;
+SS_Q(205) <= BURST;
+SS_Q(206) <= BYRH_SET;
+SS_Q(207) <= BYRL_SET;
+SS_Q(208) <= CAP_CE;
+SS_Q(209) <= CM;
+SS_Q(210) <= CPU_BUSY;
+SS_Q(211) <= CPU_BUSY_CLEAR;
+SS_Q(212 + 15 downto 212) <= CPU_VRAM_ADDR;
+SS_Q(228 + 15 downto 228) <= CPU_VRAM_DATA;
+SS_Q(244) <= CPURD_EXEC;
+SS_Q(245) <= CPURD_PEND;
+SS_Q(246) <= CPURD_PEND2;
+SS_Q(247) <= CPUWR_EXEC;
+SS_Q(248) <= CPUWR_PEND;
+SS_Q(249) <= CPUWR_PEND2;
+SS_Q(250) <= DCK_CE_D1;
+SS_Q(251 + 7 downto 251) <= DISP;
+SS_Q(259) <= DISP_BREAK_EN;
+SS_Q(260) <= DISP_BREAK_LATCH;
+SS_Q(261 + 9 downto 261) <= std_logic_vector(DISP_CNT);
+SS_Q(271) <= DISP_CNT_INC;
+SS_Q(272 + 15 downto 272) <= DMA_BUF;
+SS_Q(288) <= DMA_EXEC;
+SS_Q(289) <= DMA_PEND;
+SS_Q(290) <= DMA_WR;
+SS_Q(291) <= DMAS_EXEC;
+SS_Q(292) <= DMAS_PEND;
+SS_Q(293 + 7 downto 293) <= DMAS_SAT_ADDR;
+SS_Q(301 + 15 downto 301) <= DMAS_VRAM_ADDR;
+SS_Q(317 + 2 downto 317) <= std_logic_vector(DOT_CNT);
+SS_Q(320 + 2 downto 320) <= std_logic_vector(DOTS_REMAIN);
+SS_Q(323) <= FETCH_CE;
+SS_Q(324 + 2 downto 324) <= std_logic_vector(FETCH_DOT);
+SS_Q(327 + 7 downto 327) <= GRID_BG;
+SS_Q(335 + 7 downto 335) <= GRID_SP;
+SS_Q(343 + 6 downto 343) <= HDE;
+SS_Q(350 + 6 downto 350) <= HDS;
+SS_Q(357 + 6 downto 357) <= HDW;
+SS_Q(364 + 4 downto 364) <= HSW;
+SS_Q(369) <= IO_BYRH_SET;
+SS_Q(370) <= IO_BYRL_SET;
+SS_Q(371) <= IRQ_COL;
+SS_Q(372) <= IRQ_DMA;
+SS_Q(373) <= IRQ_DMAS;
+SS_Q(374) <= IRQ_OVF;
+SS_Q(375) <= IRQ_RCR;
+SS_Q(376) <= IRQ_VBL;
+SS_Q(377 + 9 downto 377) <= std_logic_vector(OFS_X);
+SS_Q(387 + 8 downto 387) <= std_logic_vector(OFS_Y);
+SS_Q(396 + 9 downto 396) <= std_logic_vector(RC_CNT);
+SS_Q(406) <= RD_N_OLD;
+ss_REGS_map : for state_index in 0 to 31 generate
+SS_Q((407 + state_index * 16) + 15 downto (407 + state_index * 16)) <= REGS(state_index);
+end generate;
+SS_Q(919 downto 919) <= RES7M;
+SS_Q(920) <= SB;
+SS_Q(921 + 2 downto 921) <= SCREEN;
+SS_Q(924 + 3 downto 924) <= std_logic_vector(to_unsigned(slot_t'pos(SLOT_Q), 4));
+SS_Q(928 + 1 downto 928) <= SM;
+ss_SPR_CACHE_map : for state_index in 0 to MAX_SPRITES-1 generate
+SS_Q(((930 + state_index * 45) + 0) + 9 downto ((930 + state_index * 45) + 0)) <= SPR_CACHE(state_index).X;
+SS_Q(((930 + state_index * 45) + 10) + 9 downto ((930 + state_index * 45) + 10)) <= SPR_CACHE(state_index).Y;
+SS_Q(((930 + state_index * 45) + 20) + 10 downto ((930 + state_index * 45) + 20)) <= SPR_CACHE(state_index).PC;
+SS_Q(((930 + state_index * 45) + 31)) <= SPR_CACHE(state_index).CG;
+SS_Q(((930 + state_index * 45) + 32) + 3 downto ((930 + state_index * 45) + 32)) <= SPR_CACHE(state_index).PAL;
+SS_Q(((930 + state_index * 45) + 36)) <= SPR_CACHE(state_index).PRIO;
+SS_Q(((930 + state_index * 45) + 37)) <= SPR_CACHE(state_index).CGX;
+SS_Q(((930 + state_index * 45) + 38) + 1 downto ((930 + state_index * 45) + 38)) <= SPR_CACHE(state_index).CGY;
+SS_Q(((930 + state_index * 45) + 40)) <= SPR_CACHE(state_index).HF;
+SS_Q(((930 + state_index * 45) + 41)) <= SPR_CACHE(state_index).VF;
+SS_Q(((930 + state_index * 45) + 42)) <= SPR_CACHE(state_index).SPR0;
+SS_Q(((930 + state_index * 45) + 43)) <= SPR_CACHE(state_index).TOP;
+SS_Q(((930 + state_index * 45) + 44)) <= SPR_CACHE(state_index).BOTTOM;
+end generate;
+ss_unused_cache : for state_index in MAX_SPRITES to 63 generate
+	SS_Q(930 + state_index*45 + 44 downto 930 + state_index*45) <= (others => '0');
+end generate;
+SS_Q(3810) <= SPR_CG;
+SS_Q(3811 + 15 downto 3811) <= SPR_CH0;
+SS_Q(3827 + 15 downto 3827) <= SPR_CH1;
+SS_Q(3843 + 15 downto 3843) <= SPR_CH2;
+ss_SPR_COLOR_map : for state_index in 0 to 7 generate
+SS_Q((3859 + state_index * 9) + 8 downto (3859 + state_index * 9)) <= SPR_COLOR(state_index);
+end generate;
+SS_Q(3931) <= SPR_EVAL;
+SS_Q(3932 + 6 downto 3932) <= std_logic_vector(SPR_EVAL_CNT);
+SS_Q(3939) <= SPR_EVAL_DONE;
+SS_Q(3940) <= SPR_EVAL_FULL;
+SS_Q(3941 + 7 downto 3941) <= std_logic_vector(SPR_EVAL_X);
+SS_Q(3949) <= SPR_FETCH;
+SS_Q(3950 + 6 downto 3950) <= std_logic_vector(SPR_FETCH_CNT);
+SS_Q(3957) <= SPR_FETCH_DONE;
+SS_Q(3958) <= SPR_FETCH_EN;
+SS_Q(3959) <= SPR_FETCH_W;
+SS_Q(3960) <= SPR_FIND;
+SS_Q(3961) <= SPR_LINE_CLR;
+ss_SPR_LINE_D_map : for state_index in 0 to 1 generate
+SS_Q((3962 + state_index * 10) + 9 downto (3962 + state_index * 10)) <= SPR_LINE_D(state_index);
+end generate;
+ss_SPR_LINE_RENDER_ADDR_map : for state_index in 0 to 1 generate
+SS_Q((3982 + state_index * 9) + 8 downto (3982 + state_index * 9)) <= SPR_LINE_RENDER_ADDR(state_index);
+end generate;
+SS_Q(4000 + 1 downto 4000) <= SPR_LINE_WE;
+ss_SPR_LINE_WR_ADDR_map : for state_index in 0 to 1 generate
+SS_Q((4002 + state_index * 9) + 8 downto (4002 + state_index * 9)) <= SPR_LINE_WR_ADDR(state_index);
+end generate;
+SS_Q(4020 + 9 downto 4020) <= std_logic_vector(SPR_OUT_X);
+SS_Q(4030 + 10 downto 4030) <= SPR_PC;
+SS_Q(4041) <= SPR_TILE_BOTTOM;
+SS_Q(4042 + 559 downto 4042) <= SPR_TILE_FRAME;
+SS_Q(4602) <= SPR_TILE_HF;
+SS_Q(4603) <= SPR_TILE_LEFT;
+SS_Q(4604 + 15 downto 4604) <= SPR_TILE_P0;
+SS_Q(4620 + 15 downto 4620) <= SPR_TILE_P1;
+SS_Q(4636 + 15 downto 4636) <= SPR_TILE_P2;
+SS_Q(4652 + 15 downto 4652) <= SPR_TILE_P3;
+SS_Q(4668 + 3 downto 4668) <= SPR_TILE_PAL;
+SS_Q(4672) <= SPR_TILE_PRIO;
+SS_Q(4673) <= SPR_TILE_RIGTH;
+SS_Q(4674) <= SPR_TILE_SAVE;
+SS_Q(4675) <= SPR_TILE_SPR0;
+SS_Q(4676) <= SPR_TILE_TOP;
+SS_Q(4677 + 9 downto 4677) <= std_logic_vector(SPR_TILE_X);
+SS_Q(4687 + 9 downto 4687) <= SPR_X;
+SS_Q(4697 + 9 downto 4697) <= SPR_Y;
+SS_Q(4707 + 6 downto 4707) <= SR_LATCH;
+SS_Q(4714 + 6 downto 4714) <= std_logic_vector(TILE_CNT);
+SS_Q(4721) <= TILE_ZERO;
+SS_Q(4722 + 7 downto 4722) <= VDE;
+SS_Q(4730) <= VDISP;
+SS_Q(4731) <= VDISP_OLD;
+SS_Q(4732 + 7 downto 4732) <= VDS;
+SS_Q(4740 + 8 downto 4740) <= VDW;
+SS_Q(4749 + 1 downto 4749) <= VM;
+SS_Q(4751 + 15 downto 4751) <= VRR;
+SS_Q(4767 + 4 downto 4767) <= VSW;
+SS_Q(4773 downto 4772) <= ss_fetch_cnt;
+SS_Q(4774 downto 4774) <= ss_RC_CNT_UPDATED;
+SS_Q(4778 downto 4775) <= ss_SPR_TILE_PIX;
+SS_Q(4780 downto 4779) <= ss_RENDER_STATE;
+SS_Q(7903 downto 4781) <= (others => '0');
+SS_Q(7911 downto 7904) <= std_logic_vector(CLR_A);
+SS_Q(7912) <= CLR_WE;
+SS_Q(7935 downto 7913) <= (others => '0');
+SS_Q(7967 downto 7936) <= sat_state;
+SS_Q(7987 downto 7968) <= line_state0;
+SS_Q(8007 downto 7988) <= line_state1;
+SS_Q(8191 downto 8008) <= (others => '0');
+sat_host_req <= SS_MEM_REQ when SS_MEM_SELECT = "00" else '0';
+line_host_req0 <= SS_MEM_REQ when SS_MEM_SELECT = "01" else '0';
+line_host_req1 <= SS_MEM_REQ when SS_MEM_SELECT = "10" else '0';
+SS_MEM_Q <= sat_host_q when SS_MEM_SELECT = "00" else
+			"000000" & line_host_q0 when SS_MEM_SELECT = "01" else
+			"000000" & line_host_q1 when SS_MEM_SELECT = "10" else (others => '0');
+
 
 	process(CLK, RST_N)
 	variable fetch_cnt: integer range 0 to 2;
@@ -335,6 +531,22 @@ begin
 			fetch_cnt := 0;
 			RES7M <= "0";
 		elsif rising_edge(CLK) then
+if SS_HOLD = '1' and SS_LOAD = '1' then
+CM <= SS_DATA(209);
+DOT_CNT <= unsigned(SS_DATA(317 + 2 downto 317));
+DOTS_REMAIN <= unsigned(SS_DATA(320 + 2 downto 320));
+FETCH_CE <= SS_DATA(323);
+FETCH_DOT <= unsigned(SS_DATA(324 + 2 downto 324));
+HDE <= SS_DATA(343 + 6 downto 343);
+HDS <= SS_DATA(350 + 6 downto 350);
+HDW <= SS_DATA(357 + 6 downto 357);
+HSW <= SS_DATA(364 + 4 downto 364);
+RES7M <= SS_DATA(919 downto 919);
+TILE_CNT <= unsigned(SS_DATA(4714 + 6 downto 4714));
+TILE_ZERO <= SS_DATA(4721);
+fetch_cnt := to_integer(unsigned(SS_DATA(4773 downto 4772)));
+elsif SS_HOLD = '0' then
+
 
 			if fetch_cnt = 2 then
 				fetch_cnt := 0;
@@ -386,7 +598,10 @@ begin
 			
 			if DCK_CE = '0' and HSYNC_F = '1' then
 				RES7M <= "1";
-			end if; 
+			end if;
+end if;
+ss_fetch_cnt <= std_logic_vector(to_unsigned(fetch_cnt, 2));
+
 		end if;
 	end process;
 	
@@ -428,6 +643,28 @@ begin
 			BB <= '0';
 			SB <= '0';
 		elsif rising_edge(CLK) then
+if SS_HOLD = '1' and SS_LOAD = '1' then
+BB <= SS_DATA(5);
+BG_FETCH <= SS_DATA(102);
+BG_OUT <= SS_DATA(103);
+BURST <= SS_DATA(205);
+DISP_BREAK_EN <= SS_DATA(259);
+DISP_BREAK_LATCH <= SS_DATA(260);
+DISP_CNT <= unsigned(SS_DATA(261 + 9 downto 261));
+DISP_CNT_INC <= SS_DATA(271);
+RC_CNT <= unsigned(SS_DATA(396 + 9 downto 396));
+SB <= SS_DATA(920);
+SCREEN <= SS_DATA(921 + 2 downto 921);
+SM <= SS_DATA(928 + 1 downto 928);
+VDE <= SS_DATA(4722 + 7 downto 4722);
+VDISP <= SS_DATA(4730);
+VDS <= SS_DATA(4732 + 7 downto 4732);
+VDW <= SS_DATA(4740 + 8 downto 4740);
+VM <= SS_DATA(4749 + 1 downto 4749);
+VSW <= SS_DATA(4767 + 4 downto 4767);
+RC_CNT_UPDATED := SS_DATA(4774);
+elsif SS_HOLD = '0' then
+
 			if DCK_CE = '1' then
 				if VSYNC_F = '1' then
 					VDISP <= '0';
@@ -509,7 +746,10 @@ begin
 					BB <= CR_BB;
 					SB <= CR_SB;
 				end if;
-			end if; 
+			end if;
+end if;
+ss_RC_CNT_UPDATED <= (0 => RC_CNT_UPDATED);
+
 		end if;
 	end process;
 	
@@ -673,6 +913,12 @@ begin
 process(CLK)
 begin
 	if rising_edge(CLK) then
+if SS_HOLD = '1' and SS_LOAD = '1' then
+CAP_CE <= SS_DATA(208);
+DCK_CE_D1 <= SS_DATA(250);
+SLOT_Q <= slot_t'val(to_integer(unsigned(SS_DATA(924 + 3 downto 924))));
+elsif SS_HOLD = '0' then
+
 		DCK_CE_D1 <= DCK_CE;
 		if VRAM_FAST /= 0 then
 			CAP_CE <= DCK_CE;        -- haut 1 CLK après le front DCK_CE (BSRAM)
@@ -682,6 +928,8 @@ begin
 		if DCK_CE = '1' then
 			SLOT_Q <= SLOT;           -- slot qui vient de se terminer
 		end if;
+end if;
+
 	end if;
 end process;
 
@@ -727,6 +975,24 @@ end process;
 			BG_SR3 <= (others=>'0');
 			BG_SRC <= (others=>(others=>'0'));
 		elsif rising_edge(CLK) then
+if SS_HOLD = '1' and SS_LOAD = '1' then
+BG_BAT_CC <= SS_DATA(6 + 11 downto 6);
+BG_BAT_COL <= SS_DATA(18 + 3 downto 18);
+BG_CH0 <= SS_DATA(22 + 7 downto 22);
+BG_CH1 <= SS_DATA(30 + 7 downto 30);
+BG_SR0 <= SS_DATA(114 + 15 downto 114);
+BG_SR1 <= SS_DATA(130 + 15 downto 130);
+BG_SR2 <= SS_DATA(146 + 15 downto 146);
+BG_SR3 <= SS_DATA(162 + 15 downto 162);
+for state_index in 0 to 1 loop
+BG_SRC(state_index) <= SS_DATA((178 + state_index * 4) + 3 downto (178 + state_index * 4));
+end loop;
+BG_X <= unsigned(SS_DATA(186 + 9 downto 186));
+BG_X_SKIP <= SS_DATA(196);
+OFS_X <= unsigned(SS_DATA(377 + 9 downto 377));
+OFS_Y <= unsigned(SS_DATA(387 + 8 downto 387));
+elsif SS_HOLD = '0' then
+
 
 			-- Capture différée : la SDRAM répond ~5 CLK après l'adresse
 			if CAP_CE = '1' then
@@ -787,6 +1053,8 @@ end process;
 					OFS_X <= unsigned(BXR);
 				end if;
 			end if;
+end if;
+
 		end if;
 	end process;
 	
@@ -809,6 +1077,15 @@ end process;
 SAT : entity work.dpram_ip_8x16
 port map(
 	clock		=> CLK,
+	ss_hold => SS_HOLD,
+	ss_load => SS_LOAD,
+	ss_data => SS_DATA(7967 downto 7936),
+	ss_q => sat_state,
+	ss_mem_req => sat_host_req,
+	ss_mem_we => SS_MEM_WE,
+	ss_mem_addr => SS_MEM_ADDR(7 downto 0),
+	ss_mem_di => SS_MEM_DI,
+	ss_mem_q => sat_host_q,
 	data_a	=> RAM_DI,
 	address_a=> DMAS_SAT_ADDR,
 	wren_a	=> DMAS_SAT_WE,
@@ -818,8 +1095,18 @@ port map(
 	q_b		=> SAT_Q
 );
 
-	CLR_A  <= CLR_A + 1 when rising_edge(CLK);
-	CLR_WE <= CLR_MEM   when rising_edge(CLK);
+	process(CLK)
+begin
+    if rising_edge(CLK) then
+        if SS_HOLD = '1' and SS_LOAD = '1' then
+            CLR_A <= unsigned(SS_DATA(7911 downto 7904));
+            CLR_WE <= SS_DATA(7912);
+        elsif SS_HOLD = '0' then
+            CLR_A <= CLR_A + 1;
+            CLR_WE <= CLR_MEM;
+        end if;
+    end if;
+end process;
 
 	SPR <= SPR_CACHE(to_integer(SPR_FETCH_CNT(5 downto 0)));
 	process(CLK, RST_N, SLOT, RC_CNT, SPR, SPR_FETCH_W)
@@ -886,6 +1173,57 @@ port map(
 			SPR_TILE_SAVE <= '0';
 			IRQ_OVF <= '0';
 		elsif rising_edge(CLK) then
+if SS_HOLD = '1' and SS_LOAD = '1' then
+IRQ_OVF <= SS_DATA(374);
+for state_index in 0 to MAX_SPRITES-1 loop
+SPR_CACHE(state_index).X <= SS_DATA(((930 + state_index * 45) + 0) + 9 downto ((930 + state_index * 45) + 0));
+SPR_CACHE(state_index).Y <= SS_DATA(((930 + state_index * 45) + 10) + 9 downto ((930 + state_index * 45) + 10));
+SPR_CACHE(state_index).PC <= SS_DATA(((930 + state_index * 45) + 20) + 10 downto ((930 + state_index * 45) + 20));
+SPR_CACHE(state_index).CG <= SS_DATA(((930 + state_index * 45) + 31));
+SPR_CACHE(state_index).PAL <= SS_DATA(((930 + state_index * 45) + 32) + 3 downto ((930 + state_index * 45) + 32));
+SPR_CACHE(state_index).PRIO <= SS_DATA(((930 + state_index * 45) + 36));
+SPR_CACHE(state_index).CGX <= SS_DATA(((930 + state_index * 45) + 37));
+SPR_CACHE(state_index).CGY <= SS_DATA(((930 + state_index * 45) + 38) + 1 downto ((930 + state_index * 45) + 38));
+SPR_CACHE(state_index).HF <= SS_DATA(((930 + state_index * 45) + 40));
+SPR_CACHE(state_index).VF <= SS_DATA(((930 + state_index * 45) + 41));
+SPR_CACHE(state_index).SPR0 <= SS_DATA(((930 + state_index * 45) + 42));
+SPR_CACHE(state_index).TOP <= SS_DATA(((930 + state_index * 45) + 43));
+SPR_CACHE(state_index).BOTTOM <= SS_DATA(((930 + state_index * 45) + 44));
+end loop;
+SPR_CG <= SS_DATA(3810);
+SPR_CH0 <= SS_DATA(3811 + 15 downto 3811);
+SPR_CH1 <= SS_DATA(3827 + 15 downto 3827);
+SPR_CH2 <= SS_DATA(3843 + 15 downto 3843);
+SPR_EVAL <= SS_DATA(3931);
+SPR_EVAL_CNT <= unsigned(SS_DATA(3932 + 6 downto 3932));
+SPR_EVAL_DONE <= SS_DATA(3939);
+SPR_EVAL_FULL <= SS_DATA(3940);
+SPR_EVAL_X <= unsigned(SS_DATA(3941 + 7 downto 3941));
+SPR_FETCH <= SS_DATA(3949);
+SPR_FETCH_CNT <= unsigned(SS_DATA(3950 + 6 downto 3950));
+SPR_FETCH_DONE <= SS_DATA(3957);
+SPR_FETCH_EN <= SS_DATA(3958);
+SPR_FETCH_W <= SS_DATA(3959);
+SPR_FIND <= SS_DATA(3960);
+SPR_PC <= SS_DATA(4030 + 10 downto 4030);
+SPR_TILE_BOTTOM <= SS_DATA(4041);
+SPR_TILE_HF <= SS_DATA(4602);
+SPR_TILE_LEFT <= SS_DATA(4603);
+SPR_TILE_P0 <= SS_DATA(4604 + 15 downto 4604);
+SPR_TILE_P1 <= SS_DATA(4620 + 15 downto 4620);
+SPR_TILE_P2 <= SS_DATA(4636 + 15 downto 4636);
+SPR_TILE_P3 <= SS_DATA(4652 + 15 downto 4652);
+SPR_TILE_PAL <= SS_DATA(4668 + 3 downto 4668);
+SPR_TILE_PRIO <= SS_DATA(4672);
+SPR_TILE_RIGTH <= SS_DATA(4673);
+SPR_TILE_SAVE <= SS_DATA(4674);
+SPR_TILE_SPR0 <= SS_DATA(4675);
+SPR_TILE_TOP <= SS_DATA(4676);
+SPR_TILE_X <= unsigned(SS_DATA(4677 + 9 downto 4677));
+SPR_X <= SS_DATA(4687 + 9 downto 4687);
+SPR_Y <= SS_DATA(4697 + 9 downto 4697);
+elsif SS_HOLD = '0' then
+
 			SPR_TILE_SAVE <= '0';
 			if DCK_CE = '1' then
 				if TILE_CNT = HDS_END_POS and DOT_CNT = 3 and DISP_CNT >= VDS_END_POS and DISP_CNT < VDISP_END_POS then
@@ -1037,7 +1375,9 @@ port map(
 			
 			if A = "00" and CS_N = '0' and RD_N = '0' and CPU_CE = '1' then
 				IRQ_OVF <= '0';						
-			end if; 
+			end if;
+end if;
+
 		end if;
 	end process;
 	
@@ -1057,6 +1397,25 @@ port map(
 			IRQ_COL <= '0';
 			RENDER_STATE := 0;
 		elsif rising_edge(CLK) then
+if SS_HOLD = '1' and SS_LOAD = '1' then
+IRQ_COL <= SS_DATA(371);
+SPR_LINE_CLR <= SS_DATA(3961);
+for state_index in 0 to 1 loop
+SPR_LINE_D(state_index) <= SS_DATA((3962 + state_index * 10) + 9 downto (3962 + state_index * 10));
+end loop;
+for state_index in 0 to 1 loop
+SPR_LINE_RENDER_ADDR(state_index) <= SS_DATA((3982 + state_index * 9) + 8 downto (3982 + state_index * 9));
+end loop;
+SPR_LINE_WE <= SS_DATA(4000 + 1 downto 4000);
+for state_index in 0 to 1 loop
+SPR_LINE_WR_ADDR(state_index) <= SS_DATA((4002 + state_index * 9) + 8 downto (4002 + state_index * 9));
+end loop;
+SPR_OUT_X <= unsigned(SS_DATA(4020 + 9 downto 4020));
+SPR_TILE_FRAME <= SS_DATA(4042 + 559 downto 4042);
+SPR_TILE_PIX := unsigned(SS_DATA(4778 downto 4775));
+RENDER_STATE := to_integer(unsigned(SS_DATA(4780 downto 4779)));
+elsif SS_HOLD = '0' then
+
 			SPR_LINE_WE <= (others=>'0');
 			case RENDER_STATE is
 				when 0 => -- line buffer address setup
@@ -1121,7 +1480,11 @@ port map(
 
 			if A = "00" and CS_N = '0' and RD_N = '0' and CPU_CE = '1' then
 				IRQ_COL <= '0';
-			end if; 
+			end if;
+end if;
+ss_SPR_TILE_PIX <= std_logic_vector(SPR_TILE_PIX);
+ss_RENDER_STATE <= std_logic_vector(to_unsigned(RENDER_STATE, 2));
+
 		end if;
 	end process;
 
@@ -1157,6 +1520,11 @@ port map(
     SPR_LINE_BUF0 : entity work.dpram_ip_9x10
     port map(
         clock		=> CLK,
+		ss_hold => SS_HOLD, ss_load => SS_LOAD,
+		ss_data => SS_DATA(7987 downto 7968), ss_q => line_state0,
+		ss_mem_req => line_host_req0, ss_mem_we => SS_MEM_WE,
+		ss_mem_addr => SS_MEM_ADDR, ss_mem_di => SS_MEM_DI(9 downto 0),
+		ss_mem_q => line_host_q0,
         address_a=> SPR_LINE_WR_ADDR(0),
         data_a	=> SPR_LINE_D(0),
         wren_a	=> SPR_LINE_WE(0),
@@ -1168,6 +1536,11 @@ port map(
     SPR_LINE_BUF1 : entity work.dpram_ip_9x10
     port map(
         clock		=> CLK,
+		ss_hold => SS_HOLD, ss_load => SS_LOAD,
+		ss_data => SS_DATA(8007 downto 7988), ss_q => line_state1,
+		ss_mem_req => line_host_req1, ss_mem_we => SS_MEM_WE,
+		ss_mem_addr => SS_MEM_ADDR, ss_mem_di => SS_MEM_DI(9 downto 0),
+		ss_mem_q => line_host_q1,
         address_a=> SPR_LINE_WR_ADDR(1),
         data_a	=> SPR_LINE_D(1),
         wren_a	=> SPR_LINE_WE(1),
@@ -1189,6 +1562,20 @@ port map(
 			GRID_BG <= (others=>'0');
 			GRID_SP <= (others=>'0');
 		elsif rising_edge(CLK) then
+if SS_HOLD = '1' and SS_LOAD = '1' then
+for state_index in 0 to 7 loop
+BG_COLOR(state_index) <= SS_DATA((38 + state_index * 8) + 7 downto (38 + state_index * 8));
+end loop;
+BG_OUT_X <= unsigned(SS_DATA(104 + 9 downto 104));
+BORD <= SS_DATA(197 + 7 downto 197);
+DISP <= SS_DATA(251 + 7 downto 251);
+GRID_BG <= SS_DATA(327 + 7 downto 327);
+GRID_SP <= SS_DATA(335 + 7 downto 335);
+for state_index in 0 to 7 loop
+SPR_COLOR(state_index) <= SS_DATA((3859 + state_index * 9) + 8 downto (3859 + state_index * 9));
+end loop;
+elsif SS_HOLD = '0' then
+
 			if DCK_CE = '1' then
 				BG_COLOR(7) <= (others=>'0');
 				SPR_COLOR(7) <= (others=>'0');
@@ -1230,7 +1617,9 @@ port map(
 					GRID_BG(i) <= GRID_BG(i+1);
 					GRID_SP(i) <= GRID_SP(i+1);
 				end loop;
-			end if; 
+			end if;
+end if;
+
 		end if;
 	end process;
 
@@ -1285,6 +1674,41 @@ port map(
 			BYRH_SET <= '0';
 			VDISP_OLD <= '0';
 		elsif rising_edge(CLK) then
+if SS_HOLD = '1' and SS_LOAD = '1' then
+AR <= SS_DATA(0 + 4 downto 0);
+BYRH_SET <= SS_DATA(206);
+BYRL_SET <= SS_DATA(207);
+CPU_BUSY <= SS_DATA(210);
+CPU_BUSY_CLEAR <= SS_DATA(211);
+CPU_VRAM_ADDR <= SS_DATA(212 + 15 downto 212);
+CPU_VRAM_DATA <= SS_DATA(228 + 15 downto 228);
+CPURD_EXEC <= SS_DATA(244);
+CPURD_PEND <= SS_DATA(245);
+CPURD_PEND2 <= SS_DATA(246);
+CPUWR_EXEC <= SS_DATA(247);
+CPUWR_PEND <= SS_DATA(248);
+CPUWR_PEND2 <= SS_DATA(249);
+DMA_BUF <= SS_DATA(272 + 15 downto 272);
+DMA_EXEC <= SS_DATA(288);
+DMA_PEND <= SS_DATA(289);
+DMA_WR <= SS_DATA(290);
+DMAS_EXEC <= SS_DATA(291);
+DMAS_PEND <= SS_DATA(292);
+DMAS_SAT_ADDR <= SS_DATA(293 + 7 downto 293);
+DMAS_VRAM_ADDR <= SS_DATA(301 + 15 downto 301);
+IO_BYRH_SET <= SS_DATA(369);
+IO_BYRL_SET <= SS_DATA(370);
+IRQ_DMA <= SS_DATA(372);
+IRQ_DMAS <= SS_DATA(373);
+IRQ_RCR <= SS_DATA(375);
+IRQ_VBL <= SS_DATA(376);
+for state_index in 0 to 31 loop
+REGS(state_index) <= SS_DATA((407 + state_index * 16) + 15 downto (407 + state_index * 16));
+end loop;
+VDISP_OLD <= SS_DATA(4731);
+VRR <= SS_DATA(4751 + 15 downto 4751);
+elsif SS_HOLD = '0' then
+
 			if CS_N = '0' and WR_N = '0' and CPU_CE = '1' then
 				case A is
 					when "00" =>
@@ -1489,6 +1913,8 @@ port map(
 					BYRH_SET <= '0';
 				end if; 
 			end if;
+end if;
+
 		end if;
 	end process;
 	
@@ -1498,10 +1924,17 @@ port map(
 			SR_LATCH <= (others=>'0');
 			RD_N_OLD <= '1';
 		elsif rising_edge(CLK) then
+if SS_HOLD = '1' and SS_LOAD = '1' then
+RD_N_OLD <= SS_DATA(406);
+SR_LATCH <= SS_DATA(4707 + 6 downto 4707);
+elsif SS_HOLD = '0' then
+
 			RD_N_OLD <= RD_N;
 			if RD_N = '0' and RD_N_OLD = '1' then
 				SR_LATCH <= CPU_BUSY & IRQ_VBL & IRQ_DMA & IRQ_DMAS & IRQ_RCR & IRQ_OVF & IRQ_COL;
 			end if;
+end if;
+
 		end if;
 	end process;
 

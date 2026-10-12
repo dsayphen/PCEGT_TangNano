@@ -33,6 +33,11 @@ entity pce_core is
 		reset      : in  std_logic;
 		cold_reset : in  std_logic;
 		cpu_pause  : in  std_logic;
+		ss_hold : in std_logic := '0';
+		ss_write : in std_logic := '0';
+		ss_addr : in std_logic_vector(19 downto 0) := (others => '0');
+		ss_data : in std_logic_vector(31 downto 0) := (others => '0');
+		ss_q : out std_logic_vector(31 downto 0) := (others => '0');
 		cheat_apply : in std_logic;
 		cheat_reset : in std_logic;
 		cheat_code : in std_logic_vector(128 downto 0);
@@ -172,6 +177,10 @@ architecture rtl of pce_core is
 	signal adpcm_mix : signed(15 downto 0);
 	signal adram_we_core : std_logic;
 	signal adram_rd_core : std_logic;
+	signal ss_core_q : std_logic_vector(31 downto 0);
+	signal ss_brm_state : std_logic_vector(15 downto 0);
+	signal ss_brm_read : std_logic_vector(7 downto 0);
+	signal ss_brm_load, ss_brm_req : std_logic;
 
 	function saturate_audio(value : signed(21 downto 0)) return signed is
 		variable result : signed(19 downto 0);
@@ -189,6 +198,10 @@ architecture rtl of pce_core is
 begin
 
     sgx_i <= sgx_mode when SGX_SUPPORT /= 0 else '0';
+	ss_brm_load <= ss_write and ss_hold when ss_addr = x"E0002" else '0';
+	ss_brm_req <= ss_hold when ss_addr(19 downto 16) = x"F" else '0';
+	ss_q <= x"000000" & ss_brm_read when ss_addr(19 downto 16) = x"F" else
+	        x"0000" & ss_brm_state when ss_addr = x"E0002" else ss_core_q;
 
 	gen_internal_vram: if (INTERNAL_VRAM /= 0) generate begin
 		VRAM0_RAM : entity work.dpram
@@ -243,6 +256,8 @@ begin
 		RESET       => reset,
 		COLD_RESET  => cold_reset,
 		CLK         => clk,
+		SS_HOLD => ss_hold, SS_WRITE => ss_write,
+		SS_ADDR => ss_addr, SS_DATA => ss_data, SS_Q => ss_core_q,
 
 		ROM_RD      => rom_rd,
 		ROM_RDY     => rom_rdy,
@@ -382,6 +397,10 @@ begin
 	)
 	port map (
 		clock     => clk,
+		ss_hold => ss_hold, ss_load => ss_brm_load,
+		ss_data => ss_data(15 downto 0), ss_q => ss_brm_state,
+		ss_mem_req => ss_brm_req, ss_mem_we => ss_write,
+		ss_mem_addr => ss_addr(10 downto 0), ss_mem_di => ss_data(7 downto 0), ss_mem_q => ss_brm_read,
 		address_a => brm_ram_a,
 		data_a    => brm_ram_di,
 		wren_a    => brm_ram_we,

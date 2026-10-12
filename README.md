@@ -303,12 +303,26 @@ and interrupts. Separate `SS_AUDIO_DATA`/`SS_AUDIO_Q` ports cover the six PSG
 channels, wave tables, noise/LFO generators and mixer pipeline. The VCE and
 SGX VPC also expose register-state ports; the VCE palette has a paused host
 access through the shared dual-port RAM, preserving its registered outputs.
-These ports are not connected in the Tang Nano top-level. VDC restoration,
-sprite memories, work RAM/VRAM access, the firmware bridge and SD serialization
-are still missing. The implementation targets HuCard/PCE-SGX, not CD.
-Run `./sim/run.ps1 -Savestate` with GHDL for CPU/timer, PSG/audio, palette and
-VCE/VPC capture/restore replay tests. `-CpuSavestate` remains an alias for this
-test set. These block-level tests are not an end-to-end game savestate test.
+Both VDCs now expose an 8192-bit register snapshot, including persistent
+renderer variables, plus host access to SAT and both sprite line buffers.
+A 32-bit banked portal in `pce_top_extram`/`pce_core` covers CPU/audio/video
+registers, work RAM, the palette, sprite memories and BRAM. The top-level also
+contains an MMIO bridge at `0x02000100` and a paused raw SDRAM window at
+`0x03000000`, with refresh kept running while the console is frozen.
+
+The integrated parallel portal is currently too large for this FPGA:
+Gowin reports **35506 logic units for a 20736-unit device**. It is therefore
+disabled by the default `CORE_SAVESTATES=0`; setting it to `1` does not produce
+a usable SGX bitstream. A more compact transfer architecture is required
+before firmware/SD state files and menu actions can be enabled. The firmware
+still reports savestates unavailable. The implementation targets HuCard/SGX,
+not CD; the paused raw SDRAM access is not yet validated on hardware.
+Run `./sim/run.ps1 -Savestate` with GHDL and Icarus Verilog for CPU/timer, PSG/audio, palette and
+VCE/VPC replay, VDC+sprite-memory replay, and a 38494-word whole-core portal
+capture/restore with 128 replay cycles. `-CpuSavestate` remains an alias for
+this test set; it also checks MMIO hold/read/write and the disabled bridge.
+These simulations use a modeled ROM/VRAM and do not validate
+SD files, an integrated SDRAM transaction path or a running game's savestate.
 
 Global video and audio settings live in `/config/video.cfg` and
 `/config/audio.cfg`; its `output` value selects the onboard speaker (`0`, default)

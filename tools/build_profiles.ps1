@@ -164,6 +164,7 @@ foreach ($name in $profiles) {
         ) | Set-Content -Path $tclScript -Encoding ascii
 
         Write-Host "Building $name profile (CORE_PROFILE=$id)..."
+        $buildStarted = [DateTime]::UtcNow
         Push-Location $root
         try {
             & $GowinShell $tclScript
@@ -174,12 +175,25 @@ foreach ($name in $profiles) {
             Pop-Location
         }
 
+        foreach ($stage in @('gwsynthesis', 'pnr')) {
+            $logPath = Join-Path $root "impl/$stage/$stem.log"
+            if ((Test-Path $logPath) -and (Get-Item $logPath).LastWriteTimeUtc -ge $buildStarted) {
+                $errorLines = @(Select-String -Path $logPath -Pattern '^ERROR\s*\(')
+                if ($errorLines.Count) {
+                    throw "Gowin $stage failed for '$name': $($errorLines[0].Line)"
+                }
+            }
+        }
+
         $pnrDir = Join-Path $root 'impl/pnr'
         $binary = Join-Path $pnrDir "$stem.bin"
         $fs = Join-Path $pnrDir "$stem.fs"
         foreach ($artifact in @($binary, $fs)) {
             if (-not (Test-Path $artifact)) {
                 throw "Expected Gowin artifact was not generated: $artifact"
+            }
+            if ((Get-Item $artifact).LastWriteTimeUtc -lt $buildStarted) {
+                throw "Gowin did not regenerate $artifact; refusing to publish a stale bitstream."
             }
         }
         $binarySize = (Get-Item $binary).Length

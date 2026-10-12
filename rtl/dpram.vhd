@@ -105,6 +105,9 @@ ARCHITECTURE SYN OF dpram IS
 	signal saved_q0, saved_q1, visible_q0, visible_q1 : std_logic_vector(data_width-1 downto 0);
 	signal saved_valid0, saved_valid1 : std_logic := '0';
 	signal hold_previous : std_logic := '0';
+	signal port_a_addr : std_logic_vector(addr_width-1 downto 0);
+	signal port_a_data : std_logic_vector(data_width-1 downto 0);
+	signal port_a_enable, port_a_write, port_b_enable : std_logic;
 
 BEGIN
 	visible_q0 <= saved_q0 when saved_valid0 = '1' else q0;
@@ -113,6 +116,11 @@ BEGIN
 	q_b<= visible_q1 when cs_b = '1' else (others => disable_value);
 	ss_q <= visible_q1 & visible_q0;
 	ss_mem_q <= q0;
+	port_a_addr <= ss_mem_addr when ss_hold = '1' else address_a;
+	port_a_data <= ss_mem_di when ss_hold = '1' else data_a;
+	port_a_enable <= ss_mem_req when ss_hold = '1' else enable_a;
+	port_a_write <= ss_mem_we when ss_hold = '1' else wren_a and cs_a;
+	port_b_enable <= enable_b and not ss_hold;
 
 	process(clock)
 	begin
@@ -138,33 +146,24 @@ BEGIN
 	process (clock)
 	begin
 		if rising_edge(clock) then
-			if ss_hold = '0' then
 			-- Port A: write-first / bypass preserved (CPU-facing back-to-back
 			-- read-modify-write correctness relies on this).
-			if enable_a = '1' then
-				if wren_a = '1' and cs_a = '1' then
-					ram(to_integer(unsigned(address_a))) <= data_a;
-					q0 <= data_a;
+			if port_a_enable = '1' then
+				if port_a_write = '1' then
+					ram(to_integer(unsigned(port_a_addr))) <= port_a_data;
+					q0 <= port_a_data;
 				else
-					q0 <= ram(to_integer(unsigned(address_a)));
+					q0 <= ram(to_integer(unsigned(port_a_addr)));
 				end if;
 			end if;
 
 			-- Port B: plain (no-bypass) read/write, matching Gowin BSRAM
 			-- WRITE_MODE = 2'b00. See architecture header comment.
-			if enable_b = '1' then
+			if port_b_enable = '1' then
 				if wren_b = '1' and cs_b = '1' then
 					ram(to_integer(unsigned(address_b))) <= data_b;
 				end if;
 				q1 <= ram(to_integer(unsigned(address_b)));
-			end if;
-			elsif ss_mem_req = '1' then
-				if ss_mem_we = '1' then
-					ram(to_integer(unsigned(ss_mem_addr))) <= ss_mem_di;
-					q0 <= ss_mem_di;
-				else
-					q0 <= ram(to_integer(unsigned(ss_mem_addr)));
-				end if;
 			end if;
 		end if;
 	end process;
