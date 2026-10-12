@@ -8,10 +8,6 @@ entity HUC6280_AG is
         CLK 			: in std_logic;
 		  RST_N 			: in std_logic;
 		  CE 				: in std_logic;
-		SS_HOLD : in std_logic := '0';
-		SS_LOAD : in std_logic := '0';
-		SS_DATA : in std_logic_vector(32 downto 0) := (others => '0');
-		SS_Q : out std_logic_vector(32 downto 0) := (others => '0');
 		  PC_CTRL		: in std_logic_vector(2 downto 0); 
         ADDR_CTRL		: in std_logic_vector(5 downto 0); 
 		  GOT_INT		: in std_logic;  
@@ -37,7 +33,6 @@ architecture rtl of HUC6280_AG is
 	signal NextPC, NewPCWithOffset: std_logic_vector(15 downto 0);
 
 begin
-	SS_Q <= SavedCarry & AAH & AAL & PCr;
 
 	NewPCWithOffset <= std_logic_vector(unsigned(PCr) + unsigned((7 downto 0 => AAL(7)) & AAL)); 
 	
@@ -67,9 +62,7 @@ begin
 		if RST_N = '0' then
 			PCr <= (others=>'0');
 		elsif rising_edge(CLK) then
-			if SS_HOLD = '1' and SS_LOAD = '1' then
-				PCr <= SS_DATA(15 downto 0);
-			elsif CE = '1' and SS_HOLD = '0' then
+			if CE = '1' then
 				PCr <= NextPC;
 			end if;
 		end if;
@@ -118,11 +111,7 @@ begin
 			AAH <= (others=>'0');
 			SavedCarry <= '0';
 		elsif rising_edge(CLK) then
-			if SS_HOLD = '1' and SS_LOAD = '1' then
-				AAL <= SS_DATA(23 downto 16);
-				AAH <= SS_DATA(31 downto 24);
-				SavedCarry <= SS_DATA(32);
-			elsif CE = '1' and SS_HOLD = '0' then
+			if CE = '1' then
 				AAL <= NewAAL(7 downto 0); 
 				SavedCarry <= NewAAL(8); 
 				AAH <= NewAAH(7 downto 0); 

@@ -13,12 +13,6 @@ entity HUC6280 is
 		CLK		: in std_logic;
 		RST_N		: in std_logic;
 		WAIT_N	: in std_logic;
-		SS_HOLD : in std_logic := '0';
-		SS_LOAD : in std_logic := '0';
-		SS_DATA : in std_logic_vector(351 downto 0) := (others => '0');
-		SS_Q : out std_logic_vector(351 downto 0) := (others => '0');
-		SS_AUDIO_DATA : in std_logic_vector(2116+2*PSG_O_WIDTH downto 0) := (others => '0');
-		SS_AUDIO_Q : out std_logic_vector(2116+2*PSG_O_WIDTH downto 0) := (others => '0');
 		  
 		A			: out std_logic_vector(20 downto 0);
 		DI			: in std_logic_vector(7 downto 0);
@@ -90,20 +84,8 @@ architecture rtl of HUC6280 is
 	signal TMR_RELOAD		: std_logic; 
 	signal TMR_IRQ 		: std_logic;
 	signal TMR_IRQ_ACK 	: std_logic;
-	signal CORE_STATE : std_logic_vector(255 downto 0);
-	signal WR_STATE, RD_STATE : std_logic;
-	signal O_STATE : std_logic_vector(7 downto 0);
 
 begin
-	WR_N <= WR_STATE;
-	RD_N <= RD_STATE;
-	O <= O_STATE;
-	SS_Q <= (351 downto 326 => '0') & TMR_IRQ & TMR_RELOAD & TMR_EN &
-	        TMR_LATCH & TMR_VALUE & std_logic_vector(TMR_PRE_CNT) &
-	        TMR_IRQ_ACK & INT_MASK & CPU_DI & IO_BUF & O_STATE &
-	        RD_STATE & WR_STATE & VDC_SEL_OLD & CPU_RDY & IO_CE &
-	        CPU_CER & CPU_CE & std_logic_vector(IO_CLK_CNT) &
-	        std_logic_vector(CPU_CLK_CNT) & CORE_STATE;
 
 	
 	process(CLK, RST_N)
@@ -115,13 +97,6 @@ begin
 			IO_CLK_CNT <= (others=>'0');
 			IO_CE <= '0';
 		elsif rising_edge(CLK) then
-			if SS_HOLD = '1' and SS_LOAD = '1' then
-				CPU_CLK_CNT <= unsigned(SS_DATA(260 downto 256));
-				IO_CLK_CNT <= unsigned(SS_DATA(263 downto 261));
-				CPU_CE <= SS_DATA(264);
-				CPU_CER <= SS_DATA(265);
-				IO_CE <= SS_DATA(266);
-			elsif SS_HOLD = '0' then
 			CPU_CE <= '0';
 			if (CPU_CLK_CNT = 5 and CPU_CS = '1') or (CPU_CLK_CNT = 23 and CPU_CS = '0') then
 				if WAIT_N = '1' then
@@ -143,13 +118,12 @@ begin
 				IO_CLK_CNT <= (others=>'0');
 				IO_CE <= '1';
 			end if; 
-			end if;
 		end if;
 	end process;
 	
 	CE <= CPU_CE and CPU_RDY;
 	
-	EN <= CPU_CE and CPU_RDY and not SS_HOLD;
+	EN <= CPU_CE and CPU_RDY;
 	
 	
 	CORE : entity work.HUC6280_CPU
@@ -157,10 +131,6 @@ begin
 		CLK 		=> CLK,
 		RST_N 	=> RST_N,
 		CE 		=> CPU_CE,
-		SS_HOLD => SS_HOLD,
-		SS_LOAD => SS_LOAD,
-		SS_DATA => SS_DATA(255 downto 0),
-		SS_Q => CORE_STATE,
 		
 		A_OUT 	=> CPU_A,
 		DI 		=> CPU_DI,
@@ -187,21 +157,15 @@ begin
 	process(CLK, RST_N)
 	begin
 		if RST_N = '0' then
-			WR_STATE <= '1';
-			RD_STATE <= '1';
+			WR_N <= '1';
+			RD_N <= '1';
 			CPU_RDY <= '1';
 			VDC_SEL_OLD <= '0';
 		elsif rising_edge(CLK) then
-			if SS_HOLD = '1' and SS_LOAD = '1' then
-				CPU_RDY <= SS_DATA(267);
-				VDC_SEL_OLD <= SS_DATA(268);
-				WR_STATE <= SS_DATA(269);
-				RD_STATE <= SS_DATA(270);
-			elsif SS_HOLD = '0' then
 			if CPU_CER = '1' then
 				if CPU_MCYCLE = '1' then
-					WR_STATE <= CPU_WE_N;
-					RD_STATE <= not CPU_WE_N;
+					WR_N <= CPU_WE_N;
+					RD_N <= not CPU_WE_N;
 				end if; 
 				
 				VDC_SEL_OLD <= VDC_SEL or VCE_SEL;
@@ -210,12 +174,11 @@ begin
 				end if;
 			elsif CPU_CE = '1' then
 				if CPU_RDY = '1' then
-					WR_STATE <= '1';
-					RD_STATE <= '1';
+					WR_N <= '1';
+					RD_N <= '1';
 				end if; 
 				CPU_RDY <= RDY;
 			end if; 
-			end if;
 		end if;
 	end process;
 	
@@ -236,13 +199,11 @@ begin
 	process(CLK, RST_N)
 	begin
 		if RST_N = '0' then
-			O_STATE <= (others=>'0');
+			O <= (others=>'0');
 		elsif rising_edge(CLK) then
-			if SS_HOLD = '1' and SS_LOAD = '1' then
-				O_STATE <= SS_DATA(278 downto 271);
-			elsif EN = '1' then
+			if EN = '1' then
 				if IOP_SEL = '1' and CPU_WE_N = '0' then
-					O_STATE <= CPU_DO;
+					O <= CPU_DO;
 				end if; 
 			end if; 
 		end if;
@@ -256,10 +217,6 @@ begin
 			INT_MASK <= (others=>'0');
 			TMR_IRQ_ACK <= '0';
 		elsif rising_edge(CLK) then
-			if SS_HOLD = '1' and SS_LOAD = '1' then
-				INT_MASK <= SS_DATA(297 downto 295);
-				TMR_IRQ_ACK <= SS_DATA(298);
-			elsif SS_HOLD = '0' then
 			TMR_IRQ_ACK <= '0';
 			if INT_SEL = '1' and CPU_CER = '1' then 
 				if CPU_WE_N = '0' then
@@ -278,7 +235,6 @@ begin
 					end case;
 				end if; 
 			end if; 
-			end if;
 		end if;
 	end process;
 
@@ -295,14 +251,6 @@ begin
 			TMR_RELOAD <= '0'; 
 			TMR_IRQ <= '0';
 		elsif rising_edge(CLK) then
-			if SS_HOLD = '1' and SS_LOAD = '1' then
-				TMR_PRE_CNT <= unsigned(SS_DATA(308 downto 299));
-				TMR_VALUE <= SS_DATA(315 downto 309);
-				TMR_LATCH <= SS_DATA(322 downto 316);
-				TMR_EN <= SS_DATA(323);
-				TMR_RELOAD <= SS_DATA(324);
-				TMR_IRQ <= SS_DATA(325);
-			elsif SS_HOLD = '0' then
 			if TMR_SEL = '1' and CPU_WE_N = '0' and CPU_CER = '1' then
 				if CPU_A(0) = '0' then
 					-- Timer latch
@@ -338,7 +286,6 @@ begin
 					TMR_VALUE <= TMR_LATCH;
 				end if; 
 			end if;
-			end if;
 		end if;
 	end process;
 	
@@ -353,10 +300,6 @@ begin
 		CLK		=> CLK,
 		CLKEN		=> IO_CE,	-- 7.16 Mhz clock
 		RESET_N	=> RST_N,
-		SS_HOLD => SS_HOLD,
-		SS_LOAD => SS_LOAD,
-		SS_DATA => SS_AUDIO_DATA,
-		SS_Q => SS_AUDIO_Q,
 		
 		DI			=> CPU_DO,
 		A			=> CPU_A(3 downto 0),
@@ -373,9 +316,7 @@ begin
 		if RST_N = '0' then
 			IO_BUF <= (others=>'1');
 		elsif rising_edge(CLK) then
-			if SS_HOLD = '1' and SS_LOAD = '1' then
-				IO_BUF <= SS_DATA(286 downto 279);
-			elsif EN = '1' then
+			if EN = '1' then
 				if IO_SEL = '1' then 
 					if CPU_WE_N = '0' then
 						IO_BUF <= CPU_DO;
@@ -390,9 +331,6 @@ begin
 	process(CLK)
 	begin
 		if rising_edge(CLK) then
-			if SS_HOLD = '1' and SS_LOAD = '1' then
-				CPU_DI <= SS_DATA(294 downto 287);
-			elsif SS_HOLD = '0' then
 			if IO_SEL = '0' then
 				CPU_DI <= DI;
 			elsif PSG_SEL = '1' then
@@ -412,7 +350,6 @@ begin
 				CPU_DI <= IO_BUF(7) & TMR_VALUE;
 			else
 				CPU_DI <= IO_BUF;
-			end if;
 			end if;
 		end if;
 	end process;

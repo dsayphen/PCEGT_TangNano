@@ -5,8 +5,6 @@
 # Requires iverilog on PATH (or set $env:IVERILOG_BIN to its bin directory)
 # and, for tb_iosys, the RISC-V toolchain used by firmware/build.ps1.
 
-param([Alias('Savestate')][switch]$CpuSavestate)
-
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -20,31 +18,6 @@ function Find-Tool([string]$name, [string[]]$extra) {
         if (Test-Path "$p.exe") { return "$p.exe" }
     }
     throw "$name not found"
-}
-
-if ($CpuSavestate) {
-    $ghdl = Find-Tool 'ghdl' @()
-    $work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
-    [System.IO.Directory]::CreateDirectory($work) | Out-Null
-    try {
-        $sources = @(
-            'rtl/HUC6280/HUC6280_PKG.vhd', 'rtl/HUC6280/AddSubBCD.vhd',
-            'rtl/HUC6280/HUC6280_AG.vhd', 'rtl/HUC6280/HUC6280_ALU.vhd',
-            'rtl/HUC6280/HUC6280_MC.vhd', 'rtl/HUC6280/HUC6280_CPU.vhd',
-            'rtl/mem_init_pkg.vhd', 'rtl/dpram.vhd',
-            'rtl/huc6202.vhd', 'rtl/huc6260.vhd',
-            'rtl/HUC6280/psg_mixer.vhd', 'rtl/HUC6280/psg.vhd',
-            'rtl/HUC6280/HUC6280.vhd',
-            'sim/tb_cpu_savestate.vhd'
-        )
-        & $ghdl -a --std=08 -fsynopsys -frelaxed-rules "--workdir=$work" @sources
-        if ($LASTEXITCODE) { throw 'CPU savestate analysis failed' }
-        & $ghdl --elab-run --std=08 -fsynopsys -frelaxed-rules "--workdir=$work" tb_cpu_savestate --assert-level=error --ieee-asserts=disable --stop-time=1ms
-        if ($LASTEXITCODE) { throw 'CPU savestate simulation failed' }
-    } finally {
-        Remove-Item -Recurse -Force $work
-    }
-    return
 }
 
 $ivdirs = @($env:IVERILOG_BIN, 'C:\iverilog\bin', 'C:\Program Files\iverilog\bin') | Where-Object { $_ }

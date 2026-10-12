@@ -407,59 +407,13 @@ static void audio_menu(int in_game) {
     }
 }
 
-static void savestates_menu(void) {
-    static const char *items[2] = { "Savestate", "Loadstate" };
-    static int slot = 1;
-    const int n_slots = 10;
-    const int n_items = 3;
-    int active = 0;
-
-    menu_header("Savestates", 1);
-
-    for (;;) {
-        for (int i = 0; i < n_items; i++) {
-            cursor(4, 8 + i);
-            putchar(i == active ? '>' : ' ');
-            if (i < 2) {
-                print_field(6, 8 + i, items[i], 20);
-            } else {
-                char label[24] = "Choose slot: ";
-                char number[4];
-                int len = u8_to_str(number, (uint8_t)slot);
-                for (int digit = 0; digit < len; digit++)
-                    label[13 + digit] = number[digit];
-                label[13 + len] = '\0';
-                print_field(6, 8 + i, label, 20);
-            }
-        }
-        selection_row(8 + active);
-
-        uint32_t e = joy_edge();
-        if ((e & JOY_B) || (e & JOY_MENU)) {
-            return;
-        } else if (e & JOY_UP) {
-            active = active ? active - 1 : n_items - 1;
-        } else if (e & JOY_DOWN) {
-            active = active < n_items - 1 ? active + 1 : 0;
-        } else if (active == 2 && (e & JOY_LEFT)) {
-            slot = slot > 1 ? slot - 1 : n_slots;
-        } else if (active == 2 && (e & (JOY_RIGHT | JOY_A))) {
-            slot = slot < n_slots ? slot + 1 : 1;
-        } else if (e & JOY_A) {
-            message("Savestates unavailable", "Core support required");
-            menu_header("Savestates", 1);
-        }
-        delay(20);
-    }
-}
-
 // Returns non-zero when the player chooses to return to the ROM browser.
 int pause_menu(void) {
     static const char *items[3] = {
         "Resume Game", "Reset Game", "Return to browser"
     };
     int active = 0;
-    const int n_items = 8;
+    const int n_items = 7;
     const int has_cheats = CORE_PROFILE_ID == CORE_PROFILE_PCE ||
                            CORE_PROFILE_ID == CORE_PROFILE_SGX ||
                            CORE_PROFILE_ID == CORE_PROFILE_CD ||
@@ -486,22 +440,17 @@ int pause_menu(void) {
                 continue;
             }
 
-            if (i == 1) {
-                print_field(6, 8 + i, "Savestates >", 20);
-                continue;
-            }
-
-            if (i == 3) {
+            if (i == 2) {
                 print_field(6, 8 + i, "Video Settings >", 20);
                 continue;
             }
 
-            if (i == 4) {
+            if (i == 3) {
                 print_field(6, 8 + i, "Audio Settings >", 20);
                 continue;
             }
 
-            if (i == 5) {
+            if (i == 4) {
                 if (has_cheats) {
                     make_cheats_label(label);
                     print_field(6, 8 + i, label, 20);
@@ -511,13 +460,13 @@ int pause_menu(void) {
                 continue;
             }
 
-            if (i == 2) {
+            if (i == 1) {
                 make_menu_label(label, 3);
                 print_field(6, 8 + i, label, 20);
                 continue;
             }
 
-            print_field(6, 8 + i, items[i - 5], 20);
+            print_field(6, 8 + i, items[i - 4], 20);
         }
         selection_row(8 + active);
 
@@ -533,7 +482,7 @@ int pause_menu(void) {
             audio_apply();
             overlay(0);
             return 0;
-        } else if ((e & JOY_A) && active == 6) {
+        } else if ((e & JOY_A) && active == 5) {
             if (cd_active)
                 cd_audio_reset();
             pce_reset();
@@ -543,30 +492,27 @@ int pause_menu(void) {
             audio_apply();
             overlay(0);
             return 0;
-        } else if ((e & JOY_A) && active == 7) {
+        } else if ((e & JOY_A) && active == 6) {
             cheats_clear();
             pce_stop();
             audio_paused = 0;
             audio_apply();
             return 1;
         } else if ((e & JOY_A) && active == 1) {
-            savestates_menu();
-            menu_header("Game paused", 1);
-        } else if ((e & JOY_A) && active == 2) {
             game_pad_mode = !game_pad_mode;
             reg_pad_mode = game_pad_mode;
             game_pad_mode_save(current_game_name); // <--- Sauvegarde dans /config/[nomdujeu].cfg
-        } else if ((e & JOY_A) && active == 3) {
+        } else if ((e & JOY_A) && active == 2) {
             video_menu(1);
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
             print_game_name();
-        } else if ((e & JOY_A) && active == 4) {
+        } else if ((e & JOY_A) && active == 3) {
             audio_menu(1);
             clear();
             print_field(5, 5, "Game paused", OSD_COLS - 2);
             print_game_name();
-        } else if ((e & JOY_A) && active == 5) {
+        } else if ((e & JOY_A) && active == 4) {
             if (has_cheats) {
                 cheats_menu();
                 clear();

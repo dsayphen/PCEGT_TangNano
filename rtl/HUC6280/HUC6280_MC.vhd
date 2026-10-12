@@ -9,10 +9,6 @@ entity HUC6280_MC is
         CLK		: in std_logic;
 		  RST_N	: in std_logic;
 		  EN		: in std_logic;
-	SS_HOLD : in std_logic := '0';
-	SS_LOAD : in std_logic := '0';
-	SS_DATA : in std_logic_vector(41 downto 0) := (others => '0');
-	SS_Q : out std_logic_vector(41 downto 0) := (others => '0');
         IR		: in std_logic_vector(7 downto 0);
         STATE	: in unsigned(4 downto 0);
         M		: out MCode_r
@@ -6971,9 +6967,6 @@ architecture rtl of HUC6280_MC is
 	signal ALUFlags	: ALUCtrl_r;
 
 begin
-	SS_Q <= MI.STATE_CTRL & MI.ADDR_BUS & MI.LOAD_SDLH & MI.LOAD_P &
-	        MI.LOAD_T & MI.ADDR_CTRL & MI.LOAD_PC & MI.LOAD_SP &
-	        MI.AXY_CTRL & MI.ALUBUS_CTRL & MI.ALUCtrl & MI.OUT_BUS & MI.MEM_CYCLE;
 	
 	ALUFlags <= ALU_TAB(to_integer(unsigned(MI.ALUCtrl)));
 
@@ -6983,14 +6976,7 @@ begin
 		if RST_N = '0' then
 			MI <= ("00","000","00","000","000","000000","001","000","000","0000","00000","0000",'1');
 		elsif rising_edge(CLK) then
-			if SS_HOLD = '1' and SS_LOAD = '1' then
-				MI <= (SS_DATA(41 downto 40), SS_DATA(39 downto 37),
-				       SS_DATA(36 downto 35), SS_DATA(34 downto 32),
-				       SS_DATA(31 downto 29), SS_DATA(28 downto 23),
-				       SS_DATA(22 downto 20), SS_DATA(19 downto 17),
-				       SS_DATA(16 downto 14), SS_DATA(13 downto 10),
-				       SS_DATA(9 downto 5), SS_DATA(4 downto 1), SS_DATA(0));
-			elsif EN = '1' and SS_HOLD = '0' then
+			if EN = '1' then
 				N := unsigned(IR)&STATE(2 downto 0);
 				if STATE = "00000" then
 					MI <= ("00","000","00","000","000","000000","001","000","000","0000","00000","0000",'1');

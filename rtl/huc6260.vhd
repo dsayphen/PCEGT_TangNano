@@ -10,15 +10,6 @@ entity huc6260 is
 	port (
 		CLK 		: in std_logic;
 		RESET_N	: in std_logic;
-		SS_HOLD : in std_logic := '0';
-		SS_LOAD : in std_logic := '0';
-		SS_DATA : in std_logic_vector(319 downto 0) := (others => '0');
-		SS_Q : out std_logic_vector(319 downto 0) := (others => '0');
-		SS_MEM_REQ : in std_logic := '0';
-		SS_MEM_WE : in std_logic := '0';
-		SS_MEM_ADDR : in std_logic_vector(8 downto 0) := (others => '0');
-		SS_MEM_DI : in std_logic_vector(8 downto 0) := (others => '0');
-		SS_MEM_Q : out std_logic_vector(8 downto 0) := (others => '0');
 
 		-- CPU Interface
 		A			: in std_logic_vector(2 downto 0);
@@ -138,43 +129,8 @@ signal CLKEN_FS_CNT: std_logic_vector(2 downto 0) := (others => '0');
 signal CLKEN_FF	: std_logic;
 signal MULTIRES_FF : std_logic;
 signal MULTIRES   : std_logic;
-signal cpu_output : std_logic_vector(7 downto 0);
-signal sync_edges : std_logic_vector(3 downto 0);
-signal sync_output : std_logic_vector(1 downto 0);
-signal blank_output : std_logic_vector(1 downto 0);
-signal rgb_output : std_logic_vector(8 downto 0);
-signal bw_output, fs_output : std_logic;
-signal palette_state : std_logic_vector(17 downto 0);
 
 begin
-
-DO <= cpu_output;
-HSYNC_F <= sync_edges(0);
-HSYNC_R <= sync_edges(1);
-VSYNC_F <= sync_edges(2);
-VSYNC_R <= sync_edges(3);
-HS_N <= sync_output(0);
-VS_N <= sync_output(1);
-HBL <= blank_output(0);
-VBL <= blank_output(1);
-R <= rgb_output(2 downto 0);
-G <= rgb_output(5 downto 3);
-B <= rgb_output(8 downto 6);
-BW <= bw_output;
-CLKEN_FS <= fs_output;
-SS_Q(95 downto 0) <= (95 downto 66 => '0') & cpu_output & CLR_CNT & CLEARING &
-	RAM_WE & RAM_DI & RAM_A & std_logic_vector(DBG_CR_WR) & DBG_CR_LAST &
-	DBG_LAST_A & CR & std_logic_vector(to_unsigned(ctrl_t'pos(CTRL), 2)) & PREV_A;
-SS_Q(159 downto 96) <= (63 downto 40 => '0') & MULTIRES & MULTIRES_FF &
-	bw_output & DOTCLOCK & CLKEN_FF & CLKEN_CNT &
-	std_logic_vector(to_unsigned(END_LINE, 9)) & V_CNT & H_CNT;
-SS_Q(223 downto 160) <= (63 downto 35 => '0') & rgb_output & CE_N_FF & B_FF &
-	G_FF & R_FF & blank_output & VBL_FF2 & HBL_FF2 & VBL_FF & HBL_FF &
-	sync_output & fs_output & CLKEN_FS_CNT & sync_edges;
-SS_Q(319 downto 224) <= (95 downto 78 => '0') & palette_state &
-	std_logic_vector(dbg_busy1_bar) & std_logic_vector(dbg_busy0_bar) &
-	std_logic_vector(dbg_busy1_max) & std_logic_vector(dbg_busy0_max) &
-	std_logic_vector(dbg_busy1_run) & std_logic_vector(dbg_busy0_run);
 
 TOP_BL_LINES <= TOP_BL_LINES_E when RVBL = '1' else TOP_BL_LINES_E+4;
 DISP_LINES   <= DISP_LINES_E   when RVBL = '1' else DISP_LINES_E-11;
@@ -183,15 +139,6 @@ DISP_LINES   <= DISP_LINES_E   when RVBL = '1' else DISP_LINES_E-11;
 ram : entity work.dpram generic map (addr_width => 9, data_width => 9, mem_init_file =>"huc6260_palette_init.mif")
 port map(
 	clock			=> CLK,
-	ss_hold => SS_HOLD,
-	ss_load => SS_LOAD,
-	ss_data => SS_DATA(301 downto 284),
-	ss_q => palette_state,
-	ss_mem_req => SS_MEM_REQ,
-	ss_mem_we => SS_MEM_WE,
-	ss_mem_addr => SS_MEM_ADDR,
-	ss_mem_di => SS_MEM_DI,
-	ss_mem_q => SS_MEM_Q,
 
 	address_a	=> RAM_A,
 	data_a		=> RAM_DI,
@@ -219,21 +166,6 @@ begin
 			CLEARING <= '1';
 			CLR_CNT  <= (others => '0');
 
-		elsif SS_HOLD = '1' and SS_LOAD = '1' then
-			PREV_A <= SS_DATA(2 downto 0);
-			CTRL <= ctrl_t'val(to_integer(unsigned(SS_DATA(4 downto 3))));
-			CR <= SS_DATA(12 downto 5);
-			DBG_LAST_A <= SS_DATA(15 downto 13);
-			DBG_CR_LAST <= SS_DATA(23 downto 16);
-			DBG_CR_WR <= unsigned(SS_DATA(28 downto 24));
-			RAM_A <= SS_DATA(37 downto 29);
-			RAM_DI <= SS_DATA(46 downto 38);
-			RAM_WE <= SS_DATA(47);
-			CLEARING <= SS_DATA(48);
-			CLR_CNT <= SS_DATA(57 downto 49);
-			cpu_output <= SS_DATA(65 downto 58);
-		elsif SS_HOLD = '1' then
-			null;
 		elsif CLEARING = '1' then
 			-- Sweep all 512 entries to zero, ~512 cycles (~12 us @ 43.2 MHz).
 			-- The CPU leaves reset at the same time as the VCE, so this runs
@@ -292,12 +224,12 @@ begin
 					-- CPU Read
 					PREV_A <= A;
 					CTRL <= CTRL_WAIT;
-					cpu_output <= x"FF";
+					DO <= x"FF";
 					case A is
 					when "100" =>
-						cpu_output <= RAM_DO(7 downto 0);
+						DO <= RAM_DO(7 downto 0);
 					when "101" =>
-						cpu_output <= "1111111" & RAM_DO(8);
+						DO <= "1111111" & RAM_DO(8);
 						CTRL <= CTRL_INCR;
 					when others => null;
 					end case;
@@ -331,17 +263,6 @@ end process;
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if SS_HOLD = '1' and SS_LOAD = '1' and RESET_N = '1' then
-			H_CNT <= SS_DATA(107 downto 96);
-			V_CNT <= SS_DATA(117 downto 108);
-			END_LINE <= to_integer(unsigned(SS_DATA(126 downto 118)));
-			CLKEN_CNT <= SS_DATA(129 downto 127);
-			CLKEN_FF <= SS_DATA(130);
-			DOTCLOCK <= SS_DATA(132 downto 131);
-			bw_output <= SS_DATA(133);
-			MULTIRES_FF <= SS_DATA(134);
-			MULTIRES <= SS_DATA(135);
-		elsif SS_HOLD = '0' then
 		H_CNT <= H_CNT + 1;
 
 		CLKEN_FF <= '0';
@@ -371,7 +292,7 @@ begin
 				end if;
 			end if;
 			-- Reload registers
-			bw_output <= CR(7);
+			BW <= CR(7);
 			DOTCLOCK <= CR(1 downto 0);
 
 			if V_CNT >= TOP_BL_LINES and V_CNT < TOP_BL_LINES + DISP_LINES and DOTCLOCK /= CR(1 downto 0) then 
@@ -382,7 +303,6 @@ begin
 				MULTIRES <= MULTIRES_FF;
 				MULTIRES_FF <= '0';
 			end if;
-		end if;
 		end if;
 	end if;
 end process;
@@ -396,43 +316,37 @@ HSYNC_END_POS   <= 32+464-1 when DOTCLOCK = "00" else
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if SS_HOLD = '1' and SS_LOAD = '1' and RESET_N = '1' then
-			sync_edges <= SS_DATA(163 downto 160);
-		elsif SS_HOLD = '0' then
-			sync_edges <= (others => '0');
-			if H_CNT = HSYNC_START_POS then sync_edges(0) <= '1'; end if;
-			if H_CNT = HSYNC_START_POS + 1 and DOTCLOCK = "01" then sync_edges(0) <= '1'; end if;
-			if H_CNT = HSYNC_END_POS then sync_edges(1) <= '1'; end if;
-			if V_CNT = END_LINE-1 and H_CNT = LINE_CLOCKS-1 then sync_edges(2) <= '1'; end if;
-			if V_CNT = VS_LINES-1 and H_CNT = LINE_CLOCKS-1 then sync_edges(3) <= '1'; end if;
-		end if;
+		HSYNC_F <= '0';
+		HSYNC_R <= '0';
+		VSYNC_F <= '0';
+		VSYNC_R <= '0';
+		if H_CNT = HSYNC_START_POS then HSYNC_F <= '1'; end if;
+		if H_CNT = HSYNC_START_POS + 1 and DOTCLOCK = "01" then HSYNC_F <= '1'; end if;
+		if H_CNT = HSYNC_END_POS   then HSYNC_R <= '1'; end if;
+		if V_CNT = END_LINE-1    and H_CNT = LINE_CLOCKS-1 then VSYNC_F <= '1'; end if;
+		if V_CNT = VS_LINES-1    and H_CNT = LINE_CLOCKS-1 then VSYNC_R <= '1'; end if;
 	end if;
 end process;
 
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if SS_HOLD = '1' and SS_LOAD = '1' and RESET_N = '1' then
-			CLKEN_FS_CNT <= SS_DATA(166 downto 164);
-			fs_output <= SS_DATA(167);
-		elsif SS_HOLD = '0' then
-		fs_output <= '0';
+		CLKEN_FS <= '0';
 		CLKEN_FS_CNT <= CLKEN_FS_CNT + 1;
 		if (MULTIRES = '1' or DOTCLOCK(1) = '1') and CLKEN_FS_CNT = "011" and H_CNT < LINE_CLOCKS-2-1 then
 			CLKEN_FS_CNT <= (others => '0');
-			fs_output <= '1';
+			CLKEN_FS <= '1';				
 		elsif DOTCLOCK = "00" and CLKEN_FS_CNT = "111" and H_CNT < LINE_CLOCKS-2-1 then
 			CLKEN_FS_CNT <= (others => '0');
-			fs_output <= '1';
+			CLKEN_FS <= '1';
 		elsif DOTCLOCK = "01" and CLKEN_FS_CNT = "101" then
 			CLKEN_FS_CNT <= (others => '0');
-			fs_output <= '1';
+			CLKEN_FS <= '1';				
 		end if;
 
 		if H_CNT = LINE_CLOCKS-1 then
 			 CLKEN_FS_CNT <= (others => '0');
-			 fs_output <= '1';
-		end if;
+			 CLKEN_FS <= '1';
 		end if;
 	end if;
 end process;
@@ -441,14 +355,10 @@ end process;
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if SS_HOLD = '1' and SS_LOAD = '1' and RESET_N = '1' then
-			sync_output <= SS_DATA(169 downto 168);
-		elsif SS_HOLD = '0' then
-			if H_CNT = HS_OFF then sync_output(0) <= '0'; end if;
-			if H_CNT = HS_OFF + HS_CLOCKS then sync_output(0) <= '1'; end if;
-			if V_CNT = 0 then sync_output(1) <= '0'; end if;
-			if V_CNT = VS_LINES then sync_output(1) <= '1'; end if;
-		end if;
+		if H_CNT = HS_OFF             then HS_N <= '0'; end if;
+		if H_CNT = HS_OFF + HS_CLOCKS then HS_N <= '1'; end if;
+		if V_CNT = 0                  then VS_N <= '0'; end if;
+		if V_CNT = VS_LINES           then VS_N <= '1'; end if;
 	end if;
 end process;
 
@@ -458,14 +368,6 @@ end process;
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if SS_HOLD = '1' and SS_LOAD = '1' and RESET_N = '1' then
-			dbg_busy0_run <= unsigned(SS_DATA(233 downto 224));
-			dbg_busy1_run <= unsigned(SS_DATA(243 downto 234));
-			dbg_busy0_max <= unsigned(SS_DATA(253 downto 244));
-			dbg_busy1_max <= unsigned(SS_DATA(263 downto 254));
-			dbg_busy0_bar <= unsigned(SS_DATA(273 downto 264));
-			dbg_busy1_bar <= unsigned(SS_DATA(283 downto 274));
-		elsif SS_HOLD = '0' then
 		if DBG_BUSY0_N = '0' then
 			dbg_busy0_run <= dbg_busy0_run + 1;
 			if dbg_busy0_run + 1 > dbg_busy0_max then
@@ -490,7 +392,6 @@ begin
 			dbg_busy1_bar <= dbg_busy1_max;
 			dbg_busy1_max <= (others => '0');
 		end if;
-		end if;
 	end if;
 end process;
 
@@ -498,15 +399,10 @@ end process;
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if SS_HOLD = '1' and SS_LOAD = '1' and RESET_N = '1' then
-			HBL_FF <= SS_DATA(170);
-			VBL_FF <= SS_DATA(171);
-		elsif SS_HOLD = '0' then
 		if H_CNT = LEFT_BL_CLOCKS               then HBL_FF <= '0'; end if;
 		if H_CNT = LEFT_BL_CLOCKS + DISP_CLOCKS then HBL_FF <= '1'; end if;
 		if V_CNT = TOP_BL_LINES                 then VBL_FF <= '0'; end if;
 		if V_CNT = TOP_BL_LINES + DISP_LINES    then VBL_FF <= '1'; end if;
-		end if;
 	end if;
 end process;
 
@@ -514,42 +410,43 @@ end process;
 process( CLK )
 begin
 	if rising_edge( CLK ) then
-		if SS_HOLD = '1' and SS_LOAD = '1' and RESET_N = '1' then
-			HBL_FF2 <= SS_DATA(172);
-			VBL_FF2 <= SS_DATA(173);
-			blank_output <= SS_DATA(175 downto 174);
-			R_FF <= SS_DATA(178 downto 176);
-			G_FF <= SS_DATA(181 downto 179);
-			B_FF <= SS_DATA(184 downto 182);
-			CE_N_FF <= SS_DATA(185);
-			rgb_output <= SS_DATA(194 downto 186);
-		elsif CLKEN_FF = '1' and SS_HOLD = '0' then
+		if CLKEN_FF = '1' then
 
 			-- compensate HUC6202 delay
 			VBL_FF2 <= VBL_FF;
 			HBL_FF2 <= HBL_FF;
 
-			blank_output(1) <= VBL_FF2;
-			blank_output(0) <= HBL_FF2;
+			VBL <= VBL_FF2;
+			HBL <= HBL_FF2;
 
 			if BORDER = '1' and BORDER_EN = '0' then
-				rgb_output <= (others => '0');
+				G <= (others => '0');
+				R <= (others => '0');
+				B <= (others => '0');
 				G_FF <= (others => '0');
 				R_FF <= (others => '0');
 				B_FF <= (others => '0');
 				CE_N_FF  <= '1';
 
 			elsif (CE_N = '0') then
-				rgb_output <= B_FF & G_FF & R_FF;
+				G <= G_FF;
+				R <= R_FF;
+				B <= B_FF;
 				CE_N_FF <= '0';
 			elsif (CE_N_FF = '0') then
-				rgb_output <= B_FF & G_FF & R_FF;
+				G <= G_FF;
+				R <= R_FF;
+				B <= B_FF;
 				CE_N_FF <= '1';
 
 			elsif (GRID(0) = '1' and GRID_EN(0) = '1') or (GRID(1) = '1' and GRID_EN(1) = '1') then
-				rgb_output <= (others => '1');
+				G <= (others => '1');
+				R <= (others => '1');
+				B <= (others => '1');
 			else
-				rgb_output <= COLOR(2 downto 0) & COLOR(8 downto 6) & COLOR(5 downto 3);
+				G <= COLOR(8 downto 6);
+				R <= COLOR(5 downto 3);
+				B <= COLOR(2 downto 0);
 				G_FF <= COLOR(8 downto 6);
 				R_FF <= COLOR(5 downto 3);
 				B_FF <= COLOR(2 downto 0);
@@ -563,13 +460,13 @@ begin
 			   to_integer(unsigned(V_CNT)) <  TOP_BL_LINES + 4 then
 				if to_integer(unsigned(H_CNT)) >= LEFT_BL_CLOCKS and
 				   to_integer(unsigned(H_CNT)) <  LEFT_BL_CLOCKS + to_integer(dbg_busy0_bar) then
-					rgb_output <= "000000111";
+					R <= "111"; G <= "000"; B <= "000";
 				end if;
 			elsif to_integer(unsigned(V_CNT)) >= TOP_BL_LINES + 8 and
 			      to_integer(unsigned(V_CNT)) <  TOP_BL_LINES + 12 then
 				if to_integer(unsigned(H_CNT)) >= LEFT_BL_CLOCKS and
 				   to_integer(unsigned(H_CNT)) <  LEFT_BL_CLOCKS + to_integer(dbg_busy1_bar) then
-					rgb_output <= "000111000";
+					R <= "000"; G <= "111"; B <= "000";
 				end if;
 			end if;
 		end if;

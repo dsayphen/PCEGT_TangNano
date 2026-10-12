@@ -27,10 +27,6 @@ entity huc6202 is
 		CLK 		: in std_logic;
 		CLKEN		: in std_logic;
 		RESET_N	: in std_logic;
-		SS_HOLD : in std_logic := '0';
-		SS_LOAD : in std_logic := '0';
-		SS_DATA : in std_logic_vector(63 downto 0) := (others => '0');
-		SS_Q : out std_logic_vector(63 downto 0) := (others => '0');
 
 		A			: in std_logic_vector(2 downto 0);
 		WR_N		: in std_logic;
@@ -59,16 +55,8 @@ signal PRIN : std_logic_vector(1 downto 0);
 signal PRI  : std_logic_vector(3 downto 0);
 
 signal VDC_PRI		: std_logic_vector(8 downto 0);
-signal video_output : std_logic_vector(8 downto 0);
-signal cpu_output : std_logic_vector(7 downto 0);
-signal vdc_select : std_logic;
 
 begin
-
-VDC_OUT <= video_output;
-DO <= cpu_output;
-VDCNUM <= vdc_select;
-SS_Q <= cpu_output & vdc_select & video_output & X & WIN2 & WIN1 & PRI1 & PRI0;
 
 PRIN(0) <= '1' when WIN1 <= x"40" or X >= WIN1 else '0';
 PRIN(1) <= '1' when WIN2 <= x"40" or X >= WIN2 else '0';
@@ -83,10 +71,7 @@ process( CLK )
 	variable VDCDATA : std_logic_vector(8 downto 0);
 begin
 	if rising_edge(CLK) then
-		if SS_HOLD = '1' and SS_LOAD = '1' and RESET_N = '1' then
-			X <= SS_DATA(45 downto 36);
-			video_output <= SS_DATA(54 downto 46);
-		elsif CLKEN = '1' and SS_HOLD = '0' then
+		if CLKEN = '1' then
 			X <= X + 1;
 			if HS_F = '1' then
 				X <= (others => '0');
@@ -114,7 +99,7 @@ begin
 					end case;
 			end case;
 
-			video_output <= VDCDATA;
+			VDC_OUT <= VDCDATA;
 		end if;
 	end if;
 end process;
@@ -126,16 +111,9 @@ process( CLK ) begin
 			PRI1 <= "00010001";
 			WIN1 <= (others => '0');
 			WIN2 <= (others => '0');
-			vdc_select <= '0';
-			cpu_output <= X"FF";
-		elsif SS_HOLD = '1' and SS_LOAD = '1' then
-			PRI0 <= SS_DATA(7 downto 0);
-			PRI1 <= SS_DATA(15 downto 8);
-			WIN1 <= SS_DATA(25 downto 16);
-			WIN2 <= SS_DATA(35 downto 26);
-			vdc_select <= SS_DATA(55);
-			cpu_output <= SS_DATA(63 downto 56);
-		elsif SS_HOLD = '0' then
+			VDCNUM <= '0';
+			DO <= X"FF";
+		else
 			if WR_N = '0' then
 				case A is
 					when "000" => PRI0 <= DI;
@@ -144,18 +122,18 @@ process( CLK ) begin
 					when "011" => WIN1(9 downto 8) <= DI(1 downto 0);
 					when "100" => WIN2(7 downto 0) <= DI;
 					when "101" => WIN2(9 downto 8) <= DI(1 downto 0);
-					when "110" => vdc_select <= DI(0);
+					when "110" => VDCNUM <= DI(0);
 					when others => null;
 				end case;
 			end if;
 			case A is
-				when "000" => cpu_output <= PRI0;
-				when "001" => cpu_output <= PRI1;
-				when "010" => cpu_output <= WIN1(7 downto 0);
-				when "011" => cpu_output <= "000000" & WIN1(9 downto 8);
-				when "100" => cpu_output <= WIN2(7 downto 0);
-				when "101" => cpu_output <= "000000" & WIN2(9 downto 8);
-				when others => cpu_output <= X"00";
+				when "000" => DO <= PRI0;
+				when "001" => DO <= PRI1;
+				when "010" => DO <= WIN1(7 downto 0);
+				when "011" => DO <= "000000" & WIN1(9 downto 8);
+				when "100" => DO <= WIN2(7 downto 0);
+				when "101" => DO <= "000000" & WIN2(9 downto 8);
+				when others => DO <= X"00";
 			end case;
 		end if;
 	end if;

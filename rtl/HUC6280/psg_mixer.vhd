@@ -17,10 +17,6 @@ entity psg_mixer is
 	port (
 		CLK 	: in std_logic;
 		RESET_N	: in std_logic;
-		SS_HOLD : in std_logic := '0';
-		SS_LOAD : in std_logic := '0';
-		SS_DATA : in std_logic_vector(4*A_WIDTH+2*O_WIDTH+36 downto 0) := (others => '0');
-		SS_Q : out std_logic_vector(4*A_WIDTH+2*O_WIDTH+36 downto 0) := (others => '0');
 
 		-- Incoming audio data
 		REQ : in std_logic;
@@ -49,18 +45,8 @@ signal r_acc : signed(A_WIDTH+5 downto 0);
 signal l_pipe : std_logic_vector(3 downto 0);
 signal r_pipe : std_logic_vector(3 downto 0);
 signal req_pipe : std_logic_vector(4 downto 0);
-signal scale_ram, scale_saved : std_logic_vector(A_WIDTH-1 downto 0);
-signal scale_restored : std_logic := '0';
-signal left_output, right_output : std_logic_vector(O_WIDTH-1 downto 0);
 
 begin
-
-LDATA <= left_output;
-RDATA <= right_output;
-scale <= scale_saved when scale_restored = '1' else scale_ram;
-SS_Q <= scale & right_output & left_output & req_pipe & r_pipe & l_pipe &
-	std_logic_vector(r_acc) & std_logic_vector(l_acc) &
-	std_logic_vector(product) & std_logic_vector(sample_offset);
 
 -- attenuation table
 
@@ -69,10 +55,8 @@ port map (
 	clock		=> CLK,
 	address_a=> '0'&ATTENUATION,
 	address_b=> '1'&ATTENUATION,
-	enable_a => not SS_HOLD,
-	enable_b => not SS_HOLD,
-	q_a		=> scale_ram(A_WIDTH-1 downto A_WIDTH/2),
-	q_b		=> scale_ram(A_WIDTH/2-1 downto 0)
+	q_a		=> scale(A_WIDTH-1 downto A_WIDTH/2),
+	q_b		=> scale(A_WIDTH/2-1 downto 0)
 );
 
 
@@ -83,27 +67,12 @@ sample_in(0)<='0';
 
 process(clk, RESET_N) begin
 	if RESET_N = '0' then
-		left_output<=(others=>'0');
-		right_output<=(others=>'0');
+		LDATA<=(others=>'0');
+		RDATA<=(others=>'0');
 		l_pipe<=(others=>'0');
 		r_pipe<=(others=>'0');
 		req_pipe<="10000";
-		scale_restored <= '0';
 	elsif rising_edge(clk) then
-		if SS_HOLD = '1' and SS_LOAD = '1' then
-			sample_offset <= signed(SS_DATA(5 downto 0));
-			product <= signed(SS_DATA(A_WIDTH+11 downto 6));
-			l_acc <= signed(SS_DATA(2*A_WIDTH+17 downto A_WIDTH+12));
-			r_acc <= signed(SS_DATA(3*A_WIDTH+23 downto 2*A_WIDTH+18));
-			l_pipe <= SS_DATA(3*A_WIDTH+27 downto 3*A_WIDTH+24);
-			r_pipe <= SS_DATA(3*A_WIDTH+31 downto 3*A_WIDTH+28);
-			req_pipe <= SS_DATA(3*A_WIDTH+36 downto 3*A_WIDTH+32);
-			left_output <= SS_DATA(3*A_WIDTH+36+O_WIDTH downto 3*A_WIDTH+37);
-			right_output <= SS_DATA(3*A_WIDTH+36+2*O_WIDTH downto 3*A_WIDTH+37+O_WIDTH);
-			scale_saved <= SS_DATA(4*A_WIDTH+36+2*O_WIDTH downto 3*A_WIDTH+37+2*O_WIDTH);
-			scale_restored <= '1';
-		elsif SS_HOLD = '0' then
-		scale_restored <= '0';
 		l_pipe<=l_pipe(2 downto 0)&LEFT_STB;
 		r_pipe<=r_pipe(2 downto 0)&RIGHT_STB;
 		req_pipe<=req_pipe(3 downto 0)&REQ;
@@ -127,11 +96,10 @@ process(clk, RESET_N) begin
 
 		-- Copy accumulators to output if we're done
 		if req_pipe(1)='0' then
-			left_output<=std_logic_vector(l_acc(A_WIDTH+4 downto A_WIDTH+5-O_WIDTH));
-			right_output<=std_logic_vector(r_acc(A_WIDTH+4 downto A_WIDTH+5-O_WIDTH));
+			LDATA<=std_logic_vector(l_acc(A_WIDTH+4 downto A_WIDTH+5-O_WIDTH));
+			RDATA<=std_logic_vector(r_acc(A_WIDTH+4 downto A_WIDTH+5-O_WIDTH));
 			l_acc<=(others=>'0');
 			r_acc<=(others=>'0');
-		end if;
 		end if;
 
 	end if;
