@@ -159,8 +159,98 @@ Browser Options (Select) provides **Choose core > HuCard / CD-Rom / Superset**.
 Selecting a different core asks for confirmation, checks the source slot's
 profile, size and CRC32, then erases/programs/verifies the first 1 MiB of flash.
 The three source slots and the firmware at `0x500000` are not modified.
-When `Core ready` appears, switch power off and on. S1 only resets the console
-and does not load the newly installed FPGA configuration.
+When `Core ready` appears, A requests an FPGA reload if the GPIO29/TP1
+hardware is installed and the rebuilt core supports it. Otherwise use the
+TP1 button or switch power off and on. S1 only resets the console and does
+not load the newly installed FPGA configuration.
+
+#### Experimental GPIO29 FPGA reload
+
+On the v3923 board, TP1 is RECONFIG_N (FPGA pin 9), with a 4.7 kOhm
+pull-up to 3.3 V; TP2 is ground. A momentary button from TP1 to ground has
+been reported to reload the FPGA without a power cycle. Never press it during
+a flash write.
+
+The current RTL reserves FPGA pin 29 (J6 contact 12, LCD_B5) as a low-or-high-Z
+reload output through an explicit Gowin IOBUF: data is fixed at zero and
+OEN is high at idle. It never drives a high level. Do not attach an LCD to
+this pin. A direct GPIO26-to-TP1 wire has been reported to prevent startup and
+to cause an unsolicited reload when connected; removing it restored startup.
+Do not connect GPIO26 directly to TP1. The cause is not yet established.
+The reported idle voltage was 1.1 V with an external 10 kOhm pull-up to 3.3 V,
+which is not the expected result for the intended released output.
+
+Keep TP1 disconnected for diagnosis. The reload-test screen displays the
+synchronised GPIO26 input level and the requested output state. Use a
+current-limited external pull-up when checking the released pin; a floating
+pin's voltage alone does not identify its drive state. A low input blocks
+reload requests. Simulation now tests the real Gowin IOBUF model, including
+high impedance without a pull-up, external levels and pulse feedback, but it
+does not establish the hardware cause or behaviour during configuration.
+
+The user reported successful reloading on their v3923 board with TP1 connected
+to GPIO29 and an external 110 kOhm resistor from GPIO29 to the board's 3.3 V
+supply. The board's existing 4.7 kOhm TP1 pull-up remains connected. This
+specific test does not establish cold-start reliability, compatibility with
+other boards, or the actual pulse width once the FPGA deconfigures. GPIO26
+remains excluded from the normal reload connection; its anomaly is unresolved.
+Make hardware changes with all power disconnected and never trigger reload
+during flash programming.
+
+The RTL requests a three-second low pulse, but deconfiguration can release the GPIO
+earlier; the actual pulse duration and reliable reload still need hardware
+validation. This is not a guaranteed substitute for an external pulse circuit.
+
+After rebuilding and installing the boot bitstream and all three source slots,
+Browser Options > Choose core > Test FPGA reload provides a confirmation-only
+test of the current core, without writing flash. After a verified core copy,
+A requests the same reload. Without the wire, the request expires and the
+firmware falls back to the TP1 button or power cycle. Old bitstreams remain
+compatible with the firmware and do not receive the unsupported command.
+
+Flash-control status bit 9 at `0x020000E0` advertises this feature. A full-word
+write of `0x52454346` to `0x020000E8` requests the pulse, only after firmware
+loading, with SPI idle, flash ownership released and chip select high.
+Reading `0x020000E8` returns the requested low pulse in bit 0 and the
+synchronised physical input level in bit 1.
+
+For an input-only comparison, build `tools/build_profiles.ps1 -Profile sgx_gpio26_input`.
+Its image is `impl/profiles/sgx_gpio26_input/pnr/PCE_GT_TangNano_sgx_gpio26_input.fs`.
+GPIO26 uses an IBUF with no output driver or internal pull-up; reload writes
+are disabled and status bit 10 at `0x020000E0` identifies this diagnostic.
+Keep TP1 disconnected and retain the external 10 kOhm pull-up to the board's
+3.3 V supply. Install this diagnostic as the boot configuration and update
+the firmware, then power-cycle. Choose core > Test FPGA reload displays
+`GPIO26 input-only test`, the measured input level and `Command: Released`;
+A has no effect. Do not regenerate or select core slots for this test.
+
+For comparison on another pin, `-Profile sgx_gpio29_input` produces
+`impl/profiles/sgx_gpio29_input/pnr/PCE_GT_TangNano_sgx_gpio29_input.fs`.
+It places the same input-only diagnostic on FPGA pin 29 (J6 contact 12,
+LCD_B5), unused by this core when no LCD is connected. With all power off,
+move the external 10 kOhm pull-up from GPIO26 to GPIO29; keep TP1 disconnected.
+After installing this boot bitstream and the current firmware, power-cycle
+and check for `GPIO29 input-only test`. Report both its input level and the
+GPIO29-to-ground voltage. Reload commands remain disabled. Register
+`0x020000E8` bits 15:8 identify the diagnostic's FPGA pin number.
+
+To test the output driver without a reconfiguration connection, build only
+`-Profile sgx_gpio29_pulse`. The image is
+`impl/profiles/sgx_gpio29_pulse/pnr/PCE_GT_TangNano_sgx_gpio29_pulse.fs`.
+Keep TP1 disconnected and the external 10 kOhm pull-up on GPIO29. With the
+current firmware, Choose core > Test FPGA reload shows `GPIO29 pulse test`.
+First check for High/Released and approximately 3.3 V. A then requests a
+three-second low pulse, during which the input should read Low and the command
+Low, followed by High/Released. This diagnostic does not drive a high level;
+the resistor supplies the idle high level. Core copying is disabled in this
+mode. Flash status bit 11 identifies the output test; normal profiles also
+request three seconds but retain confirmation after copying. No slot images
+should be updated with this diagnostic variant.
+The generated pulse-test image reports a -0.241 ns SDRAM setup violation and
+three recovery violations; it is not timing-clean or a hardware-validated core.
+Passing the disconnected output test alone does not validate self-reconfiguration
+or the GPIO's behaviour during FPGA configuration; the reported connected
+GPIO29 test is separate and is not a general electrical guarantee.
 
 Prepare the initial flash contents after rebuilding all three cores:
 
@@ -177,6 +267,20 @@ Prepare the initial flash contents after rebuilding all three cores:
 | `0x200000` | `impl/core-slots/cd_slot.bin` (CD-Rom) |
 | `0x300000` | `impl/core-slots/superset_slot.bin` |
 | `0x500000` | `firmware/firmware.bin` |
+
+To program the boot Superset and all three source slots in one operation:
+
+```powershell
+& .\tools\prepare_core_slots.ps1 -CombinedImage
+```
+
+This creates `impl/core-slots/cores_superset_sgx_cd_superset.bin`, exactly
+4 MiB: Superset at zero, SGX at `0x100000`, CD at `0x200000`, and Superset
+at `0x300000`. Slot padding and manifests are preserved. Program it as raw
+SPI flash binary data at `0x000000`, with erase/program/verify limited to
+`0x000000..0x3FFFFF`, never bulk/chip erase. It replaces the boot core as well
+as the three source slots. The firmware at `0x500000` is not included and
+must be updated separately. Power-cycle after programming to load Superset.
 
 Program the three slot images as raw SPI flash data at the specified offsets,
 not as FPGA configuration downloads. They contain the existing Gowin `.bin`
@@ -447,6 +551,16 @@ line buffers.
 
 Output timing is `819 x 524/526 @ 25.92 MHz` = **31.65 kHz / 60.2 Hz** with 640
 active pixels and 480 active lines, i.e. within ~0.6 % of VGA 640x480@60. The
+browser holds the console in reset and now keeps 263 PCE lines (526 HDMI
+lines, about 60.17 Hz), instead of reverting to 262 lines (about 60.40 Hz).
+Games still select 262 or 263 lines with VCE control bit 2. This reduces
+display resynchronisation when entering a 263-line game but does not force a
+fixed HDMI refresh rate for every game. The GHDL test `tb_vce_frame_timing`
+checks reset/browser timing and both game modes; `sim/run.ps1` runs it when
+GHDL is available. Adding an independent HDMI blanking line each frame would
+break the current two-output-lines-per-core-line lock without rate conversion.
+
+The
 PCE's 270 / 360 / 540 dots per line (depending on the VCE dot clock) are scaled
 to the full 640 pixels with a nearest-neighbour DDA whose step is exact
 (108 / 144 / 216 in 1/256 units), so the picture always fills the screen with
@@ -454,6 +568,13 @@ the correct 4:3 aspect ratio.
 
 With the browser open, choose **Options > Audio Settings > Output** to switch
 between the onboard speaker and HDMI. Speaker is the default. Speaker mode uses
+the onboard output by default at FPGA configuration; the selected HDMI/Speaker
+mode is retained across a firmware-only reset when returning to the browser,
+avoiding a temporary HDMI-to-DVI-to-HDMI transition. Explicit firmware writes
+can still change the output. The focused `AUDIO_MODE_RESET_TEST` mode of
+`tb_iosys` checks selection retention and rejects writes during reset.
+
+Speaker mode uses
 the existing I2S amplifier; HDMI mode sends 16-bit stereo LPCM at 48 kHz in
 HDMI data islands and disables the onboard amplifier. The video timing is
 unchanged, and HDMI playback still needs verification on a physical display.

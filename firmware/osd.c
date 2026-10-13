@@ -17,6 +17,28 @@ void loading_status(const char *msg) {
     status(msg);
 }
 
+void progress_bar(int percent) {
+    const int blocks = OSD_COLS - 2;
+    if (percent < 0)
+        percent = 0;
+    if (percent > 100)
+        percent = 100;
+    int filled = percent * blocks / 100;
+
+    clear_line(ROW_PROGRESS + 1);
+    clear_line(ROW_PROGRESS_BAR);
+    cursor(1, ROW_PROGRESS_BAR);
+    for (int block = 0; block < blocks; block++)
+        putchar(block < filled ? '_' : '$');
+}
+
+void progress_status(const char *msg, int percent) {
+    clear_line(ROW_PROGRESS);
+    cursor(1, ROW_PROGRESS);
+    printf("%s %d%%", msg, percent);
+    progress_bar(percent);
+}
+
 void title(void) {
     const char *profile;
 
@@ -41,7 +63,9 @@ void title(void) {
     clear_line(ROW_TITLE);
     cursor(1, ROW_TITLE);
     print(profile);
-    print(" - pick a ROM");
+    putchar(' ');
+    int path_column = 2 + (int)strlen(profile);
+    print_field(path_column, ROW_TITLE, pwd, OSD_COLS - 1 - path_column);
 }
 
 // Print a string right-truncated to `w` columns starting at column x.

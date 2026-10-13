@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('pce', 'sgx', 'sgx_rv_diag', 'sgx_no_hdmi_audio', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'superset', 'all')]
+    [ValidateSet('pce', 'sgx', 'sgx_rv_diag', 'sgx_no_hdmi_audio', 'sgx_gpio26_input', 'sgx_gpio29_input', 'sgx_gpio29_pulse', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'superset', 'all')]
     [string]$Profile = 'all',
     [string]$GowinShell
 )
@@ -28,6 +28,9 @@ $profileIds = @{
     sgx = 1
     sgx_rv_diag = 1
     sgx_no_hdmi_audio = 1
+    sgx_gpio26_input = 1
+    sgx_gpio29_input = 1
+    sgx_gpio29_pulse = 1
     cd  = 2
     cdprobe = 2
     cd_sgx = 2
@@ -46,6 +49,7 @@ foreach ($name in $profiles) {
     $projectCopy = Join-Path $root "$stem.gprj"
     $configCopy = Join-Path $root "impl/${stem}_process_config.json"
     $tclScript = Join-Path $workDir "build_$name.tcl"
+    $constraintsCopy = Join-Path $workDir "$stem.cst"
     $id = $profileIds[$name]
 
     try {
@@ -59,7 +63,26 @@ foreach ($name in $profiles) {
             $parameterPattern,
             "parameter [1:0] CORE_PROFILE = 2'd$id",
             1)
-        if ($name -eq 'sgx_rv_diag') {
+        if ($name -in @('sgx_gpio26_input', 'sgx_gpio29_input')) {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_RECONFIG_INPUT_ONLY = 0',
+                'parameter CORE_RECONFIG_INPUT_ONLY = 1',
+                1)
+            if ($name -eq 'sgx_gpio26_input') {
+                $profileSource = [regex]::Replace(
+                    $profileSource,
+                    'parameter CORE_RECONFIG_PIN = 29',
+                    'parameter CORE_RECONFIG_PIN = 26',
+                    1)
+            }
+        } elseif ($name -eq 'sgx_gpio29_pulse') {
+            $profileSource = [regex]::Replace(
+                $profileSource,
+                'parameter CORE_RECONFIG_OUTPUT_TEST = 0',
+                'parameter CORE_RECONFIG_OUTPUT_TEST = 1',
+                1)
+        } elseif ($name -eq 'sgx_rv_diag') {
             $profileSource = [regex]::Replace(
                 $profileSource,
                 'parameter CORE_RV_DIAGNOSTIC = 0',
@@ -129,6 +152,38 @@ foreach ($name in $profiles) {
             throw 'Expected exactly one top_tang_nano20k.v entry in PCE_GT_TangNano.gprj.'
         }
         $topFile[0].SetAttribute('path', 'impl/profile-build/top_tang_nano20k.v')
+        if ($name -in @('sgx_gpio26_input', 'sgx_gpio29_input', 'sgx_gpio29_pulse')) {
+            $constraintsFile = @($project.Project.FileList.File | Where-Object {
+                $_.GetAttribute('path') -eq 'constraints/tang_nano20k.cst'
+            })
+            if ($constraintsFile.Count -ne 1) {
+                throw 'Expected exactly one tang_nano20k.cst project entry.'
+            }
+            $constraintsText = Get-Content (Join-Path $root 'constraints/tang_nano20k.cst') -Raw
+            $outputConstraint = 'IO_PORT "fpga_reconfig_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=4;'
+            if (-not $constraintsText.Contains($outputConstraint)) {
+                throw 'Expected the reload output constraint before creating diagnostic constraints.'
+            }
+            if ($name -ne 'sgx_gpio29_pulse') {
+                $constraintsText = $constraintsText.Replace(
+                    $outputConstraint,
+                    'IO_PORT "fpga_reconfig_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;')
+            }
+            if ($name -eq 'sgx_gpio26_input') {
+                $gpio29Location = 'IO_LOC  "fpga_reconfig_n" 29;'
+                if (-not $constraintsText.Contains($gpio29Location)) {
+                    throw 'Expected the GPIO29 location before creating GPIO26 input constraints.'
+                }
+                $constraintsText = $constraintsText.Replace(
+                    $gpio29Location,
+                    'IO_LOC  "fpga_reconfig_n" 26;')
+            }
+            [System.IO.File]::WriteAllText(
+                $constraintsCopy,
+                $constraintsText,
+                [System.Text.UTF8Encoding]::new($false))
+            $constraintsFile[0].SetAttribute('path', "impl/profile-build/$stem.cst")
+        }
         if ($name -eq 'sgx_no_hdmi_audio') {
             $audioFiles = @($project.Project.FileList.File | Where-Object {
                 $_.GetAttribute('path') -in @(
@@ -199,7 +254,7 @@ foreach ($name in $profiles) {
         Write-Host ("{0}: .bin {1} bytes ({2:N1} KiB), .fs {3:N1} MiB" -f
             $name, $binarySize, ($binarySize / 1KB), ((Get-Item $fs).Length / 1MB))
     } finally {
-        Remove-Item $projectCopy, $configCopy, $tclScript, $profileTop `
+        Remove-Item $projectCopy, $configCopy, $tclScript, $profileTop, $constraintsCopy `
             -Force -ErrorAction SilentlyContinue
     }
 }

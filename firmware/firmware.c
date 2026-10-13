@@ -74,10 +74,10 @@ int main(void) {
     
     uart_print("\nPCEtang iosys firmware\n");
 
-    overlay(1);
     clear();
     title();
     status("Starting...");
+    overlay(1);
     delay(200);
 
     for (;;) {
@@ -191,13 +191,8 @@ int main(void) {
             delay(300);                     // let the buttons be released
             overlay(1);
             if (pause_menu()) {
-                if (mount_card() != 0) {
-                    message("No SD card, or it is not",
-                            "FAT16/FAT32/exFAT formatted");
-                    overlay(0);
-                    continue;
-                }
-                browse();
+                for (;;)
+                    delay(100);
             }
         } else if (select_armed &&
                    (raw & JOY_SELECT) &&

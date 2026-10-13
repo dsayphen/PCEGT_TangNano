@@ -1,6 +1,7 @@
 param(
     [string]$InputDirectory,
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [switch]$CombinedImage
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,6 +69,20 @@ foreach ($profile in $profiles) {
     $stream.Dispose()
     Write-Host ("{0}: {1} -> 0x{2:X6}, size={3}, CRC32={4:X8}" -f
         $profile.Label, $destination, ($profile.Id * $slotSize), $binary.Length, $crc)
+}
+if ($CombinedImage) {
+    $order = @('superset', 'sgx', 'cd', 'superset')
+    $combined = New-Object byte[] ($order.Count * $slotSize)
+    for ($slotIndex = 0; $slotIndex -lt $order.Count; $slotIndex++) {
+        $sourceSlot = Join-Path $OutputDirectory ("{0}_slot.bin" -f $order[$slotIndex])
+        $bytes = [IO.File]::ReadAllBytes($sourceSlot)
+        if ($bytes.Length -ne $slotSize) { throw "Invalid slot size: $sourceSlot" }
+        [Array]::Copy($bytes, 0, $combined, ($slotIndex * $slotSize), $slotSize)
+    }
+    $destination = Join-Path $OutputDirectory 'cores_superset_sgx_cd_superset.bin'
+    [IO.File]::WriteAllBytes($destination, $combined)
+    Write-Host ("Combined cores: {0} -> 0x000000, {1} bytes; firmware not included." -f
+        $destination, $combined.Length)
 }
 Write-Host 'Program these slot images as raw SPI flash data, without erasing the entire flash.'
 Write-Host 'All three bitstreams must include flash PIO support. Keep firmware at 0x500000.'

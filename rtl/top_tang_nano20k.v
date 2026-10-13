@@ -27,6 +27,10 @@ module top_tang_nano20k #(
     parameter CORE_CHEAT_MAX_CODES = 4,
     parameter CORE_VDC1_MEMORY = 1,
     parameter CORE_HDMI_AUDIO = 1,
+    parameter CORE_RECONFIG_INPUT_ONLY = 0,
+    parameter CORE_RECONFIG_PIN = 29,
+    parameter CORE_RECONFIG_OUTPUT_TEST = 0,
+    parameter CORE_RECONFIG_PULSE_MS = 3000,
     parameter CORE_RV_DIAGNOSTIC = 0
 ) (
     input  wire        sys_clk,        // 27 MHz crystal
@@ -34,6 +38,7 @@ module top_tang_nano20k #(
     // on-board push buttons (active high)
     input  wire        s1,
     input  wire        s2,
+    inout  wire        fpga_reconfig_n,
 
     // on-board USB serial bridge
     input  wire        uart_rx,
@@ -292,16 +297,40 @@ wire        sdram_init_done;
 assign sd_dat1 = 1'b1;
 assign sd_dat2 = 1'b1;
 
+wire reconfig_pull_low;
+wire reconfig_pin_high;
+generate
+    if (CORE_RECONFIG_INPUT_ONLY) begin : gen_reconfig_input
+        IBUF u_reconfig_ibuf (
+            .I(fpga_reconfig_n), .O(reconfig_pin_high)
+        );
+    end else begin : gen_reconfig_output
+        IOBUF u_reconfig_iobuf (
+            .I   (1'b0),
+            .OEN (~reconfig_pull_low),
+            .O   (reconfig_pin_high),
+            .IO  (fpga_reconfig_n)
+        );
+    end
+endgenerate
+
 iosys #(
     .FREQ                (CLK_SYS_HZ),
     .FIRMWARE_FLASH_ADDR (FIRMWARE_FLASH_ADDR),
     .FIRMWARE_SIZE       (FIRMWARE_SIZE),
     .RV_BASE             (23'h40_0000),
     .CORE_ID             (CORE_PROFILE),
+    .RECONFIG_ENABLE     (!CORE_RECONFIG_INPUT_ONLY),
+    .RECONFIG_INPUT_ONLY (CORE_RECONFIG_INPUT_ONLY),
+    .RECONFIG_PIN        (CORE_RECONFIG_PIN),
+    .RECONFIG_OUTPUT_TEST (CORE_RECONFIG_OUTPUT_TEST),
+    .RECONFIG_PULSE_MS   (CORE_RECONFIG_PULSE_MS),
     .RV_DIAGNOSTIC       (CORE_RV_DIAGNOSTIC)
 ) u_iosys (
     .clk              (clk_sys),
     .resetn           (sys_resetn),
+    .reconfig_pull_low (reconfig_pull_low),
+    .reconfig_pin_high (reconfig_pin_high),
 
     .clk_pix          (clk_pix),
     .pix_resetn       (pix_resetn),

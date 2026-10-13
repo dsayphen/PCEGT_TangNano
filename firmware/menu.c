@@ -109,17 +109,46 @@ static void print_game_name(void) {
     while (end > current_game_name && end[-1] == ' ')
         end--;
 
-    while (current_game_name + i < end && i < OSD_COLS - 5) {
+    while (current_game_name + i < end && i < OSD_COLS - 6) {
         label[i] = current_game_name[i];
         i++;
     }
     label[i] = '\0';
-    print_field(5, 6, label, OSD_COLS - 5);
+    print_field(5, 6, label, OSD_COLS - 6);
+}
+
+static void menu_frame(void) {
+    cursor(3, 4);
+    putchar('`');
+    for (int column = 4; column < OSD_COLS - 1; column++)
+        putchar('~');
+    putchar('^');
+
+    for (int row = 5; row < 18; row++) {
+        cursor(3, row);
+        putchar('|');
+        cursor(OSD_COLS - 1, row);
+        putchar('|');
+    }
+
+    cursor(3, 7);
+    putchar('\\');
+    for (int column = 4; column < OSD_COLS - 1; column++)
+        putchar('~');
+    putchar(0x7f);
+
+    cursor(3, 18);
+    putchar('{');
+    for (int column = 4; column < OSD_COLS - 1; column++)
+        putchar('~');
+    putchar('}');
 }
 
 static void menu_header(const char *heading, int in_game) {
     clear();
-    print_field(5, 5, heading, OSD_COLS - 2);
+    if (in_game)
+        menu_frame();
+    print_field(5, 5, heading, OSD_COLS - 6);
     if (in_game)
         print_game_name();
 }
@@ -174,14 +203,17 @@ static void cheats_menu(void) {
     int active = 0;
     int first = 0;
     int redraw = 1;
-    const int visible_rows = 10;
-    clear();
-    print_field(5, 5, "Cheats", OSD_COLS - 2);
-    print_game_name();
+    menu_header("Cheats", 1);
 
     for (;;) {
         int count = cheats_count();
+        int first_row = count > 8 ? 8 : 9;
+        int visible_rows = count > 8 ? 10 : 8;
         int status = 0;
+        if (redraw) {
+            for (int row = 8; row < 18; row++)
+                print_field(4, row, "", OSD_COLS - 5);
+        }
         if (redraw && count > 0) {
             if (active >= count)
                 active = count - 1;
@@ -191,7 +223,7 @@ static void cheats_menu(void) {
                 first = active - visible_rows + 1;
             for (int row = 0; row < visible_rows; row++) {
                 int index = first + row;
-                cursor(4, 8 + row);
+                cursor(4, first_row + row);
                 putchar(index < count && index == active ? '>' : ' ');
                 if (index < count) {
                     char label[25];
@@ -203,20 +235,18 @@ static void cheats_menu(void) {
                     while (*description && pos < (int)sizeof(label) - 1)
                         label[pos++] = *description++;
                     label[pos] = '\0';
-                    print_field(6, 8 + row, label, 25);
+                    print_field(6, first_row + row, label, 25);
                 } else {
-                    print_field(6, 8 + row, "", 25);
+                    print_field(6, first_row + row, "", 25);
                 }
             }
-            selection_row(8 + active - first);
+            selection_row(first_row + active - first);
             status = *cheats_status() != '\0';
             print_field(1, 19, status ? cheats_status() : "A=Toggle  B=Back",
                         OSD_COLS - 2);
         } else if (redraw) {
-            for (int row = 0; row < visible_rows; row++)
-                clear_line(8 + row);
-            print_field(2, 10, *cheats_status() ? cheats_status() : "No cheats found",
-                        OSD_COLS - 4);
+            print_field(5, 10, *cheats_status() ? cheats_status() : "No cheats found",
+                        OSD_COLS - 6);
             print_field(1, 19, "B=Back", OSD_COLS - 2);
         }
         redraw = 0;
@@ -244,25 +274,26 @@ static void video_menu(int in_game) {
     static const char *back_label = "Back";
     int active = 0;
     const int n_items = 4;
+    const int first_row = in_game ? 9 : 8;
 
     menu_header("Video Settings", in_game);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
-            cursor(4, 8 + i);
+            cursor(4, first_row + i);
             putchar(i == active ? '>' : ' ');
 
             char label[24];
 
             if (i == 3) {
-                print_field(6, 8 + i, back_label, 20);
+                print_field(6, first_row + i, back_label, 20);
                 continue;
             }
 
             make_menu_label(label, i + 4);
-            print_field(6, 8 + i, label, 20);
+            print_field(6, first_row + i, label, 20);
         }
-        selection_row(8 + active);
+        selection_row(first_row + active);
 
         uint32_t e = joy_edge();
         if (e & JOY_UP) {
@@ -295,12 +326,13 @@ static void audio_menu(int in_game) {
     };
     int active = 0;
     const int n_items = in_game ? 4 : 7;
+    const int first_row = in_game ? 9 : 8;
 
     menu_header("Audio Settings", in_game);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
-            cursor(4, 8 + i);
+            cursor(4, first_row + i);
             putchar(i == active ? '>' : ' ');
 
             char label[24];
@@ -341,9 +373,9 @@ static void audio_menu(int in_game) {
             }
             label[j] = '\0';
 
-            print_field(6, 8 + i, label, 20);
+            print_field(6, first_row + i, label, 20);
         }
-        selection_row(8 + active);
+        selection_row(first_row + active);
 
         uint32_t e = joy_edge();
         if (e & JOY_UP) {
@@ -414,6 +446,7 @@ int pause_menu(void) {
     };
     int active = 0;
     const int n_items = 7;
+    const int first_row = 9;
     const int has_cheats = CORE_PROFILE_ID == CORE_PROFILE_PCE ||
                            CORE_PROFILE_ID == CORE_PROFILE_SGX ||
                            CORE_PROFILE_ID == CORE_PROFILE_CD ||
@@ -424,51 +457,49 @@ int pause_menu(void) {
     audio_apply();
     pce_pause(1);
     save_game_saves(0);
-    clear();
-    print_field(5, 5, "Game paused", OSD_COLS - 2);
-    print_game_name();
+    menu_header("Game paused", 1);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
-            cursor(4, 8 + i);
+            cursor(4, first_row + i);
             putchar(i == active ? '>' : ' ');
 
             char label[24];
 
             if (i == 0) {
-                print_field(6, 8 + i, items[0], 20);
+                print_field(6, first_row + i, items[0], 20);
                 continue;
             }
 
             if (i == 2) {
-                print_field(6, 8 + i, "Video Settings >", 20);
+                print_field(6, first_row + i, "Video Settings >", 20);
                 continue;
             }
 
             if (i == 3) {
-                print_field(6, 8 + i, "Audio Settings >", 20);
+                print_field(6, first_row + i, "Audio Settings >", 20);
                 continue;
             }
 
             if (i == 4) {
                 if (has_cheats) {
                     make_cheats_label(label);
-                    print_field(6, 8 + i, label, 20);
+                    print_field(6, first_row + i, label, 20);
                 } else {
-                    print_field(6, 8 + i, "Cheats unavailable", 20);
+                    print_field(6, first_row + i, "Cheats unavailable", 20);
                 }
                 continue;
             }
 
             if (i == 1) {
                 make_menu_label(label, 3);
-                print_field(6, 8 + i, label, 20);
+                print_field(6, first_row + i, label, 20);
                 continue;
             }
 
-            print_field(6, 8 + i, items[i - 4], 20);
+            print_field(6, first_row + i, items[i - 4], 20);
         }
-        selection_row(8 + active);
+        selection_row(first_row + active);
 
         uint32_t e = joy_edge();
         if (e & JOY_UP) {
@@ -494,6 +525,9 @@ int pause_menu(void) {
             return 0;
         } else if ((e & JOY_A) && active == 6) {
             cheats_clear();
+            overlay(0);
+            clear();
+            selection_row(31);
             pce_stop();
             audio_paused = 0;
             audio_apply();
@@ -504,25 +538,17 @@ int pause_menu(void) {
             game_pad_mode_save(current_game_name); // <--- Sauvegarde dans /config/[nomdujeu].cfg
         } else if ((e & JOY_A) && active == 2) {
             video_menu(1);
-            clear();
-            print_field(5, 5, "Game paused", OSD_COLS - 2);
-            print_game_name();
+            menu_header("Game paused", 1);
         } else if ((e & JOY_A) && active == 3) {
             audio_menu(1);
-            clear();
-            print_field(5, 5, "Game paused", OSD_COLS - 2);
-            print_game_name();
+            menu_header("Game paused", 1);
         } else if ((e & JOY_A) && active == 4) {
             if (has_cheats) {
                 cheats_menu();
-                clear();
-                print_field(5, 5, "Game paused", OSD_COLS - 2);
-                print_game_name();
+                menu_header("Game paused", 1);
             } else {
                 message("Cheats unavailable", "Not in this core");
-                clear();
-                print_field(5, 5, "Game paused", OSD_COLS - 2);
-                print_game_name();
+                menu_header("Game paused", 1);
             }
         }
         delay(20);

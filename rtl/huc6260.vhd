@@ -285,7 +285,7 @@ begin
 			V_CNT <= V_CNT + 1;
 			if V_CNT >= END_LINE-1 then
 				V_CNT <= (others => '0');
-				if CR(2) = '1' then			-- artifact bit affects number of lines per field; check at start of field
+				if RESET_N = '0' or CR(2) = '1' then			-- artifact bit affects number of lines per field; check at start of field
 				  END_LINE <= TOTAL_LINES;
 				else
 				  END_LINE <= TOTAL_LINES - 1;

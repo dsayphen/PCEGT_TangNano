@@ -86,13 +86,14 @@ static void show_rom_progress(uint32_t loaded, uint32_t size) {
     if (percent > 100)
         percent = 100;
 
-    clear_line(ROW_STATUS);
-    cursor(1, ROW_STATUS);
+    clear_line(ROW_PROGRESS);
+    cursor(1, ROW_PROGRESS);
     print("Loading ROM ");
     print_padded_decimal(loaded_kb, width);
     putchar('/');
     print_padded_decimal(size_kb, width);
     printf(" KB %d%%", percent);
+    progress_bar(percent);
 }
 
 static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_len) {

@@ -65,10 +65,17 @@ module iosys #(
     parameter [22:0] RV_BASE             = 23'h40_0000,
     parameter [31:0] ROM_MAX_SIZE        = 32'h0040_0000,
     parameter [15:0] CORE_ID             = 16'd3,
+    parameter RECONFIG_ENABLE = 0,
+    parameter RECONFIG_INPUT_ONLY = 0,
+    parameter [7:0] RECONFIG_PIN = 8'd29,
+    parameter RECONFIG_OUTPUT_TEST = 0,
+    parameter RECONFIG_PULSE_MS = 3000,
     parameter RV_DIAGNOSTIC = 0
 ) (
     input  wire        clk,               // clk_sys, 43.2 MHz
     input  wire        resetn,
+    output wire        reconfig_pull_low,
+    input  wire        reconfig_pin_high,
 
     // ---- OSD, pixel clock domain -----------------------------------------
     input  wire        clk_pix,
@@ -214,6 +221,8 @@ module iosys #(
     output wire        sd_cs_n            // card DAT3
 );
 
+initial audio_hdmi = 1'b0;
+
 /* verilator lint_off PINMISSING */
 /* verilator lint_off WIDTHTRUNC */
 
@@ -250,6 +259,31 @@ wire [31:0] flash_pio_status;
 wire [7:0] flash_pio_data;
 wire flash_ctrl_sel = mem_valid && (mem_addr == 32'h0200_00e0);
 wire flash_data_sel = mem_valid && (mem_addr == 32'h0200_00e4);
+wire reconfig_sel = mem_valid && (mem_addr == 32'h0200_00e8);
+localparam RECONFIG_TICKS = (FREQ / 1000) * RECONFIG_PULSE_MS;
+localparam RECONFIG_BITS = $clog2(RECONFIG_TICKS + 1);
+reg [RECONFIG_BITS-1:0] reconfig_count = 0;
+reg [1:0] reconfig_pin_sync = 2'b00;
+assign reconfig_pull_low = RECONFIG_ENABLE && resetn && (reconfig_count != 0);
+
+always @(posedge clk) begin
+    if (!resetn)
+        reconfig_pin_sync <= 2'b00;
+    else
+        reconfig_pin_sync <= {reconfig_pin_sync[0], reconfig_pin_high};
+end
+
+always @(posedge clk) begin
+    if (!resetn)
+        reconfig_count <= 0;
+    else if (reconfig_count != 0)
+        reconfig_count <= reconfig_count - 1'b1;
+    else if (RECONFIG_ENABLE && flash_loaded && !flash_pio_owned &&
+             flash_spi_cs_n && !flash_pio_status[0] && reconfig_sel &&
+             mem_wstrb == 4'b1111 && mem_wdata == 32'h52454346)
+        reconfig_count <= RECONFIG_TICKS;
+end
+
 assign flash_spi_cs_n = flash_pio_owned ? flash_pio_cs_n : flash_boot_cs_n;
 assign flash_spi_mosi = flash_pio_owned ? flash_pio_mosi : flash_boot_mosi;
 assign flash_spi_clk = flash_pio_owned ? flash_pio_clk : flash_boot_clk;
@@ -478,7 +512,7 @@ localparam [22:0] VRAM_CLEAR_SPAN  = 23'h01_0000;
 wire rl_data_ready = (rl_cnt == 3'd0) && !rl_clearing;
 
 assign mem_ready = (ram_sel && rv_ready && !probe_valid) || textdisp_sel ||
-                   flash_ctrl_sel || flash_data_sel ||
+                   flash_ctrl_sel || flash_data_sel || reconfig_sel ||
                    (uart_div_sel && !diag_uart_owned) ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
                    game_ctrl_sel || rl_status_sel || rl_debug_sel || vdc_options_sel ||
@@ -498,8 +532,12 @@ assign mem_ready = (ram_sel && rv_ready && !probe_valid) || textdisp_sel ||
                    ((spi_byte_sel || spi_word_sel) && !spi_wait);
 
 assign mem_rdata = ram_sel      ? rv_rdata :
-                   flash_ctrl_sel ? flash_pio_status :
+                   flash_ctrl_sel ? (flash_pio_status |
+                                     (RECONFIG_ENABLE ? 32'h00000200 : 32'd0) |
+                                     (RECONFIG_INPUT_ONLY ? 32'h00000400 : 32'd0) |
+                                     (RECONFIG_OUTPUT_TEST ? 32'h00000800 : 32'd0)) :
                    flash_data_sel ? {24'd0, flash_pio_data} :
+                   reconfig_sel ? {16'd0, RECONFIG_PIN, 6'd0, reconfig_pin_sync[1], reconfig_pull_low} :
                    joy_sel      ? {20'b0, joy1} :
                    zoom_sel     ? {30'b0, video_zoom} :
                    scan_sel     ? {30'b0, scanline} :
@@ -902,7 +940,8 @@ always @(posedge clk) begin
         audio_volume <= mem_wdata[3:0];
         audio_bass   <= mem_wdata[7:4];
         audio_treble <= mem_wdata[11:8];
-        audio_hdmi   <= mem_wdata[12];
+        if (resetn)
+            audio_hdmi <= mem_wdata[12];
         audio_cdda_enable <= mem_wdata[13];
         audio_adpcm_enable <= mem_wdata[14];
     end
@@ -949,7 +988,6 @@ always @(posedge clk) begin
         audio_volume <= 4'd10;     // unity gain
         audio_bass   <= 4'd5;      // flat (offset by +5)
         audio_treble <= 4'd5;      // flat (offset by +5)
-        audio_hdmi   <= 1'b0;
         audio_cdda_enable <= 1'b1;
         audio_adpcm_enable <= 1'b1;
         vdc_sprites_double <= 1'b0;

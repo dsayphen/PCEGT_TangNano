@@ -223,12 +223,87 @@ static int save_autorun(uint32_t profile, const char *game) {
     return 0;
 }
 
+static void trigger_fpga_reload(void) {
+    if ((reg_fpga_reload & 3u) != 2u) {
+        status("Reload pin low - use TP1");
+        return;
+    }
+    status("Reloading FPGA...");
+    reg_fpga_reload = FPGA_RELOAD_KEY;
+    delay(4000);
+    status("Use TP1 button or power cycle");
+}
+
+static void test_fpga_reload(void) {
+    uint32_t flash_state = reg_flash_ctrl;
+    int input_only = (flash_state & FPGA_RELOAD_INPUT_ONLY) != 0;
+    int output_test = (flash_state & FPGA_RELOAD_OUTPUT_TEST) != 0;
+    int pulse_pending = 0;
+    if (!(flash_state & (FPGA_RELOAD_SUPPORTED | FPGA_RELOAD_INPUT_ONLY))) {
+        char details[] = "Flash ctrl: 00000000";
+        for (int digit = 0; digit < 8; digit++)
+            details[12 + digit] = "0123456789ABCDEF"[(flash_state >> ((7 - digit) * 4)) & 15u];
+        message("FPGA reload unavailable", details);
+        return;
+    }
+    if (flash_state & 0x101u) {
+        message("SPI flash is busy", "Reload test cancelled");
+        return;
+    }
+    int gpio29 = ((reg_fpga_reload >> 8) & 0xffu) == 29u;
+    clear();
+    selection_row(31);
+    print_field(1, 8, output_test ? "GPIO29 pulse test"
+                                : input_only ? (gpio29 ? "GPIO29 input-only test" : "GPIO26 input-only test")
+                                             : "Reload current FPGA core?",
+                OSD_COLS - 2);
+    status(input_only ? "B=Back" : output_test ? "A=3s pulse  B=Back" : "A=Confirm  B=Cancel");
+    delay(250);
+    for (;;) {
+        uint32_t reload_state = reg_fpga_reload;
+        print_field(1, 10, gpio29 ? (reload_state & 2u ? "GPIO29 input: High" : "GPIO29 input: Low")
+                    : (reload_state & 2u ? "GPIO26 input: High" : "GPIO26 input: Low"),
+                    OSD_COLS - 2);
+        print_field(1, 11, reload_state & 1u ? "Command: Low" : "Command: Released",
+                    OSD_COLS - 2);
+        if (output_test && pulse_pending && !(reload_state & 1u)) {
+            pulse_pending = 0;
+            status("Pulse complete  A=Test B=Back");
+        }
+        uint32_t edge = joy_edge();
+        if ((edge & JOY_B) && !(reload_state & 1u))
+            return;
+        if (!input_only && (edge & JOY_A) && !(reload_state & 1u)) {
+            if ((reload_state & 3u) != 2u) {
+                message(gpio29 ? "GPIO29 is not idle high" : "GPIO26 is not idle high",
+                        "Keep TP1 disconnected");
+                return;
+            }
+            if (output_test) {
+                status("Pulse active - TP1 disconnected");
+                reg_fpga_reload = FPGA_RELOAD_KEY;
+                pulse_pending = 1;
+                delay(20);
+                continue;
+            }
+            trigger_fpga_reload();
+            message("FPGA reload did not occur", gpio29 ? "Check GPIO29 / TP1 wiring" : "Check GPIO26 / TP1 wiring");
+            return;
+        }
+        delay(20);
+    }
+}
+
 int core_offer_switch(uint32_t profile, const char *game) {
     CoreManifest manifest;
     uint8_t identity[3];
     int modified = 0;
     if (profile < CORE_PROFILE_SGX || profile > CORE_PROFILE_SUPERSET)
         return 0;
+    if (reg_flash_ctrl & FPGA_RELOAD_OUTPUT_TEST) {
+        message("GPIO pulse diagnostic core", "Core copying disabled");
+        return 0;
+    }
     if (!confirm_switch(profile))
         return 0;
     if ((reg_flash_ctrl >> 16) != 0x4653u) {
@@ -254,6 +329,8 @@ int core_offer_switch(uint32_t profile, const char *game) {
         manifest.profile != profile || manifest.size == 0 ||
         manifest.size > MANIFEST_OFFSET)
         goto failed;
+    status("");
+    progress_status("Checking core", 0);
     uint32_t crc = 0xffffffffu;
     for (uint32_t offset = 0; offset < manifest.size; offset += SECTOR_SIZE) {
         uint32_t length = manifest.size - offset;
@@ -263,9 +340,7 @@ int core_offer_switch(uint32_t profile, const char *game) {
             goto failed;
         for (uint32_t index = 0; index < length; index++)
             crc = crc_byte(crc, sector_buf[index]);
-        clear_line(ROW_STATUS);
-        cursor(1, ROW_STATUS);
-        printf("Checking core %d%%", (int)((offset + length) * 100 / manifest.size));
+        progress_status("Checking core", (int)((offset + length) * 100 / manifest.size));
     }
     if (~crc != manifest.crc)
         goto failed;
@@ -277,6 +352,7 @@ int core_offer_switch(uint32_t profile, const char *game) {
     pce_pause(1);
     cd_audio_reset();
     cd_close();
+    progress_status("Copying core", 0);
     for (uint32_t offset = 0; offset < SLOT_SIZE; offset += SECTOR_SIZE) {
         if (flash_read(source + offset, sector_buf, SECTOR_SIZE) != 0)
             goto failed;
@@ -289,15 +365,25 @@ int core_offer_switch(uint32_t profile, const char *game) {
         }
         if (flash_verify(offset, sector_buf) != 0)
             goto failed;
-        clear_line(ROW_STATUS);
-        cursor(1, ROW_STATUS);
-        printf("Copying core %d%%", (int)((offset + SECTOR_SIZE) * 100 / SLOT_SIZE));
+        progress_status("Copying core", (int)((offset + SECTOR_SIZE) * 100 / SLOT_SIZE));
     }
     flash_release();
     clear();
     print_field(1, 8, "Core ready", OSD_COLS - 2);
     print_field(1, 9, core_name(profile), OSD_COLS - 2);
-    status("Power off, then power on");
+    if (reg_flash_ctrl & FPGA_RELOAD_SUPPORTED) {
+        status("A=Reload FPGA");
+        delay(250);
+        for (;;) {
+            if (joy_edge() & JOY_A) {
+                trigger_fpga_reload();
+                break;
+            }
+            delay(20);
+        }
+    } else {
+        status("Use TP1 button or power cycle");
+    }
     for (;;) delay(100);
 
 failed:
@@ -327,6 +413,9 @@ void core_menu(void) {
             if (profile == CORE_PROFILE_ID)
                 print_field(21, 8 + index, "Active", 6);
         }
+        cursor(2, 11);
+        putchar(active == 3 ? '>' : ' ');
+        print_field(4, 11, "Test FPGA reload", OSD_COLS - 5);
         selection_row(8 + active);
         status("A=Select  B=Back");
         for (;;) {
@@ -334,14 +423,18 @@ void core_menu(void) {
             if (edge & (JOY_B | JOY_SELECT))
                 return;
             if (edge & JOY_UP) {
-                active = active ? active - 1 : 2;
+                active = active ? active - 1 : 3;
                 break;
             }
             if (edge & JOY_DOWN) {
-                active = active == 2 ? 0 : active + 1;
+                active = active == 3 ? 0 : active + 1;
                 break;
             }
             if (edge & JOY_A) {
+                if (active == 3) {
+                    test_fpga_reload();
+                    break;
+                }
                 uint32_t profile = active + CORE_PROFILE_SGX;
                 if (profile != CORE_PROFILE_ID)
                     core_offer_switch(profile, NULL);

@@ -38,6 +38,11 @@
 #define reg_vdc_options    (*(volatile uint32_t*)0x020000d0)
 #define reg_flash_ctrl     (*(volatile uint32_t*)0x020000e0)
 #define reg_flash_data     (*(volatile uint32_t*)0x020000e4)
+#define reg_fpga_reload    (*(volatile uint32_t*)0x020000e8)
+#define FPGA_RELOAD_SUPPORTED (1u << 9)
+#define FPGA_RELOAD_INPUT_ONLY (1u << 10)
+#define FPGA_RELOAD_OUTPUT_TEST (1u << 11)
+#define FPGA_RELOAD_KEY    0x52454346u
 #define CORE_PROFILE_PCE      0u
 #define CORE_PROFILE_SGX      1u
 #define CORE_PROFILE_CD       2u

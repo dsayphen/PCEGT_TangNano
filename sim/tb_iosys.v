@@ -16,6 +16,25 @@
 module tb_iosys;
 
 localparam FIRMWARE_SIZE = 4096;
+`ifdef RECONFIG_INPUT_TEST
+localparam RECONFIG_INPUT_ONLY_TEST = 1;
+`else
+localparam RECONFIG_INPUT_ONLY_TEST = 0;
+`endif
+`ifdef RECONFIG_PULSE_TEST
+localparam RECONFIG_OUTPUT_TEST_MODE = 1;
+localparam RECONFIG_PULSE_MS_TEST = 3000;
+`else
+localparam RECONFIG_OUTPUT_TEST_MODE = 0;
+localparam RECONFIG_PULSE_MS_TEST = 3000;
+`endif
+localparam RECONFIG_PIN_TEST = 29;
+`ifdef RECONFIG_TEST
+localparam IOSYS_FREQ = 1000;
+`else
+localparam IOSYS_FREQ = 43_200_000;
+`endif
+localparam RECONFIG_TICKS_TEST = (IOSYS_FREQ / 1000) * RECONFIG_PULSE_MS_TEST;
 
 reg clk = 0;
 reg clk_mem = 0;
@@ -71,15 +90,40 @@ reg         refresh_window = 1'b0;
 wire        osd_on;
 wire [23:0] osd_rgb;
 wire        osd_active;
+wire        reload_pin;
+wire        reload_pin_high;
+wire        reload_pull_low;
+
+`ifdef RECONFIG_TEST
+`ifdef RECONFIG_INPUT_TEST
+IBUF reload_ibuf (
+    .I(reload_pin), .O(reload_pin_high)
+);
+`else
+IOBUF reload_iobuf (
+    .I(1'b0), .OEN(~reload_pull_low), .O(reload_pin_high), .IO(reload_pin)
+);
+`endif
+`else
+assign reload_pin = reload_pull_low ? 1'b0 : 1'bz;
+assign reload_pin_high = reload_pin;
+`endif
 
 iosys #(
-    .FREQ                (43_200_000),
+    .FREQ                (IOSYS_FREQ),
+    .RECONFIG_ENABLE     (!RECONFIG_INPUT_ONLY_TEST),
+    .RECONFIG_INPUT_ONLY (RECONFIG_INPUT_ONLY_TEST),
+    .RECONFIG_PIN        (RECONFIG_PIN_TEST),
+    .RECONFIG_OUTPUT_TEST (RECONFIG_OUTPUT_TEST_MODE),
+    .RECONFIG_PULSE_MS   (RECONFIG_PULSE_MS_TEST),
     .FIRMWARE_FLASH_ADDR (24'h50_0000),
     .FIRMWARE_SIZE       (FIRMWARE_SIZE),
     .RV_BASE             (23'h40_0000)
 ) dut (
     .clk        (clk),
     .resetn     (resetn),
+    .reconfig_pull_low (reload_pull_low),
+    .reconfig_pin_high (reload_pin_high),
 
     .clk_pix    (clk),
     .pix_resetn (resetn),
@@ -228,12 +272,14 @@ always @(negedge clk_mem)
         !O_sdram_cas_n && O_sdram_wen_n)
         refreshes = refreshes + 1;
 
+`ifndef RECONFIG_TEST
 initial begin
     wait (dut.flash_loaded);
     repeat (10) @(posedge clk);
     check_eq(sd.mem[21'h100000], 32'h001f0137, "firmware word 0");
     check_eq(sd.mem[21'h100001], 32'h1f000513, "firmware word 1");
 end
+`endif
 
 task check_eq;
     input [63:0] got;
@@ -248,6 +294,181 @@ task check_eq;
         end
     end
 endtask
+
+`ifdef RECONFIG_TEST
+wire reload_pullup_source;
+reg reload_pullup_enable = 1;
+reg reload_external_low = 0;
+pullup(reload_pullup_source);
+tranif1(reload_pin, reload_pullup_source, reload_pullup_enable);
+assign reload_pin = reload_external_low ? 1'b0 : 1'bz;
+
+task reload_write;
+    input [31:0] key;
+    input [3:0] strobes;
+    begin
+        @(negedge clk);
+        force dut.mem_addr = 32'h0200_00e8;
+        force dut.mem_wdata = key;
+        force dut.mem_wstrb = strobes;
+        force dut.mem_valid = 1'b1;
+        #1;
+        check_eq(dut.mem_ready, 1, "reload register ready");
+        @(posedge clk);
+        #1;
+        @(negedge clk);
+        force dut.mem_valid = 1'b0;
+    end
+endtask
+
+task check_reload;
+    integer tick;
+    begin
+        force dut.mem_valid = 1'b0;
+        force dut.flash_loaded = 1'b0;
+        force dut.flash_pio_owned = 1'b0;
+        force dut.flash_boot_cs_n = 1'b1;
+        force dut.flash_pio_status = 32'd0;
+        check_eq(reload_pin, 1, "reload pin idle released");
+        reload_write(32'h52454346, 4'hf);
+        check_eq(reload_pin, 1, "reload blocked during boot");
+        force dut.flash_loaded = 1'b1;
+        force dut.mem_addr = 32'h0200_00e0;
+        force dut.mem_valid = 1'b1;
+        force dut.mem_wstrb = 4'd0;
+        #1;
+        check_eq(dut.mem_rdata[9], !RECONFIG_INPUT_ONLY_TEST, "reload capability advertised");
+        check_eq(dut.mem_rdata[10], RECONFIG_INPUT_ONLY_TEST, "input-only capability advertised");
+        check_eq(dut.mem_rdata[11], RECONFIG_OUTPUT_TEST_MODE, "pulse-test capability advertised");
+        force dut.mem_valid = 1'b0;
+        reload_pullup_enable = 0;
+        #1;
+        if (reload_pin !== 1'bz)
+            $fatal(1, "Idle Gowin IOBUF is not high impedance");
+        reload_external_low = 1;
+        repeat (3) @(posedge clk);
+        force dut.mem_addr = 32'h0200_00e8;
+        force dut.mem_valid = 1'b1;
+        #1;
+        check_eq(dut.mem_rdata[15:8], RECONFIG_PIN_TEST, "diagnostic GPIO number");
+        check_eq(dut.mem_rdata[7:0], 0, "reload pin feedback external low");
+        reload_external_low = 0;
+        reload_pullup_enable = 1;
+        repeat (3) @(posedge clk);
+        #1;
+        check_eq(dut.mem_rdata[7:0], 2, "reload pin feedback pulled high");
+        force dut.mem_valid = 1'b0;
+`ifdef RECONFIG_INPUT_TEST
+        reload_write(32'h52454346, 4'hf);
+        repeat (3) @(posedge clk);
+        #1;
+        check_eq(dut.reconfig_count, 0, "input-only rejects reload key");
+        check_eq(dut.reconfig_pull_low, 0, "input-only output never enabled");
+        check_eq(reload_pin, 1, "input-only pin stays pulled high");
+        reload_pullup_enable = 0;
+        #1;
+        if (reload_pin !== 1'bz)
+            $fatal(1, "Input-only GPIO26 has an unexpected driver");
+        if (errors != 0)
+            $fatal(1, "RECONFIG_INPUT_TEST FAILED: %0d errors", errors);
+        $display("*** RECONFIG_INPUT_TEST PASSED ***");
+        $finish;
+`endif
+        reload_write(32'd1, 4'hf);
+        check_eq(reload_pin, 1, "invalid reload key rejected");
+        reload_write(32'h52454346, 4'h1);
+        check_eq(reload_pin, 1, "partial reload write rejected");
+        force dut.flash_pio_owned = 1'b1;
+        reload_write(32'h52454346, 4'hf);
+        check_eq(reload_pin, 1, "reload blocked while flash owned");
+        force dut.flash_pio_owned = 1'b0;
+        force dut.flash_boot_cs_n = 1'b0;
+        reload_write(32'h52454346, 4'hf);
+        check_eq(reload_pin, 1, "reload blocked while flash selected");
+        force dut.flash_boot_cs_n = 1'b1;
+        force dut.flash_pio_status = 32'd1;
+        reload_write(32'h52454346, 4'hf);
+        check_eq(reload_pin, 1, "reload blocked while SPI busy");
+        force dut.flash_pio_status = 32'd0;
+        reload_write(32'h52454346, 4'hf);
+        check_eq(reload_pin, 0, "reload pin asserted low");
+        check_eq(dut.reconfig_count, RECONFIG_TICKS_TEST, "reload duration loaded");
+        force dut.mem_valid = 1'b1;
+        force dut.mem_wstrb = 4'd0;
+        for (tick = 1; tick <= RECONFIG_TICKS_TEST; tick = tick + 1) begin
+            @(posedge clk);
+            #1;
+            if (dut.reconfig_pull_low !== (tick < RECONFIG_TICKS_TEST))
+                $fatal(1, "Reload duration mismatch at tick %0d", tick);
+            if (tick == 3)
+                check_eq(dut.mem_rdata[7:0], 1, "reload pin feedback during pulse");
+        end
+        check_eq(reload_pin, 1, "reload pin released after pulse");
+        repeat (3) @(posedge clk);
+        #1;
+        check_eq(dut.mem_rdata[7:0], 2, "reload pin feedback after pulse");
+        force dut.mem_valid = 1'b0;
+        reload_write(32'h52454346, 4'hf);
+        resetn = 0;
+        #1;
+        check_eq(reload_pin, 1, "reload pin released on reset");
+        @(posedge clk);
+        #1;
+        check_eq(dut.reconfig_count, 0, "reload count cleared on reset");
+        if (errors != 0)
+            $fatal(1, "RECONFIG_TEST FAILED: %0d errors", errors);
+        $display("*** RECONFIG_TEST PASSED ***");
+        $finish;
+    end
+endtask
+`endif
+
+`ifdef AUDIO_MODE_RESET_TEST
+task write_audio_mode;
+    input [31:0] value;
+    begin
+        @(negedge clk);
+        force dut.mem_valid = 1'b1;
+        force dut.mem_addr = 32'h0200_0064;
+        force dut.mem_wdata = value;
+        force dut.mem_wstrb = 4'hf;
+        @(posedge clk);
+        #1;
+        @(negedge clk);
+        force dut.mem_valid = 1'b0;
+    end
+endtask
+
+task check_audio_mode_reset;
+    begin
+        force dut.mem_valid = 1'b0;
+        check_eq(dut.audio_hdmi, 0, "speaker default on FPGA startup");
+        write_audio_mode(32'h0000755a);
+        check_eq(dut.audio_hdmi, 1, "firmware selects HDMI");
+        resetn = 0;
+        repeat (8) @(posedge clk);
+        #1;
+        check_eq(dut.audio_hdmi, 1, "HDMI survives firmware reset");
+        write_audio_mode(32'h0000655a);
+        check_eq(dut.audio_hdmi, 1, "audio write ignored during reset");
+        @(negedge clk);
+        resetn = 1;
+        repeat (4) @(posedge clk);
+        #1;
+        check_eq(dut.audio_hdmi, 1, "HDMI remains selected after reset");
+        write_audio_mode(32'h0000655a);
+        check_eq(dut.audio_hdmi, 0, "firmware can select speaker");
+        resetn = 0;
+        repeat (8) @(posedge clk);
+        #1;
+        check_eq(dut.audio_hdmi, 0, "speaker survives firmware reset");
+        if (errors != 0)
+            $fatal(1, "AUDIO_MODE_RESET_TEST FAILED: %0d errors", errors);
+        $display("*** AUDIO_MODE_RESET_TEST PASSED ***");
+        $finish;
+    end
+endtask
+`endif
 
 task check_cd_audio_feed;
     begin
@@ -332,6 +553,16 @@ initial begin
 
     repeat (10) @(posedge clk);
     resetn = 1;
+
+`ifdef AUDIO_MODE_RESET_TEST
+    repeat (2) @(posedge clk);
+    check_audio_mode_reset();
+`endif
+
+`ifdef RECONFIG_TEST
+    repeat (2) @(posedge clk);
+    check_reload();
+`endif
 
     // wait for the two loads to have been announced
     wait (marks >= 6);

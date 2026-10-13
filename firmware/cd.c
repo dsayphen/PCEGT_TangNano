@@ -248,7 +248,8 @@ static int load_system_card(void) {
         return -1;
     }
 
-    status("Loading System Card...");
+    status("");
+    progress_status("Loading System Card", 0);
     uart_print("syscard: starting SDRAM transfer\n");
     pce_pause(1);
     pce_load_start(size, 0);
@@ -274,6 +275,7 @@ static int load_system_card(void) {
 
         if (total - last_report >= 65536 || total == size) {
             uart_printf("syscard: %d / %d bytes\n", (int)total, (int)size);
+            progress_status("Loading System Card", (int)(total * 100 / size));
             last_report = total;
         }
     }

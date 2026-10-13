@@ -103,6 +103,36 @@ localparam [23:0] TEXT   = 24'hA0_A0_A0;
 localparam [23:0] CURSOR = 24'hFF_FF_FF;
 localparam [23:0] BACK   = 24'h00_00_00;
 
+task check_selected_glyph;
+    input [7:0] character;
+    input [23:0] expected;
+    integer pixel_x, pixel_y, lit_pixels;
+    reg [23:0] colour;
+    begin
+        wr((5 << 16) | (3 << 8) | character);
+        repeat (8) @(posedge clk_pix);
+        lit_pixels = 0;
+        for (pixel_y = 0; pixel_y < 16; pixel_y = pixel_y + 1) begin
+            for (pixel_x = 0; pixel_x < 16; pixel_x = pixel_x + 1) begin
+                pixel(X0 + 5*16 + pixel_x, Y0 + 3*16 + pixel_y, colour);
+                if (colour !== BACK) begin
+                    lit_pixels = lit_pixels + 1;
+                    if (colour !== expected) begin
+                        $display("FAIL selected glyph %h pixel (%0d,%0d): %h expected %h",
+                                 character, pixel_x, pixel_y, colour, expected);
+                        errors = errors + 1;
+                    end
+                end
+            end
+        end
+        if (lit_pixels == 0) begin
+            $display("FAIL selected glyph %h is blank", character);
+            errors = errors + 1;
+        end else
+            $display("checked selected glyph %h: %0d lit pixels", character, lit_pixels);
+    end
+endtask
+
 initial begin
     $dumpfile("sim/tb_textdisp.vcd");
     $dumpvars(0, tb_textdisp);
@@ -110,6 +140,26 @@ initial begin
     repeat (4) @(posedge clk);
     resetn = 1;
     repeat (4) @(posedge clk);
+
+    if ($test$plusargs("decorative")) begin
+        wr(32'h0300_0000 | (3 << 8));
+        check_selected_glyph(8'h60, TEXT);
+        check_selected_glyph(8'h5E, TEXT);
+        check_selected_glyph(8'h7B, TEXT);
+        check_selected_glyph(8'h7D, TEXT);
+        check_selected_glyph(8'h7E, TEXT);
+        check_selected_glyph(8'h7C, TEXT);
+        check_selected_glyph(8'h5C, TEXT);
+        check_selected_glyph(8'h7F, TEXT);
+        check_selected_glyph(8'h5F, TEXT);
+        check_selected_glyph(8'h24, TEXT);
+        check_selected_glyph("A", CURSOR);
+        check_selected_glyph(">", CURSOR);
+        if (errors != 0)
+            $fatal(1, "tb_textdisp decorative FAILED: %0d errors", errors);
+        $display("*** tb_textdisp decorative PASSED ***");
+        $finish;
+    end
 
     // 'A' at column 5, row 3 and '>' (0x3E) in the cursor column of row 3
     wr(32'h0000_0000 | (5 << 16) | (3 << 8) | "A");

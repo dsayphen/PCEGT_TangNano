@@ -60,9 +60,9 @@ wire island_preamble = hdmi_audio_on && cx >= 11'd644 && cx < 11'd652;
 wire island_guard = hdmi_audio_on &&
                     ((cx >= 11'd652 && cx < 11'd654) ||
                      (cx >= 11'd782 && cx < 11'd784));
-wire video_preamble = hdmi_audio_on && cy < 10'd479 &&
+wire video_preamble = hdmi_audio_on && cy < 10'd480 &&
                       cx >= 11'd809 && cx < 11'd817;
-wire video_guard = hdmi_audio_on && cy < 10'd479 &&
+wire video_guard = hdmi_audio_on && cy < 10'd480 &&
                    cx >= 11'd817 && cx < 11'd819;
 wire packet_start = hdmi_audio_on && cx >= 11'd653 && cx < 11'd781 &&
                     cx[4:0] == 5'd13;

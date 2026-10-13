@@ -162,6 +162,13 @@ wire [7:0] glyph = (s0_char >= 8'h20 && s0_char <= 8'h7F) ? s0_char : 8'h3F;
 wire [6:0] glyph_idx = glyph[6:0] - 7'h20;
 wire [9:0] font_addr = {glyph_idx, s0_yoff};
 
+wire decorative_glyph =
+    s0_char == 8'h60 || s0_char == 8'h5E ||
+    s0_char == 8'h7B || s0_char == 8'h7D ||
+    s0_char == 8'h7E || s0_char == 8'h7C ||
+    s0_char == 8'h5C || s0_char == 8'h7F ||
+    s0_char == 8'h5F || s0_char == 8'h24;
+
 wire [7:0] font_data;
 
 font_rom u_font (
@@ -178,7 +185,7 @@ reg       s1_de;
 always @(posedge clk_pix) begin
     s1_box    <= s0_box;
     s1_xoff   <= s0_xoff;
-    s1_cursor <= s0_cursor;
+    s1_cursor <= s0_cursor && !decorative_glyph;
     s1_de     <= s0_de;
 end
 

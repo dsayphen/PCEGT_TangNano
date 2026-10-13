@@ -226,7 +226,6 @@ static void draw_entry_name(int index, int offset) {
 static void draw_page(int page, int total, int active) {
     clear();
     title();
-    print_field(1, ROW_PATH, pwd, OSD_COLS - 2);
 
     for (int i = 0; i < PAGESIZE; i++) {
         int y = ROW_FIRST + i;
