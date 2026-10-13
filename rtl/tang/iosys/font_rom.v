@@ -57,14 +57,14 @@ always @(posedge clk) begin
         10'd30 : data <= 8'h66;
         10'd31 : data <= 8'h00;
         // 0x24 '$'
-        10'd32 : data <= 8'h08;
-        10'd33 : data <= 8'h7C;
-        10'd34 : data <= 8'h06;
-        10'd35 : data <= 8'h3C;
-        10'd36 : data <= 8'h60;
-        10'd37 : data <= 8'h3E;
-        10'd38 : data <= 8'h08;
-        10'd39 : data <= 8'h00;
+        10'd32 : data <= 8'hAA;
+        10'd33 : data <= 8'h55;
+        10'd34 : data <= 8'hAA;
+        10'd35 : data <= 8'h55;
+        10'd36 : data <= 8'hAA;
+        10'd37 : data <= 8'h55;
+        10'd38 : data <= 8'hAA;
+        10'd39 : data <= 8'h55;
         // 0x25 '%'
         10'd40 : data <= 8'h00;
         10'd41 : data <= 8'h46;
@@ -561,14 +561,14 @@ always @(posedge clk) begin
         10'd478: data <= 8'h3C;
         10'd479: data <= 8'h00;
         // 0x5C '\'
-        10'd480: data <= 8'h00;
-        10'd481: data <= 8'h02;
-        10'd482: data <= 8'h06;
-        10'd483: data <= 8'h0C;
-        10'd484: data <= 8'h18;
-        10'd485: data <= 8'h30;
-        10'd486: data <= 8'h60;
-        10'd487: data <= 8'h40;
+        10'd480: data <= 8'h18;
+        10'd481: data <= 8'h18;
+        10'd482: data <= 8'h18;
+        10'd483: data <= 8'hF8;
+        10'd484: data <= 8'hF8;
+        10'd485: data <= 8'h18;
+        10'd486: data <= 8'h18;
+        10'd487: data <= 8'h18;
         // 0x5D ']'
         10'd488: data <= 8'h00;
         10'd489: data <= 8'h3C;
@@ -579,32 +579,32 @@ always @(posedge clk) begin
         10'd494: data <= 8'h3C;
         10'd495: data <= 8'h00;
         // 0x5E '^'
-        10'd496: data <= 8'h08;
-        10'd497: data <= 8'h1C;
-        10'd498: data <= 8'h36;
-        10'd499: data <= 8'h00;
-        10'd500: data <= 8'h00;
-        10'd501: data <= 8'h00;
-        10'd502: data <= 8'h00;
-        10'd503: data <= 8'h00;
+        10'd496: data <= 8'h00;
+        10'd497: data <= 8'h00;
+        10'd498: data <= 8'h00;
+        10'd499: data <= 8'h1F;
+        10'd500: data <= 8'h1F;
+        10'd501: data <= 8'h18;
+        10'd502: data <= 8'h18;
+        10'd503: data <= 8'h18;
         // 0x5F '_'
-        10'd504: data <= 8'h00;
-        10'd505: data <= 8'h00;
-        10'd506: data <= 8'h00;
-        10'd507: data <= 8'h00;
-        10'd508: data <= 8'h00;
-        10'd509: data <= 8'h00;
+        10'd504: data <= 8'hFF;
+        10'd505: data <= 8'hFF;
+        10'd506: data <= 8'hFF;
+        10'd507: data <= 8'hFF;
+        10'd508: data <= 8'hFF;
+        10'd509: data <= 8'hFF;
         10'd510: data <= 8'hFF;
-        10'd511: data <= 8'h00;
+        10'd511: data <= 8'hFF;
         // 0x60 '`'
-        10'd512: data <= 8'h0C;
-        10'd513: data <= 8'h18;
-        10'd514: data <= 8'h30;
-        10'd515: data <= 8'h00;
-        10'd516: data <= 8'h00;
-        10'd517: data <= 8'h00;
-        10'd518: data <= 8'h00;
-        10'd519: data <= 8'h00;
+        10'd512: data <= 8'h00;
+        10'd513: data <= 8'h00;
+        10'd514: data <= 8'h00;
+        10'd515: data <= 8'hF8;
+        10'd516: data <= 8'hF8;
+        10'd517: data <= 8'h18;
+        10'd518: data <= 8'h18;
+        10'd519: data <= 8'h18;
         // 0x61 'a'
         10'd520: data <= 8'h00;
         10'd521: data <= 8'h00;
@@ -840,50 +840,50 @@ always @(posedge clk) begin
         10'd726: data <= 8'h7E;
         10'd727: data <= 8'h00;
         // 0x7B '{'
-        10'd728: data <= 8'h00;
-        10'd729: data <= 8'h70;
+        10'd728: data <= 8'h18;
+        10'd729: data <= 8'h18;
         10'd730: data <= 8'h18;
-        10'd731: data <= 8'h18;
-        10'd732: data <= 8'h0E;
-        10'd733: data <= 8'h18;
-        10'd734: data <= 8'h18;
-        10'd735: data <= 8'h70;
+        10'd731: data <= 8'hF8;
+        10'd732: data <= 8'hF8;
+        10'd733: data <= 8'h00;
+        10'd734: data <= 8'h00;
+        10'd735: data <= 8'h00;
         // 0x7C '|'
-        10'd736: data <= 8'h00;
+        10'd736: data <= 8'h18;
         10'd737: data <= 8'h18;
         10'd738: data <= 8'h18;
         10'd739: data <= 8'h18;
-        10'd740: data <= 8'h00;
+        10'd740: data <= 8'h18;
         10'd741: data <= 8'h18;
         10'd742: data <= 8'h18;
         10'd743: data <= 8'h18;
         // 0x7D '}'
-        10'd744: data <= 8'h00;
-        10'd745: data <= 8'h0E;
+        10'd744: data <= 8'h18;
+        10'd745: data <= 8'h18;
         10'd746: data <= 8'h18;
-        10'd747: data <= 8'h18;
-        10'd748: data <= 8'h70;
-        10'd749: data <= 8'h18;
-        10'd750: data <= 8'h18;
-        10'd751: data <= 8'h0E;
+        10'd747: data <= 8'h1F;
+        10'd748: data <= 8'h1F;
+        10'd749: data <= 8'h00;
+        10'd750: data <= 8'h00;
+        10'd751: data <= 8'h00;
         // 0x7E '~'
         10'd752: data <= 8'h00;
-        10'd753: data <= 8'hDC;
-        10'd754: data <= 8'h76;
-        10'd755: data <= 8'h00;
-        10'd756: data <= 8'h00;
+        10'd753: data <= 8'h00;
+        10'd754: data <= 8'h00;
+        10'd755: data <= 8'hFF;
+        10'd756: data <= 8'hFF;
         10'd757: data <= 8'h00;
         10'd758: data <= 8'h00;
         10'd759: data <= 8'h00;
         // 0x7F ' '
-        10'd760: data <= 8'h00;
-        10'd761: data <= 8'h00;
-        10'd762: data <= 8'h00;
-        10'd763: data <= 8'h00;
-        10'd764: data <= 8'h00;
-        10'd765: data <= 8'h00;
-        10'd766: data <= 8'h00;
-        10'd767: data <= 8'h00;
+        10'd760: data <= 8'h18;
+        10'd761: data <= 8'h18;
+        10'd762: data <= 8'h18;
+        10'd763: data <= 8'h1F;
+        10'd764: data <= 8'h1F;
+        10'd765: data <= 8'h18;
+        10'd766: data <= 8'h18;
+        10'd767: data <= 8'h18;
         default: data <= 8'h00;
     endcase
 end
