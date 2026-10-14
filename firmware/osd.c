@@ -26,16 +26,23 @@ void progress_bar(int percent) {
     int filled = percent * blocks / 100;
 
     clear_line(ROW_PROGRESS + 1);
-    clear_line(ROW_PROGRESS_BAR);
-    cursor(1, ROW_PROGRESS_BAR);
+    cursor(0, ROW_PROGRESS_BAR);
+    putchar(' ');
     for (int block = 0; block < blocks; block++)
         putchar(block < filled ? '_' : '$');
+    putchar(' ');
 }
 
 void progress_status(const char *msg, int percent) {
-    clear_line(ROW_PROGRESS);
+    if (percent < 0)
+        percent = 0;
+    if (percent > 100)
+        percent = 100;
     cursor(1, ROW_PROGRESS);
     printf("%s %d%%", msg, percent);
+    int text_len = (int)strlen(msg) + (percent >= 100 ? 5 : percent >= 10 ? 4 : 3);
+    for (int column = 1 + text_len; column < OSD_COLS; column++)
+        putchar(' ');
     progress_bar(percent);
 }
 

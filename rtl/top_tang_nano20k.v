@@ -210,6 +210,7 @@ wire [1:0]  scanline;
 wire        game_pause;
 wire        game_reset;
 wire        pad_mode;
+wire        pad_mode_sf2;
 wire        cheat_apply;
 wire        cheat_reset;
 wire [128:0] cheat_code;
@@ -362,6 +363,7 @@ iosys #(
     .game_reset       (game_reset),
     .system_reset     (system_reset),
     .pad_mode         (pad_mode),
+    .pad_mode_sf2     (pad_mode_sf2),
     .cheat_apply      (cheat_apply),
     .cheat_reset      (cheat_reset),
     .cheat_code       (cheat_code),
@@ -812,12 +814,12 @@ pce_pad u_joy (
     .down     (game_btn[5]),
     .left     (game_btn[6]),
     .right    (game_btn[7]),
-    .btn_i    (game_btn[8]),                 // SNES A -> PCE I
-    .btn_ii   (game_btn[0]),                 // SNES B -> PCE II
-    .btn_iii  (game_btn[9]),                 // SNES X -> PCE III
-    .btn_iv   (game_btn[1]),                 // SNES Y -> PCE IV
-    .btn_v    (game_btn[10]),                // SNES L -> PCE V
-    .btn_vi   (game_btn[11]),                // SNES R -> PCE VI
+    .btn_i    (pad_mode_sf2 ? game_btn[11] : game_btn[8]), // SF2 R -> PCE I
+    .btn_ii   (pad_mode_sf2 ? game_btn[8]  : game_btn[0]), // SF2 A -> PCE II
+    .btn_iii  (pad_mode_sf2 ? game_btn[0]  : game_btn[9]), // SF2 B -> PCE III
+    .btn_iv   (pad_mode_sf2 ? game_btn[9]  : game_btn[1]), // SF2 X -> PCE IV
+    .btn_v    (pad_mode_sf2 ? game_btn[1]  : game_btn[10]), // SF2 Y -> PCE V
+    .btn_vi   (pad_mode_sf2 ? game_btn[10] : game_btn[11]), // SF2 L -> PCE VI
     .sel      (game_btn[2]),                 // SNES Select -> Select
     .run      (game_btn[3])                  // SNES Start -> Run
 );

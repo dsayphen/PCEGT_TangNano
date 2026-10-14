@@ -184,6 +184,7 @@ module iosys #(
     output reg         game_reset,
     output reg         system_reset,
     output reg         pad_mode,
+    output reg         pad_mode_sf2,
     output wire        cheat_apply,
     output wire        cheat_reset,
     output wire [128:0] cheat_code,
@@ -544,7 +545,7 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    uart_div_sel ? uart_div_do :
                    uart_dat_sel ? uart_dat_do :
                    time_sel     ? time_reg :
-                   pad_mode_sel ? {6'd0, vce_cr_q, vcr_q, vdw_q, pad_mode} :
+                   pad_mode_sel ? {pad_mode_sf2, 5'd0, vce_cr_q, vcr_q, vdw_q, pad_mode} :
                    color_mode_sel ? {6'd0, vds_q, vsw_q, hde_q, hsw_q, color_mode} :
                    id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
                    audio_sel    ? {17'b0, audio_adpcm_enable, audio_cdda_enable,
@@ -913,8 +914,10 @@ always @(posedge clk) begin
         end
     end
 
-    if (pad_mode_sel && (mem_wstrb != 4'b0))
-        pad_mode <= mem_wdata[0];
+    if (pad_mode_sel && (mem_wstrb != 4'b0)) begin
+        pad_mode <= |mem_wdata[1:0];
+        pad_mode_sf2 <= mem_wdata[1];
+    end
 
     if (color_mode_sel && (mem_wstrb != 4'b0))
         color_mode <= mem_wdata[0];
@@ -984,6 +987,7 @@ always @(posedge clk) begin
         game_reset   <= 1'b0;
         system_reset <= 1'b0;
         pad_mode     <= 1'b0;
+        pad_mode_sf2 <= 1'b0;
         color_mode   <= 1'b0;
         audio_volume <= 4'd10;     // unity gain
         audio_bass   <= 4'd5;      // flat (offset by +5)

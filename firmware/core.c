@@ -331,6 +331,7 @@ int core_offer_switch(uint32_t profile, const char *game) {
         goto failed;
     status("");
     progress_status("Checking core", 0);
+    int last_pct = 0;
     uint32_t crc = 0xffffffffu;
     for (uint32_t offset = 0; offset < manifest.size; offset += SECTOR_SIZE) {
         uint32_t length = manifest.size - offset;
@@ -340,7 +341,11 @@ int core_offer_switch(uint32_t profile, const char *game) {
             goto failed;
         for (uint32_t index = 0; index < length; index++)
             crc = crc_byte(crc, sector_buf[index]);
-        progress_status("Checking core", (int)((offset + length) * 100 / manifest.size));
+        int pct = (int)((offset + length) * 100 / manifest.size);
+        if (pct != last_pct) {
+            last_pct = pct;
+            progress_status("Checking core", pct);
+        }
     }
     if (~crc != manifest.crc)
         goto failed;
@@ -353,6 +358,7 @@ int core_offer_switch(uint32_t profile, const char *game) {
     cd_audio_reset();
     cd_close();
     progress_status("Copying core", 0);
+    last_pct = 0;
     for (uint32_t offset = 0; offset < SLOT_SIZE; offset += SECTOR_SIZE) {
         if (flash_read(source + offset, sector_buf, SECTOR_SIZE) != 0)
             goto failed;
@@ -365,7 +371,11 @@ int core_offer_switch(uint32_t profile, const char *game) {
         }
         if (flash_verify(offset, sector_buf) != 0)
             goto failed;
-        progress_status("Copying core", (int)((offset + SECTOR_SIZE) * 100 / SLOT_SIZE));
+        int pct = (int)((offset + SECTOR_SIZE) * 100 / SLOT_SIZE);
+        if (pct != last_pct) {
+            last_pct = pct;
+            progress_status("Copying core", pct);
+        }
     }
     flash_release();
     clear();

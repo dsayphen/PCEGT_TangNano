@@ -54,6 +54,7 @@ void scanline_cycle(int dir) {
 static const char *zoom_names[3] = { "Integer", "Stretch", "Bilinear" };
 static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
 static const char *color_names[2] = { "RAW RGB", "Composite" };
+#define MENU_FRAME_WIDTH 26
 
 // Snapshot of the HuC6260/HuC6270 timing registers as the running game has
 // programmed them, plus the number of pixels the scandoubler actually latched
@@ -86,10 +87,11 @@ void vdc_timing_dump(void) {
                 (int)reg_vid_vdw_dbg() + 1);
 }
 
-static void print_game_name(void) {
+static void print_game_name(int frame_width) {
     char label[OSD_COLS - 4];
     const char *end = current_game_name;
     const char *extension = 0;
+    int max_len = frame_width - 2;
     int i = 0;
 
     while (*end) {
@@ -109,48 +111,73 @@ static void print_game_name(void) {
     while (end > current_game_name && end[-1] == ' ')
         end--;
 
-    while (current_game_name + i < end && i < OSD_COLS - 6) {
+    while (current_game_name + i < end && i < max_len) {
         label[i] = current_game_name[i];
         i++;
     }
     label[i] = '\0';
-    print_field(5, 6, label, OSD_COLS - 6);
+    cursor((OSD_COLS - i) / 2, 6);
+    print(label);
 }
 
-static void menu_frame(void) {
-    cursor(3, 4);
+static void menu_frame(int width) {
+    int left = (OSD_COLS - width) / 2;
+    int right = left + width - 1;
+
+    cursor(left, 4);
     putchar('`');
-    for (int column = 4; column < OSD_COLS - 1; column++)
+    for (int column = left + 1; column < right; column++)
         putchar('~');
     putchar('^');
 
     for (int row = 5; row < 18; row++) {
-        cursor(3, row);
+        cursor(left, row);
         putchar('|');
-        cursor(OSD_COLS - 1, row);
+        cursor(right, row);
         putchar('|');
     }
 
-    cursor(3, 7);
+    cursor(left, 7);
     putchar('\\');
-    for (int column = 4; column < OSD_COLS - 1; column++)
+    for (int column = left + 1; column < right; column++)
         putchar('~');
     putchar(0x7f);
 
-    cursor(3, 18);
+    cursor(left, 18);
     putchar('{');
-    for (int column = 4; column < OSD_COLS - 1; column++)
+    for (int column = left + 1; column < right; column++)
         putchar('~');
     putchar('}');
 }
 
-static void menu_header(const char *heading, int in_game) {
+static void menu_header(const char *heading, int in_game, int frame_width) {
     clear();
     if (in_game)
-        menu_frame();
-    print_field(5, 5, heading, OSD_COLS - 6);
+        menu_frame(frame_width);
+    if (in_game) {
+        int inner_width = frame_width - 2;
+        int heading_len = (int)strlen(heading);
+        int x = (OSD_COLS - frame_width) / 2 + 1;
+        if (heading_len < inner_width)
+            x += (inner_width - heading_len) / 2;
+        print_field(x, 5, heading, heading_len < inner_width ? heading_len : inner_width);
+    } else {
+        print_field(5, 5, heading, OSD_COLS - 6);
+    }
     if (in_game)
-        print_game_name();
+        print_game_name(frame_width);
+}
+
+static int cheats_frame_width(void) {
+    int width = MENU_FRAME_WIDTH;
+    int maximum = OSD_COLS - 4;
+
+    for (int index = 0; index < cheats_count(); index++) {
+        int required = (int)strlen(cheats_description(index)) + 6;
+        if (required > width)
+            width = required;
+    }
+    return width > maximum ? maximum : width;
 }
 
 static void make_menu_label(char *buf, int type) {
@@ -160,7 +187,8 @@ static void make_menu_label(char *buf, int type) {
 
     if (type == 3) {
         prefix = "Gamepad: ";
-        value = game_pad_mode ? "6 buttons" : "2 buttons";
+        value = game_pad_mode == 2 ? "Street Fighter" :
+                game_pad_mode == 1 ? "6 buttons" : "2 buttons";
     } else if (type == 4) {
         prefix = "Color: ";
         value = color_names[video_color];
@@ -203,7 +231,10 @@ static void cheats_menu(void) {
     int active = 0;
     int first = 0;
     int redraw = 1;
-    menu_header("Cheats", 1);
+    int frame_width = cheats_frame_width();
+    int frame_left = (OSD_COLS - frame_width) / 2;
+    int item_width = frame_width - 4;
+    menu_header("Cheats", 1, frame_width);
 
     for (;;) {
         int count = cheats_count();
@@ -212,7 +243,7 @@ static void cheats_menu(void) {
         int status = 0;
         if (redraw) {
             for (int row = 8; row < 18; row++)
-                print_field(4, row, "", OSD_COLS - 5);
+                print_field(frame_left + 1, row, "", frame_width - 2);
         }
         if (redraw && count > 0) {
             if (active >= count)
@@ -223,21 +254,21 @@ static void cheats_menu(void) {
                 first = active - visible_rows + 1;
             for (int row = 0; row < visible_rows; row++) {
                 int index = first + row;
-                cursor(4, first_row + row);
+                cursor(frame_left + 1, first_row + row);
                 putchar(index < count && index == active ? '>' : ' ');
                 if (index < count) {
                     char label[25];
                     const char *description = cheats_description(index);
                     int pos = 0;
-                    const char *enabled = cheats_is_active(index) ? "[ON] " : "[OFF] ";
+                    const char *enabled = cheats_is_active(index) ? "x " : "o ";
                     while (*enabled)
                         label[pos++] = *enabled++;
                     while (*description && pos < (int)sizeof(label) - 1)
                         label[pos++] = *description++;
                     label[pos] = '\0';
-                    print_field(6, first_row + row, label, 25);
+                    print_field(frame_left + 3, first_row + row, label, item_width);
                 } else {
-                    print_field(6, first_row + row, "", 25);
+                    print_field(frame_left + 3, first_row + row, "", item_width);
                 }
             }
             selection_row(first_row + active - first);
@@ -245,8 +276,13 @@ static void cheats_menu(void) {
             print_field(1, 19, status ? cheats_status() : "A=Toggle  B=Back",
                         OSD_COLS - 2);
         } else if (redraw) {
-            print_field(5, 10, *cheats_status() ? cheats_status() : "No cheats found",
-                        OSD_COLS - 6);
+            const char *message = *cheats_status() ? cheats_status() : "No cheats found";
+            int inner_width = frame_width - 2;
+            int message_len = (int)strlen(message);
+            int x = frame_left + 1;
+            if (message_len < inner_width)
+                x += (inner_width - message_len) / 2;
+            print_field(x, 10, message, message_len < inner_width ? message_len : inner_width);
             print_field(1, 19, "B=Back", OSD_COLS - 2);
         }
         redraw = 0;
@@ -276,7 +312,7 @@ static void video_menu(int in_game) {
     const int n_items = 4;
     const int first_row = in_game ? 9 : 8;
 
-    menu_header("Video Settings", in_game);
+    menu_header("Video Settings", in_game, MENU_FRAME_WIDTH);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
@@ -328,7 +364,7 @@ static void audio_menu(int in_game) {
     const int n_items = in_game ? 4 : 7;
     const int first_row = in_game ? 9 : 8;
 
-    menu_header("Audio Settings", in_game);
+    menu_header("Audio Settings", in_game, MENU_FRAME_WIDTH);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
@@ -457,7 +493,7 @@ int pause_menu(void) {
     audio_apply();
     pce_pause(1);
     save_game_saves(0);
-    menu_header("Game paused", 1);
+    menu_header("Game paused", 1, MENU_FRAME_WIDTH);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
@@ -533,22 +569,22 @@ int pause_menu(void) {
             audio_apply();
             return 1;
         } else if ((e & JOY_A) && active == 1) {
-            game_pad_mode = !game_pad_mode;
+            game_pad_mode = (game_pad_mode + 1) % 3;
             reg_pad_mode = game_pad_mode;
             game_pad_mode_save(current_game_name); // <--- Sauvegarde dans /config/[nomdujeu].cfg
         } else if ((e & JOY_A) && active == 2) {
             video_menu(1);
-            menu_header("Game paused", 1);
+            menu_header("Game paused", 1, MENU_FRAME_WIDTH);
         } else if ((e & JOY_A) && active == 3) {
             audio_menu(1);
-            menu_header("Game paused", 1);
+            menu_header("Game paused", 1, MENU_FRAME_WIDTH);
         } else if ((e & JOY_A) && active == 4) {
             if (has_cheats) {
                 cheats_menu();
-                menu_header("Game paused", 1);
+                menu_header("Game paused", 1, MENU_FRAME_WIDTH);
             } else {
                 message("Cheats unavailable", "Not in this core");
-                menu_header("Game paused", 1);
+                menu_header("Game paused", 1, MENU_FRAME_WIDTH);
             }
         }
         delay(20);
@@ -564,7 +600,7 @@ void options_menu(void) {
     const int n_items = 7;
     int active = 0;
 
-    menu_header("Options", 0);
+    menu_header("Options", 0, MENU_FRAME_WIDTH);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
@@ -600,10 +636,10 @@ void options_menu(void) {
             return;
         } else if ((e & JOY_A) && active == 0) {
             video_menu(0);
-            menu_header("Options", 0);
+            menu_header("Options", 0, MENU_FRAME_WIDTH);
         } else if ((e & JOY_A) && active == 1) {
             audio_menu(0);
-            menu_header("Options", 0);
+            menu_header("Options", 0, MENU_FRAME_WIDTH);
         } else if ((e & JOY_A) && active == 2) {
             debug_uart = !debug_uart;
             system_config_save();
@@ -616,7 +652,7 @@ void options_menu(void) {
             system_config_save();
         } else if ((e & JOY_A) && active == 5) {
             core_menu();
-            menu_header("Options", 0);
+            menu_header("Options", 0, MENU_FRAME_WIDTH);
         }
         delay(20);
     }

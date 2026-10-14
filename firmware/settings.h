@@ -22,6 +22,7 @@ extern int audio_paused;
 
 void game_pad_mode_load(const char *game_name);
 void game_pad_mode_save(const char *game_name);
+int game_pad_mode_sf2_default(const char *game_name);
 int game_cheats_activated_load(const char *game_name, uint8_t *indices,
 							   int max_indices, int *count);
 int game_cheats_activated_save(const char *game_name, const uint8_t *indices,

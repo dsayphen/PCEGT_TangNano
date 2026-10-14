@@ -137,7 +137,8 @@ static void read_config_values(const char *game_name, int *pad_mode,
         char *entry = line;
         while (*entry == ' ' || *entry == '\t') entry++;
         if (starts_with(entry, "pad_mode=")) {
-            *pad_mode = parse_u8(entry + 9) ? 1 : 0;
+            uint8_t mode = parse_u8(entry + 9);
+            *pad_mode = mode <= 2 ? mode : 0;
         } else if (starts_with(entry, "cheats_activated=") && cheats_size) {
             strncpy(cheats_line, entry, cheats_size - 1);
             cheats_line[cheats_size - 1] = '\0';
@@ -159,7 +160,7 @@ static int write_game_config(const char *game_name, int pad_mode,
     int len;
     static const char header[] =
         "# PCEngine / SuperGrafx game settings\n"
-        "# pad_mode: 0 = 2 buttons, 1 = 6 buttons\n";
+        "# pad_mode: 0 = 2 buttons, 1 = 6 buttons, 2 = 6-button SF2 mapping\n";
     if (build_game_path(path, sizeof(path), "/config/", game_name,
                         ".cfg", 1) != 0)
         return -1;
@@ -192,13 +193,23 @@ static int write_game_config(const char *game_name, int pad_mode,
 
 void game_pad_mode_load(const char *game_name) {
     char ignored_cheats[256] = "";
-    game_pad_mode = 0;
-    reg_pad_mode = 0;
+    game_pad_mode = game_pad_mode_sf2_default(game_name);
+    reg_pad_mode = game_pad_mode;
     if (!game_name || !*game_name)
         return;
     read_config_values(game_name, &game_pad_mode, ignored_cheats,
                        sizeof(ignored_cheats));
     reg_pad_mode = game_pad_mode;
+}
+
+int game_pad_mode_sf2_default(const char *game_name) {
+    if (!game_name || !*game_name)
+        return 0;
+    return contains_ci(game_name, "street fighter ii") ||
+           contains_ci(game_name, "street fighter 2") ||
+           contains_ci(game_name, "streetfighterii") ||
+           contains_ci(game_name, "streetfighter2") ||
+           contains_ci(game_name, "sf2") ? 2 : 0;
 }
 
 void game_pad_mode_save(const char *game_name) {
