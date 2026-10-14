@@ -187,7 +187,7 @@ static void make_menu_label(char *buf, int type) {
 
     if (type == 3) {
         prefix = "Gamepad: ";
-        value = game_pad_mode == 2 ? "Street Fighter" :
+        value = game_pad_mode == 2 ? "SF2" :
                 game_pad_mode == 1 ? "6 buttons" : "2 buttons";
     } else if (type == 4) {
         prefix = "Color: ";

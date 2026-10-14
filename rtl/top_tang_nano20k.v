@@ -817,8 +817,8 @@ pce_pad u_joy (
     .btn_i    (pad_mode_sf2 ? game_btn[11] : game_btn[8]), // SF2 R -> PCE I
     .btn_ii   (pad_mode_sf2 ? game_btn[8]  : game_btn[0]), // SF2 A -> PCE II
     .btn_iii  (pad_mode_sf2 ? game_btn[0]  : game_btn[9]), // SF2 B -> PCE III
-    .btn_iv   (pad_mode_sf2 ? game_btn[9]  : game_btn[1]), // SF2 X -> PCE IV
-    .btn_v    (pad_mode_sf2 ? game_btn[1]  : game_btn[10]), // SF2 Y -> PCE V
+    .btn_iv   (pad_mode_sf2 ? game_btn[1]  : game_btn[1]), // SF2 Y -> PCE IV
+    .btn_v    (pad_mode_sf2 ? game_btn[9]  : game_btn[10]), // SF2 X -> PCE V
     .btn_vi   (pad_mode_sf2 ? game_btn[10] : game_btn[11]), // SF2 L -> PCE VI
     .sel      (game_btn[2]),                 // SNES Select -> Select
     .run      (game_btn[3])                  // SNES Start -> Run

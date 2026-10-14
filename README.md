@@ -228,7 +228,7 @@ without the image extension; the previous name remains a read fallback.
 `pad_mode` values are `0` (2 buttons), `1` (standard 6 buttons), and `2`
 (6-button SF2 layout). Recognized Street Fighter II/SF2 filenames default to
 mode 2 when no `pad_mode` is saved. Standard six-button mode keeps the existing
-mapping. In SF2 mode, SNES A/B/X/Y/L/R map to PCE II/III/IV/V/VI/I
+mapping. In SF2 mode, SNES A/B/X/Y/L/R map to PCE II/III/V/IV/VI/I
 respectively. A saved per-game setting still overrides the default; the
 in-game Gamepad option cycles through all three modes.
 
@@ -285,6 +285,14 @@ CD games support CD audio and ADPCM. CD-ROM support remains experimental.
 ---
 
 ## 6. Development
+
+Resource use in the current Gowin profile builds:
+
+| Profile | Logic | Registers | BSRAM | BSRAM remaining |
+| --- | ---: | ---: | ---: | ---: |
+| SGX | 13,649 / 20,736 (66%) | 7,100 / 15,915 (45%) | 43 / 46 (94%) | 3 |
+| CD | 15,480 / 20,736 (75%) | 7,489 / 15,915 (48%) | 41 / 46 (90%) | 5 |
+| Superset | 17,785 / 20,736 (86%) | 8,887 / 15,915 (56%) | 46 / 46 (100%) | 0 |
 
 Run the available simulations from the repository root:
 
