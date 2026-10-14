@@ -35,8 +35,23 @@ const char *core_name(uint32_t profile) {
     case CORE_PROFILE_SGX: return "HuCard";
     case CORE_PROFILE_CD: return "CD-Rom";
     case CORE_PROFILE_SUPERSET: return "Superset";
+    case CORE_PROFILE_SNES: return "SNES";
     default: return "Unknown";
     }
+}
+
+uint32_t core_game_profile(const char *game) {
+    if (is_snes(game))
+        return CORE_PROFILE_SNES;
+    if (is_cue(game))
+        return CORE_PROFILE_CD;
+    return is_rom(game) ? CORE_PROFILE_SGX : 0;
+}
+
+int core_supports_game(uint32_t profile, const char *game) {
+    uint32_t required = core_game_profile(game);
+    return required && (profile == required ||
+           (profile == CORE_PROFILE_SUPERSET && required != CORE_PROFILE_SNES));
 }
 
 static uint32_t crc_byte(uint32_t crc, uint8_t value) {
@@ -298,7 +313,7 @@ int core_offer_switch(uint32_t profile, const char *game) {
     CoreManifest manifest;
     uint8_t identity[3];
     int modified = 0;
-    if (profile < CORE_PROFILE_SGX || profile > CORE_PROFILE_SUPERSET)
+    if (profile < CORE_PROFILE_SGX || profile > CORE_PROFILE_SNES)
         return 0;
     if (reg_flash_ctrl & FPGA_RELOAD_OUTPUT_TEST) {
         message("GPIO pulse diagnostic core", "Core copying disabled");
@@ -307,7 +322,7 @@ int core_offer_switch(uint32_t profile, const char *game) {
     if (!confirm_switch(profile))
         return 0;
     if ((reg_flash_ctrl >> 16) != 0x4653u) {
-        message("Core switching unavailable", "Rebuild all three cores");
+        message("Core switching unavailable", "Rebuild compatible cores");
         return 0;
     }
     reg_flash_ctrl = 3;
@@ -415,7 +430,7 @@ void core_menu(void) {
     for (;;) {
         clear();
         print_field(3, 5, "Choose core", OSD_COLS - 3);
-        for (int index = 0; index < 3; index++) {
+        for (int index = 0; index < 4; index++) {
             uint32_t profile = index + CORE_PROFILE_SGX;
             cursor(2, 8 + index);
             putchar(index == active ? '>' : ' ');
@@ -423,9 +438,9 @@ void core_menu(void) {
             if (profile == CORE_PROFILE_ID)
                 print_field(21, 8 + index, "Active", 6);
         }
-        cursor(2, 11);
-        putchar(active == 3 ? '>' : ' ');
-        print_field(4, 11, "Test FPGA reload", OSD_COLS - 5);
+        cursor(2, 12);
+        putchar(active == 4 ? '>' : ' ');
+        print_field(4, 12, "Test FPGA reload", OSD_COLS - 5);
         selection_row(8 + active);
         status("A=Select  B=Back");
         for (;;) {
@@ -433,15 +448,15 @@ void core_menu(void) {
             if (edge & (JOY_B | JOY_SELECT))
                 return;
             if (edge & JOY_UP) {
-                active = active ? active - 1 : 3;
+                active = active ? active - 1 : 4;
                 break;
             }
             if (edge & JOY_DOWN) {
-                active = active == 3 ? 0 : active + 1;
+                active = active == 4 ? 0 : active + 1;
                 break;
             }
             if (edge & JOY_A) {
-                if (active == 3) {
+                if (active == 4) {
                     test_fpga_reload();
                     break;
                 }
@@ -474,8 +489,7 @@ int core_autorun(void) {
         autorun.game[0] == 0 || autorun.game[NAME_MAX - 1] != 0 ||
         strchr(autorun.game, '/') || strchr(autorun.game, '\\') ||
         autorun.crc != buffer_crc(&autorun, sizeof(autorun) - sizeof(autorun.crc)) ||
-        (is_cue(autorun.game) ? CORE_PROFILE_ID == CORE_PROFILE_SGX :
-         !is_rom(autorun.game) || CORE_PROFILE_ID == CORE_PROFILE_CD)) {
+        !core_supports_game(CORE_PROFILE_ID, autorun.game)) {
         message("Autorun cancelled", "Invalid request or wrong core");
         return 0;
     }

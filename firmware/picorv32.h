@@ -47,6 +47,7 @@
 #define CORE_PROFILE_SGX      1u
 #define CORE_PROFILE_CD       2u
 #define CORE_PROFILE_SUPERSET 3u
+#define CORE_PROFILE_SNES     4u
 #define CORE_PROFILE_ID       (reg_core_id & 0xffffu)
 #define reg_audio          (*(volatile uint32_t*)0x02000064)
 #define reg_cd_events      (*(volatile uint32_t*)0x02000070)

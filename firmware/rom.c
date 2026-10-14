@@ -20,7 +20,14 @@ int is_rom(const char *name) {
     if (n < 5)
         return 0;
     return strcasecmp(name + n - 4, ".pce") == 0 ||
-           strcasecmp(name + n - 4, ".sgx") == 0;
+           strcasecmp(name + n - 4, ".sgx") == 0 || is_snes(name);
+}
+
+int is_snes(const char *name) {
+    int length = (int)strlen(name);
+    return length >= 5 &&
+           (strcasecmp(name + length - 4, ".sfc") == 0 ||
+            strcasecmp(name + length - 4, ".smc") == 0);
 }
 
 int is_cue(const char *name) {
@@ -96,6 +103,115 @@ static void show_rom_progress(uint32_t loaded, uint32_t size) {
     progress_bar(percent);
 }
 
+static int snes_header_read(FIL *file, uint32_t offset, uint32_t size,
+                            int hirom) {
+    UINT read;
+    uint32_t position = offset + (hirom ? 0xffc0u : 0x7fc0u);
+    if (f_lseek(file, position) != FR_OK ||
+        f_read(file, io_buf, 64, &read) != FR_OK || read != 64)
+        return -1;
+
+    uint32_t rom_exponent = io_buf[23];
+    uint32_t ram_exponent = io_buf[24];
+    uint32_t reset = io_buf[60] | ((uint32_t)io_buf[61] << 8);
+    uint32_t checksum = io_buf[28] | ((uint32_t)io_buf[29] << 8);
+    uint32_t complement = io_buf[30] | ((uint32_t)io_buf[31] << 8);
+    uint8_t mapper = io_buf[21];
+    if (rom_exponent >= 14 || ram_exponent > 7 || reset < 0x8000u ||
+        (hirom ? (mapper & 3) != 1 : (mapper & 3) != 0 && mapper != 0x53))
+        return -1;
+
+    int ascii_name = 1;
+    for (int index = 0; index < 21; index++) {
+        if (io_buf[index] < 32 || io_buf[index] > 127)
+            ascii_name = 0;
+    }
+    int score = ((1024u << rom_exponent) >= size) + (rom_exponent == 1) +
+                (checksum + complement == 0xffffu) + ascii_name;
+    return score ? 0 : -1;
+}
+
+static int snes_chip_supported(void) {
+    uint8_t chip = io_buf[22];
+    return chip != 0x13 && chip != 0x14 && chip != 0x15 && chip != 0x1a &&
+           chip != 0x32 && chip != 0x34 && chip != 0x35 && chip != 0x43 &&
+           chip != 0x45 && chip != 0xf3 && chip != 0xf5 && chip != 0xf6 &&
+           chip != 0xf9;
+}
+
+static int load_snes_rom(const char *fname, uint32_t size) {
+    FIL file;
+    UINT read;
+    uint32_t offset = (size & 0x3ffu) == 0x200u ? 512u : 0u;
+    uint32_t payload = size - offset;
+    uint32_t total = 0;
+    int last_percent = -1;
+    if (CORE_PROFILE_ID != CORE_PROFILE_SNES ||
+        (size & 0x3ffu) != offset || payload < 32768u || payload > 0x3c0000u) {
+        message("Unsupported SNES image", "32 KiB to 3.75 MiB maximum");
+        return -1;
+    }
+
+    cd_close();
+    strcpy(path_buf, pwd);
+    if (pwd[1])
+        strcat(path_buf, "/");
+    strcat(path_buf, fname);
+    if (f_open(&file, path_buf, FA_READ) != FR_OK) {
+        message("Cannot open", fname);
+        return -1;
+    }
+    if (snes_header_read(&file, offset, payload, 0) != 0 &&
+        snes_header_read(&file, offset, payload, 1) != 0) {
+        f_close(&file);
+        message("Invalid SNES header", fname);
+        return -1;
+    }
+    if (!snes_chip_supported()) {
+        f_close(&file);
+        message("Unsupported SNES chip", fname);
+        return -1;
+    }
+
+    current_game_snes_ram_size = io_buf[24] ? 1024u << io_buf[24] : 0;
+    current_game_populous = 0;
+    extract_filename(current_game_name, fname);
+    loading_status("");
+    show_rom_progress(0, payload);
+    pce_load_start(payload + 64u, 0);
+    for (UINT index = 0; index < 64; index += 4)
+        pce_load_word(*(const uint32_t *)(io_buf + index));
+
+    if (f_lseek(&file, offset) != FR_OK)
+        goto failed;
+    while (total < payload) {
+        UINT want = (UINT)imin((int)(payload - total), sizeof(io_buf));
+        if (f_read(&file, io_buf, want, &read) != FR_OK || read != want)
+            goto failed;
+        for (UINT index = 0; index < read; index += 4)
+            pce_load_word(*(const uint32_t *)(io_buf + index));
+        total += read;
+        int percent = (int)(total * 100u / payload);
+        if (percent != last_percent) {
+            last_percent = percent;
+            show_rom_progress(total, payload);
+        }
+    }
+    f_close(&file);
+    load_game_saves(current_game_name, 0);
+    if (pce_load_end() != 0) {
+        message("ROM transfer timeout", fname);
+        return -1;
+    }
+    return 0;
+
+failed:
+    f_close(&file);
+    (void)pce_load_end();
+    message("Read error", fname);
+    return -1;
+}
+
 static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_len) {
     FIL f;
     char line[256];
@@ -152,6 +268,9 @@ static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_l
 // (size & 0x3FF) == 0x200, exactly like the UART loader does.
 // ---------------------------------------------------------------------------
 int load_rom(const char *fname, uint32_t size) {
+    if (is_snes(fname))
+        return load_snes_rom(fname, size);
+
     FIL f;
     UINT br;
     uint32_t total = 0;
@@ -165,6 +284,7 @@ int load_rom(const char *fname, uint32_t size) {
     char bin_path[PWD_SIZE + NAME_MAX + 2];
 
     cd_close();
+    current_game_snes_ram_size = 0;
 
     if (is_cue(fname)) {
         strncpy(cue_path, pwd, sizeof(cue_path));

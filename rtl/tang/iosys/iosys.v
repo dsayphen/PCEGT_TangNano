@@ -64,6 +64,7 @@ module iosys #(
     // base of the softcore's 2 MiB RAM window inside the 8 MiB SDRAM
     parameter [22:0] RV_BASE             = 23'h40_0000,
     parameter [31:0] ROM_MAX_SIZE        = 32'h0040_0000,
+    parameter        ROM_CLEAR_ENABLE   = 1,
     parameter [15:0] CORE_ID             = 16'd3,
     parameter RECONFIG_ENABLE = 0,
     parameter RECONFIG_INPUT_ONLY = 0,
@@ -873,7 +874,7 @@ always @(posedge clk) begin
             rl_cnt        <= 3'd0;
             rl_finishing  <= 1'b0;
             rl_timeout    <= 20'd0;
-            rl_clearing   <= 1'b1;
+            rl_clearing   <= ROM_CLEAR_ENABLE;
             rl_clear_addr <= 23'd0;
             rl_clear_phase<= 1'b0;
         end else if (mem_wdata[7:0] == 8'd0) begin
@@ -902,7 +903,7 @@ always @(posedge clk) begin
             image_valid      <= 1'b0;
             rl_cnt           <= 3'd0;
             rl_finishing     <= 1'b0;
-            rl_clearing      <= 1'b1;
+            rl_clearing      <= ROM_CLEAR_ENABLE;
             rl_clear_addr    <= 23'd0;
             rl_clear_phase   <= 1'b0;
             rl_reboot_pending <= 1'b1;

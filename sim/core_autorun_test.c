@@ -38,7 +38,8 @@ FRESULT f_unlink(const TCHAR *path) {
     return FR_OK;
 }
 FRESULT f_stat(const TCHAR *path, FILINFO *info) {
-    if (strcmp(path, "/games/game.pce") && strcmp(path, "/games/game.sgx"))
+    if (strcmp(path, "/games/game.pce") && strcmp(path, "/games/game.sgx") &&
+        strcmp(path, "/games/game.sfc") && strcmp(path, "/games/game.smc"))
         return FR_NO_FILE;
     info->fsize = 4096;
     info->fattrib = 0;
@@ -116,6 +117,20 @@ int main(void) {
     check(core_autorun() == 0 && !present && !cd_loads, 14);
     prepare(CORE_PROFILE_SGX, "../game.pce");
     check(core_autorun() == 0 && !present && !rom_loads, 15);
+    prepare(CORE_PROFILE_SNES, "game.sfc");
+    check(core_autorun() == 1 && !present && rom_loads == 1, 16);
+    prepare(CORE_PROFILE_SNES, "game.smc");
+    check(core_autorun() == 1 && !present && rom_loads == 1, 17);
+    prepare(CORE_PROFILE_SNES, "game.pce");
+    check(core_autorun() == 0 && !present && !rom_loads, 18);
+    prepare(CORE_PROFILE_SNES, "game.cue");
+    check(core_autorun() == 0 && !present && !cd_loads, 19);
+    prepare(CORE_PROFILE_SUPERSET, "game.sfc");
+    check(core_autorun() == 0 && !present && !rom_loads, 20);
+    prepare(CORE_PROFILE_SGX, "game.sfc");
+    check(core_autorun() == 0 && !present && !rom_loads, 21);
+    prepare(CORE_PROFILE_SNES, "game.txt");
+    check(core_autorun() == 0 && !present && !rom_loads, 22);
     (*(volatile uint32_t *)0x03000000) = 0;
     for (;;) {}
 }

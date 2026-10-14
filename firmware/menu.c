@@ -361,7 +361,8 @@ static void audio_menu(int in_game) {
         "Volume", "Bass", "Treble", "Output", "CD-DA", "ADPCM audio", "Back"
     };
     int active = 0;
-    const int n_items = in_game ? 4 : 7;
+    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
+    const int n_items = in_game ? 4 : snes_profile ? 5 : 7;
     const int first_row = in_game ? 9 : 8;
 
     menu_header("Audio Settings", in_game, MENU_FRAME_WIDTH);
@@ -373,7 +374,7 @@ static void audio_menu(int in_game) {
 
             char label[24];
             int j = 0;
-            const char *prefix = (in_game && i == 3) ? "Back" : labels[i];
+            const char *prefix = i == n_items - 1 ? "Back" : labels[i];
             while (*prefix)
                 label[j++] = *prefix++;
 
@@ -399,7 +400,7 @@ static void audio_menu(int in_game) {
                 label[j++] = ' ';
                 while (*value)
                     label[j++] = *value++;
-            } else if (!in_game && (i == 4 || i == 5)) {
+            } else if (!in_game && !snes_profile && (i == 4 || i == 5)) {
                 const char *value = (i == 4 ? audio_cdda_enabled : audio_adpcm_enabled)
                     ? "On" : "Off";
                 label[j++] = ':';
@@ -435,7 +436,7 @@ static void audio_menu(int in_game) {
                 audio_output_hdmi = !audio_output_hdmi;
                 audio_apply();
                 audio_config_save();
-            } else if (!in_game && (active == 4 || active == 5)) {
+            } else if (!in_game && !snes_profile && (active == 4 || active == 5)) {
                 if (active == 4)
                     audio_cdda_enabled = !audio_cdda_enabled;
                 else
@@ -460,7 +461,7 @@ static void audio_menu(int in_game) {
                 audio_output_hdmi = !audio_output_hdmi;
                 audio_apply();
                 audio_config_save();
-            } else if (!in_game && (active == 4 || active == 5)) {
+            } else if (!in_game && !snes_profile && (active == 4 || active == 5)) {
                 if (active == 4)
                     audio_cdda_enabled = !audio_cdda_enabled;
                 else
@@ -481,14 +482,16 @@ int pause_menu(void) {
         "Resume Game", "Reset Game", "Return to browser"
     };
     int active = 0;
-    const int n_items = 7;
+    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
+    const int n_items = snes_profile ? 4 : 7;
     const int first_row = 9;
     const int has_cheats = CORE_PROFILE_ID == CORE_PROFILE_PCE ||
                            CORE_PROFILE_ID == CORE_PROFILE_SGX ||
                            CORE_PROFILE_ID == CORE_PROFILE_CD ||
                            CORE_PROFILE_ID == CORE_PROFILE_SUPERSET;
 
-    vdc_timing_dump();
+    if (!snes_profile)
+        vdc_timing_dump();
     audio_paused = 1;
     audio_apply();
     pce_pause(1);
@@ -497,27 +500,28 @@ int pause_menu(void) {
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
+            int item = snes_profile ? (i == 1 ? 3 : i >= 2 ? i + 3 : i) : i;
             cursor(4, first_row + i);
             putchar(i == active ? '>' : ' ');
 
             char label[24];
 
-            if (i == 0) {
+            if (item == 0) {
                 print_field(6, first_row + i, items[0], 20);
                 continue;
             }
 
-            if (i == 2) {
+            if (item == 2) {
                 print_field(6, first_row + i, "Video Settings >", 20);
                 continue;
             }
 
-            if (i == 3) {
+            if (item == 3) {
                 print_field(6, first_row + i, "Audio Settings >", 20);
                 continue;
             }
 
-            if (i == 4) {
+            if (item == 4) {
                 if (has_cheats) {
                     make_cheats_label(label);
                     print_field(6, first_row + i, label, 20);
@@ -527,17 +531,18 @@ int pause_menu(void) {
                 continue;
             }
 
-            if (i == 1) {
+            if (item == 1) {
                 make_menu_label(label, 3);
                 print_field(6, first_row + i, label, 20);
                 continue;
             }
 
-            print_field(6, first_row + i, items[i - 4], 20);
+            print_field(6, first_row + i, items[item - 4], 20);
         }
         selection_row(first_row + active);
 
         uint32_t e = joy_edge();
+        int command = snes_profile ? (active == 1 ? 3 : active >= 2 ? active + 3 : active) : active;
         if (e & JOY_UP) {
             active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {
@@ -549,7 +554,7 @@ int pause_menu(void) {
             audio_apply();
             overlay(0);
             return 0;
-        } else if ((e & JOY_A) && active == 5) {
+        } else if ((e & JOY_A) && command == 5) {
             if (cd_active)
                 cd_audio_reset();
             pce_reset();
@@ -559,7 +564,7 @@ int pause_menu(void) {
             audio_apply();
             overlay(0);
             return 0;
-        } else if ((e & JOY_A) && active == 6) {
+        } else if ((e & JOY_A) && command == 6) {
             cheats_clear();
             overlay(0);
             clear();
@@ -568,17 +573,17 @@ int pause_menu(void) {
             audio_paused = 0;
             audio_apply();
             return 1;
-        } else if ((e & JOY_A) && active == 1) {
+        } else if ((e & JOY_A) && command == 1) {
             game_pad_mode = (game_pad_mode + 1) % 3;
             reg_pad_mode = game_pad_mode;
             game_pad_mode_save(current_game_name); // <--- Sauvegarde dans /config/[nomdujeu].cfg
-        } else if ((e & JOY_A) && active == 2) {
+        } else if ((e & JOY_A) && command == 2) {
             video_menu(1);
             menu_header("Game paused", 1, MENU_FRAME_WIDTH);
-        } else if ((e & JOY_A) && active == 3) {
+        } else if ((e & JOY_A) && command == 3) {
             audio_menu(1);
             menu_header("Game paused", 1, MENU_FRAME_WIDTH);
-        } else if ((e & JOY_A) && active == 4) {
+        } else if ((e & JOY_A) && command == 4) {
             if (has_cheats) {
                 cheats_menu();
                 menu_header("Game paused", 1, MENU_FRAME_WIDTH);
@@ -597,60 +602,64 @@ void options_menu(void) {
         "Video Settings >", "Audio Settings >", "Debug UART: ",
         "Cheats: ", "Sprites: ", "Choose core >", "Back"
     };
-    const int n_items = 7;
+    const int snes_items[4] = {1, 2, 5, 6};
+    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
+    const int n_items = snes_profile ? 4 : 7;
     int active = 0;
 
     menu_header("Options", 0, MENU_FRAME_WIDTH);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
+            int item = snes_profile ? snes_items[i] : i;
             cursor(4, 8 + i);
             putchar(i == active ? '>' : ' ');
 
-            if (i >= 2 && i <= 4) {
+            if (item >= 2 && item <= 4) {
                 char label[32];
-                const char *value = i == 2
+                const char *value = item == 2
                     ? (debug_uart ? "On" : "Off")
-                    : i == 3 ? (cheats_enabled ? "On" : "Off")
+                    : item == 3 ? (cheats_enabled ? "On" : "Off")
                     : vdc_sprites_double ? "32" : "16";
                 int j = 0;
-                for (const char *s = items[i]; *s; s++)
+                for (const char *s = items[item]; *s; s++)
                     label[j++] = *s;
                 while (*value)
                     label[j++] = *value++;
                 label[j] = '\0';
                 print_field(6, 8 + i, label, 20);
             } else {
-                print_field(6, 8 + i, items[i], 20);
+                print_field(6, 8 + i, items[item], 20);
             }
         }
         selection_row(8 + active);
         print_field(1, ROW_STATUS, "A=Select  B=Back", OSD_COLS - 2);
 
         uint32_t e = joy_edge();
+        int command = snes_profile ? snes_items[active] : active;
         if (e & JOY_UP) {
             active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {
             active = active < n_items - 1 ? active + 1 : 0;
-        } else if ((e & (JOY_B | JOY_SELECT)) || ((e & JOY_A) && active == 6)) {
+        } else if ((e & (JOY_B | JOY_SELECT)) || ((e & JOY_A) && command == 6)) {
             return;
-        } else if ((e & JOY_A) && active == 0) {
+        } else if ((e & JOY_A) && command == 0) {
             video_menu(0);
             menu_header("Options", 0, MENU_FRAME_WIDTH);
-        } else if ((e & JOY_A) && active == 1) {
+        } else if ((e & JOY_A) && command == 1) {
             audio_menu(0);
             menu_header("Options", 0, MENU_FRAME_WIDTH);
-        } else if ((e & JOY_A) && active == 2) {
+        } else if ((e & JOY_A) && command == 2) {
             debug_uart = !debug_uart;
             system_config_save();
-        } else if ((e & JOY_A) && active == 3) {
+        } else if ((e & JOY_A) && command == 3) {
             cheats_enabled = !cheats_enabled;
             system_config_save();
-        } else if ((e & JOY_A) && active == 4) {
+        } else if ((e & JOY_A) && command == 4) {
             vdc_sprites_double = !vdc_sprites_double;
             vdc_options_apply();
             system_config_save();
-        } else if ((e & JOY_A) && active == 5) {
+        } else if ((e & JOY_A) && command == 5) {
             core_menu();
             menu_header("Options", 0, MENU_FRAME_WIDTH);
         }

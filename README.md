@@ -54,16 +54,16 @@ From the repository root, build **both** components:
 & "G:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\gw_sh.exe" tools/build.tcl
 ```
 
-To build the three profile variants from the same RTL sources, run:
+To build the four profile variants, run:
 
 ```powershell
 & .\tools\build_profiles.ps1 -Profile all
 ```
 
 The script creates temporary Gowin project/config copies and stores each
-profile's bitstream and binary under `impl/profiles/{sgx,cd,superset}/`.
+profile's bitstream and binary under `impl/profiles/{sgx,cd,superset,snes}/`.
 The `all` build selects `sgx` (HuCard, including ordinary PCE games), `cd`
-(CD-Rom), and `superset`; PCE is not offered by the core selection menu.
+(CD-Rom), `superset`, and experimental `snes`; PCE is not offered by the core selection menu.
 Each core image is about 887 KiB and fits a 1 MiB flash slot. Core selection
 copies the selected image to the boot address, then requests a reload through
 the tested GPIO29 connection described below.
@@ -83,10 +83,10 @@ Programmer can write the binary at this address.
 
 ### Core selection from the browser
 
-Browser Options (Select) provides **Choose core > HuCard / CD-Rom / Superset**.
+Browser Options (Select) provides **Choose core > HuCard / CD-Rom / Superset / SNES**.
 Selecting a different core asks for confirmation, checks the source slot's
 profile, size and CRC32, then erases/programs/verifies the first 1 MiB of flash.
-The three source slots and the firmware at `0x500000` are not modified.
+The four source slots and the firmware at `0x500000` are not modified.
 When `Core ready` appears, A requests an FPGA reload if the GPIO29/TP1
 hardware is installed and the rebuilt core supports it. Otherwise use the
 TP1 button or switch power off and on. S1 only resets the console and does
@@ -109,9 +109,10 @@ Build the firmware, cores and flash images with:
 & .\tools\prepare_core_slots.ps1 -CombinedImage
 ```
 
-This creates a 4 MiB image containing Superset, SGX, CD-Rom, then Superset.
+This creates `impl/core-slots/cores_superset_sgx_cd_superset_snes.bin`, a
+5 MiB image containing Superset, SGX, CD-Rom, Superset, then SNES.
 Program it as raw SPI flash data at `0x000000`, with erase/program/verify
-limited to `0x000000..0x3FFFFF`. **Never use Bulk Erase.** The firmware is a
+limited to `0x000000..0x4FFFFF`. **Never use Bulk Erase.** The firmware is a
 separate file at `0x500000`. Verify programmer readback and power-cycle after
 programming.
 
@@ -121,6 +122,23 @@ the exact game and directory to `/config/core_autorun.dat` on the SD card.
 After copying, the requested core starts and loads the selected game. **Do not
 interrupt a core copy.** If power is lost during programming, restore the boot
 image with an external programmer.
+
+### Experimental SNES profile
+
+The [SNESTang](https://github.com/nand2mario/snestang) core is integrated as a
+separate FPGA profile, using this project's shared PicoRV32 firmware, browser,
+OSD, audio controls, saves and core switching. Build it alone with
+`tools/build_profiles.ps1 -Profile snes`. Its source slot is `0x400000`;
+the common firmware remains at `0x500000`.
+
+The browser recognizes `.sfc` and `.smc`, including 512-byte copier headers,
+and offers a switch to SNES. LoROM/HiROM images from 32 KiB to 3.75 MiB and
+up to 128 KiB SRAM are supported; saves use `/saves/<game>.srm` when entering
+the pause menu, not on power loss. SNES uses 720p NTSC integer scaling with
+native pad mapping; PCE video/pad/cheat options are hidden in this profile.
+ExHiROM and Super FX, SA-1, CX4, S-DD1, SPC7110 and ST01x images are rejected.
+Gameplay, audio and switching to/from SNES have not been tested on hardware.
+See [source provenance](rtl/snestang/README.md) for the upstream revision and license.
 
 ---
 

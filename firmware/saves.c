@@ -8,6 +8,7 @@
 #define BRM_SAVE_SIZE 2048
 #define POP_SAVE_SIZE 32768
 #define POP_SAVE_BASE ((volatile uint8_t *)0x001b0000)
+#define SNES_SAVE_BASE ((volatile uint8_t *)0x001e0000)
 
 static void brm_transfer(uint8_t *buffer, uint32_t offset, UINT count, int to_bram) {
     reg_brm_access = 1;
@@ -26,7 +27,7 @@ static void brm_transfer(uint8_t *buffer, uint32_t offset, UINT count, int to_br
 static void save_ram_transfer(uint8_t *buffer, uint32_t offset, UINT count,
                               int is_populous, int to_ram) {
     if (is_populous) {
-        volatile uint8_t *ram = POP_SAVE_BASE + offset;
+        volatile uint8_t *ram = (is_populous == 2 ? SNES_SAVE_BASE : POP_SAVE_BASE) + offset;
         for (UINT i = 0; i < count; i++) {
             if (to_ram)
                 ram[i] = buffer[i];
@@ -92,10 +93,16 @@ int load_game_saves(const char *game_name, int is_populous) {
     int ok = 0;
 
     pce_pause(1);
-    if (save_ram_file(game_name, ".brm", BRM_SAVE_SIZE, 0, 0) != 0)
-        ok = -1;
-    if (is_populous && save_ram_file(game_name, ".pop", POP_SAVE_SIZE, 1, 0) != 0)
-        ok = -1;
+    if (CORE_PROFILE_ID == CORE_PROFILE_SNES) {
+        if (current_game_snes_ram_size &&
+            save_ram_file(game_name, ".srm", current_game_snes_ram_size, 2, 0) != 0)
+            ok = -1;
+    } else {
+        if (save_ram_file(game_name, ".brm", BRM_SAVE_SIZE, 0, 0) != 0)
+            ok = -1;
+        if (is_populous && save_ram_file(game_name, ".pop", POP_SAVE_SIZE, 1, 0) != 0)
+            ok = -1;
+    }
     pce_pause(0);
 
     if (ok == 0)
@@ -111,11 +118,17 @@ int save_game_saves(int resume_game) {
         return 0;
 
     pce_pause(1);
-    if (save_ram_file(current_game_name, ".brm", BRM_SAVE_SIZE, 0, 1) != 0)
-        ok = -1;
-    if (current_game_populous &&
-        save_ram_file(current_game_name, ".pop", POP_SAVE_SIZE, 1, 1) != 0)
-        ok = -1;
+    if (CORE_PROFILE_ID == CORE_PROFILE_SNES) {
+        if (current_game_snes_ram_size &&
+            save_ram_file(current_game_name, ".srm", current_game_snes_ram_size, 2, 1) != 0)
+            ok = -1;
+    } else {
+        if (save_ram_file(current_game_name, ".brm", BRM_SAVE_SIZE, 0, 1) != 0)
+            ok = -1;
+        if (current_game_populous &&
+            save_ram_file(current_game_name, ".pop", POP_SAVE_SIZE, 1, 1) != 0)
+            ok = -1;
+    }
     if (resume_game)
         pce_pause(0);
 

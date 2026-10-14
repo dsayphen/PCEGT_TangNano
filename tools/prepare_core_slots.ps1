@@ -34,7 +34,8 @@ if ([CoreSlotCrc]::Compute([Text.Encoding]::ASCII.GetBytes('123456789')) -ne [ui
 $profiles = @(
     @{ Name = 'sgx'; Id = 1; Label = 'HuCard' },
     @{ Name = 'cd'; Id = 2; Label = 'CD-Rom' },
-    @{ Name = 'superset'; Id = 3; Label = 'Superset' }
+    @{ Name = 'superset'; Id = 3; Label = 'Superset' },
+    @{ Name = 'snes'; Id = 4; Label = 'SNES' }
 )
 
 foreach ($profile in $profiles) {
@@ -71,7 +72,7 @@ foreach ($profile in $profiles) {
         $profile.Label, $destination, ($profile.Id * $slotSize), $binary.Length, $crc)
 }
 if ($CombinedImage) {
-    $order = @('superset', 'sgx', 'cd', 'superset')
+    $order = @('superset', 'sgx', 'cd', 'superset', 'snes')
     $combined = New-Object byte[] ($order.Count * $slotSize)
     for ($slotIndex = 0; $slotIndex -lt $order.Count; $slotIndex++) {
         $sourceSlot = Join-Path $OutputDirectory ("{0}_slot.bin" -f $order[$slotIndex])
@@ -79,10 +80,10 @@ if ($CombinedImage) {
         if ($bytes.Length -ne $slotSize) { throw "Invalid slot size: $sourceSlot" }
         [Array]::Copy($bytes, 0, $combined, ($slotIndex * $slotSize), $slotSize)
     }
-    $destination = Join-Path $OutputDirectory 'cores_superset_sgx_cd_superset.bin'
+    $destination = Join-Path $OutputDirectory 'cores_superset_sgx_cd_superset_snes.bin'
     [IO.File]::WriteAllBytes($destination, $combined)
     Write-Host ("Combined cores: {0} -> 0x000000, {1} bytes; firmware not included." -f
         $destination, $combined.Length)
 }
 Write-Host 'Program these slot images as raw SPI flash data, without erasing the entire flash.'
-Write-Host 'All three bitstreams must include flash PIO support. Keep firmware at 0x500000.'
+Write-Host 'All four bitstreams must include flash PIO support. Keep firmware at 0x500000.'

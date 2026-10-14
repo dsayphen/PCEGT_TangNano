@@ -19,6 +19,7 @@ extern char pwd[PWD_SIZE];                  // browser.c
 extern uint8_t io_buf[2048];                // firmware.c
 extern char current_game_name[NAME_MAX];    // firmware.c
 extern int current_game_populous;           // firmware.c
+extern uint32_t current_game_snes_ram_size;
 
 // ---- util.c ---------------------------------------------------------------
 uint8_t to_bcd(uint32_t v);

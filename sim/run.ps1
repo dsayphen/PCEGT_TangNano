@@ -68,6 +68,24 @@ if ($CROSS) {
     & $vvp sim/tb_core_autorun.vvp
     if ($LASTEXITCODE) { throw 'core_autorun_test failed' }
     Push-Location sim
+    try {
+        & "${CROSS}gcc" -Os -mabi=ilp32 -march=rv32i -ffreestanding -fno-builtin -ffunction-sections -fdata-sections `
+            '-Wl,--gc-sections,--build-id=none,-T,../firmware/baremetal.ld' -nostdlib `
+            -o snes_loader_test.elf start.o snes_loader_test.c ../firmware/picorv32.c -lgcc
+        if ($LASTEXITCODE) { throw 'compiling snes_loader_test failed' }
+        & "${CROSS}objcopy" snes_loader_test.elf snes_loader_test.bin -O binary
+        if ($LASTEXITCODE) { throw 'objcopy snes_loader_test failed' }
+    } finally {
+        Pop-Location
+    }
+    python tools/bin2hex.py sim/snes_loader_test.bin sim/snes_loader_test.hex 131072
+    if ($LASTEXITCODE) { throw 'converting snes_loader_test failed' }
+    & $iverilog -g2005-sv -s tb_core_autorun '-Ptb_core_autorun.MAX_CYCLES=40000000' `
+        -o sim/tb_snes_loader.vvp sim/tb_core_autorun.v rtl/tang/iosys/picorv32.v
+    if ($LASTEXITCODE) { throw 'iverilog snes_loader_test failed' }
+    & $vvp sim/tb_snes_loader.vvp '+IMAGE=sim/snes_loader_test.hex'
+    if ($LASTEXITCODE) { throw 'snes_loader_test failed' }
+    Push-Location sim
     & "${CROSS}gcc" -x assembler-with-cpp -mabi=ilp32 -march=rv32i -c -o start.o ../firmware/start.S
     & "${CROSS}gcc" -Os -mabi=ilp32 -march=rv32i -ffreestanding -fno-builtin -Wall -c -o prog.o prog.c
     & "${CROSS}gcc" -mabi=ilp32 -march=rv32i '-Wl,--build-id=none,-Bstatic,-T,../firmware/baremetal.ld,--strip-debug' `
@@ -105,12 +123,13 @@ $gowinPrimSim = if ($env:GOWIN_HOME) {
 } else {
     'G:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\simlib\gw2a\prim_sim.v'
 }
-foreach ($tb in @('tb_flash_pio', 'tb_textdisp', 'tb_dvi_video_window', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vram_clear', 'tb_arcade_ram', 'tb_rv_uart_diagnostic', 'tb_rv_x22', 'tb_rv_memory_probe')) {
+foreach ($tb in @('tb_snes_iosys_memory', 'tb_flash_pio', 'tb_textdisp', 'tb_dvi_video_window', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vram_clear', 'tb_arcade_ram', 'tb_rv_uart_diagnostic', 'tb_rv_x22', 'tb_rv_memory_probe')) {
     if ($tb -eq 'tb_dvi_video_window' -and -not (Test-Path $gowinPrimSim)) {
         Write-Warning 'Gowin GW2A simulation library unavailable; skipping tb_dvi_video_window.'
         continue
     }
     $files = switch ($tb) {
+        'tb_snes_iosys_memory' { @('sim/tb_snes_iosys_memory.sv', 'rtl/snestang/src/sdram_nano.v') }
     'tb_flash_pio' { @('sim/tb_flash_pio.v', 'rtl/tang/iosys/spiflash.v', 'rtl/tang/iosys/spi_master.v') }
         'tb_rv_memory_probe' { @('sim/tb_rv_memory_probe.v', 'rtl/tang/rv_memory_probe.v', 'rtl/tang/rv_stack_watch.v') }
         'tb_rv_x22' { @('sim/tb_rv_x22.v', 'rtl/tang/iosys/picorv32.v') }

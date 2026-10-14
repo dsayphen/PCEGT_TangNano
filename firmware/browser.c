@@ -36,20 +36,10 @@ static int is_hidden_dir(const char *name) {
     return 0;
 }
 
-static uint32_t required_profile(const char *name) {
-    return is_cue(name) ? CORE_PROFILE_CD : CORE_PROFILE_SGX;
-}
-
-static int profile_supports(uint32_t required) {
-    uint32_t active = CORE_PROFILE_ID;
-
-    return active == required || active == CORE_PROFILE_SUPERSET;
-}
-
 static int check_entry_profile(const char *name) {
-    uint32_t required = required_profile(name);
+    uint32_t required = core_game_profile(name);
 
-    if (profile_supports(required))
+    if (core_supports_game(CORE_PROFILE_ID, name))
         return 1;
 
     core_offer_switch(required, name);

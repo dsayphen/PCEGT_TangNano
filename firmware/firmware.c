@@ -46,6 +46,7 @@ uint8_t io_buf[2048];
 
 char current_game_name[NAME_MAX] = "";
 int current_game_populous = 0;
+uint32_t current_game_snes_ram_size = 0;
 
 // ---------------------------------------------------------------------------
 // Mounting
@@ -66,7 +67,7 @@ static int mount_card(void) {
 // ---------------------------------------------------------------------------
 int main(void) {
     // 43.2 MHz / 375 = 115200 baud
-    uart_init(375);
+    uart_init(CORE_PROFILE_ID == CORE_PROFILE_SNES ? 188 : 375);
 
     uint32_t sp_val;
     __asm__ volatile ("mv %0, sp" : "=r"(sp_val));
@@ -194,11 +195,11 @@ int main(void) {
                 for (;;)
                     delay(100);
             }
-        } else if (select_armed &&
+        } else if (CORE_PROFILE_ID != CORE_PROFILE_SNES && select_armed &&
                    (raw & JOY_SELECT) &&
                    (e & (JOY_UP | JOY_DOWN))) {
             zoom_cycle();
-        } else if (select_armed &&
+        } else if (CORE_PROFILE_ID != CORE_PROFILE_SNES && select_armed &&
                    (raw & JOY_SELECT) &&
                    (e & (JOY_LEFT | JOY_RIGHT))) {
             scanline_cycle((e & JOY_RIGHT) ? 1 : -1);
