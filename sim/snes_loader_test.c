@@ -18,7 +18,8 @@ static void capture_start(uint32_t size, int sgx) {
 }
 static void capture_word(uint32_t word) {
     if (word_count < sizeof(streamed) / sizeof(streamed[0]))
-        streamed[word_count++] = word;
+        streamed[word_count] = word;
+    word_count++;
 }
 static int capture_end(void) {
     finishes++;
@@ -132,7 +133,7 @@ int main(void) {
     header[22] = 0x13;
     check(load_snes_rom("game.sfc", file_size) != 0 && !starts && opens == closes, 5);
     prepare(0, 0);
-    check(load_snes_rom("game.sfc", 4u * 1024u * 1024u) != 0 && !opens, 6);
+    check(load_snes_rom("game.sfc", 4u * 1024u * 1024u + 1024u) != 0 && !opens, 6);
     prepare(0, 0);
     header[24] = 8;
     check(load_snes_rom("game.sfc", file_size) != 0 && !starts && opens == closes, 7);
@@ -142,6 +143,24 @@ int main(void) {
     prepare(0, 0);
     fail_read = 1;
     check(load_snes_rom("game.sfc", file_size) != 0 && starts == 1 && opens == closes, 9);
+    prepare(0, 0);
+    header[23] = 12;
+    file_size = 0x3c0000u;
+    fail_read = 1;
+    check(load_snes_rom("game.sfc", file_size) != 0 && starts == 1 &&
+        stream_size == 0x3c0040u && opens == closes, 10);
+    prepare(0, 1);
+    header[23] = 12;
+    file_size = 0x3c0000u + 512u;
+    fail_read = 1;
+    check(load_snes_rom("game.smc", file_size) != 0 && starts == 1 &&
+        stream_size == 0x3c0040u && opens == closes, 11);
+    prepare(0, 0);
+    check(load_snes_rom("game.sfc", 0x400000u) != 0 && !opens, 12);
+    prepare(0, 1);
+    check(load_snes_rom("game.smc", 0x400000u + 512u) != 0 && !opens, 13);
+    prepare(0, 0);
+    check(load_snes_rom("game.sfc", 0x3c0400u) != 0 && !opens, 14);
     (*(volatile uint32_t *)0x03000000) = 0;
     for (;;) {}
 }

@@ -195,11 +195,11 @@ int main(void) {
                 for (;;)
                     delay(100);
             }
-        } else if (CORE_PROFILE_ID != CORE_PROFILE_SNES && select_armed &&
+        } else if (select_armed &&
                    (raw & JOY_SELECT) &&
                    (e & (JOY_UP | JOY_DOWN))) {
             zoom_cycle();
-        } else if (CORE_PROFILE_ID != CORE_PROFILE_SNES && select_armed &&
+        } else if (select_armed &&
                    (raw & JOY_SELECT) &&
                    (e & (JOY_LEFT | JOY_RIGHT))) {
             scanline_cycle((e & JOY_RIGHT) ? 1 : -1);

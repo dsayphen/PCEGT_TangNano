@@ -9,7 +9,10 @@
 //
 `timescale 1ns/1ps
 
-module tb_textdisp;
+module tb_textdisp #(
+    parameter BLOCK_RAM = 0,
+    parameter CHARACTER_BITS = 8
+);
 
 localparam COLS = 32;
 localparam ROWS = 20;
@@ -32,7 +35,9 @@ reg        osd_de = 0;
 wire       osd_on;
 wire [23:0] osd_rgb;
 
-textdisp #(.COLS(COLS), .ROWS(ROWS), .X0(X0), .Y0(Y0)) dut (
+textdisp #(.COLS(COLS), .ROWS(ROWS), .X0(X0), .Y0(Y0),
+           .CHARACTER_BITS(CHARACTER_BITS),
+           .PLANE_RAM_STYLE(BLOCK_RAM ? "block_ram" : "distributed_ram")) dut (
     .clk         (clk),
     .resetn      (resetn),
     .reg_char_we (reg_char_we),
@@ -133,6 +138,28 @@ task check_selected_glyph;
     end
 endtask
 
+task check_fallback;
+    input [7:0] character;
+    reg [23:0] reference [0:255];
+    reg [23:0] colour;
+    integer pixel_x, pixel_y;
+    begin
+        wr((5 << 16) | (3 << 8) | 8'h3f);
+        repeat (8) @(posedge clk_pix);
+        for (pixel_y = 0; pixel_y < 16; pixel_y = pixel_y + 1)
+            for (pixel_x = 0; pixel_x < 16; pixel_x = pixel_x + 1)
+                pixel(X0 + 5*16 + pixel_x, Y0 + 3*16 + pixel_y, reference[pixel_y*16+pixel_x]);
+        wr((5 << 16) | (3 << 8) | character);
+        repeat (8) @(posedge clk_pix);
+        for (pixel_y = 0; pixel_y < 16; pixel_y = pixel_y + 1)
+            for (pixel_x = 0; pixel_x < 16; pixel_x = pixel_x + 1) begin
+                pixel(X0 + 5*16 + pixel_x, Y0 + 3*16 + pixel_y, colour);
+                if (colour !== reference[pixel_y*16+pixel_x])
+                    $fatal(1, "Non-printable character %h does not match '?'", character);
+            end
+    end
+endtask
+
 initial begin
     $dumpfile("sim/tb_textdisp.vcd");
     $dumpvars(0, tb_textdisp);
@@ -155,6 +182,9 @@ initial begin
         check_selected_glyph(8'h24, TEXT);
         check_selected_glyph("A", CURSOR);
         check_selected_glyph(">", CURSOR);
+        check_fallback(8'h01);
+        check_fallback(8'he0);
+        check_fallback(8'hff);
         if (errors != 0)
             $fatal(1, "tb_textdisp decorative FAILED: %0d errors", errors);
         $display("*** tb_textdisp decorative PASSED ***");

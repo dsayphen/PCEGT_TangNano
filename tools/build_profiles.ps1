@@ -1,10 +1,29 @@
 param(
-    [ValidateSet('pce', 'sgx', 'sgx_rv_diag', 'sgx_no_hdmi_audio', 'sgx_gpio26_input', 'sgx_gpio29_input', 'sgx_gpio29_pulse', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'superset', 'snes', 'all')]
+    [ValidateSet('pce', 'sgx', 'sgx_rv_diag', 'sgx_no_hdmi_audio', 'sgx_gpio26_input', 'sgx_gpio29_input', 'sgx_gpio29_pulse', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'snes', 'all')]
     [string]$Profile = 'all',
-    [string]$GowinShell
+    [string]$GowinShell,
+    [switch]$SnesSdramPhase180,
+    [switch]$SnesMemoryDiagnostic,
+    [switch]$SnesUpstreamRamDiagnostic,
+    [switch]$SnesWramWaitDiagnostic
 )
 
 $ErrorActionPreference = 'Stop'
+if ($SnesSdramPhase180 -and $Profile -ne 'snes') {
+    throw '-SnesSdramPhase180 is a diagnostic option for -Profile snes only.'
+}
+if ($SnesMemoryDiagnostic -and $Profile -ne 'snes') {
+    throw '-SnesMemoryDiagnostic is a diagnostic option for -Profile snes only.'
+}
+if ($SnesUpstreamRamDiagnostic -and $Profile -ne 'snes') {
+    throw '-SnesUpstreamRamDiagnostic is a diagnostic option for -Profile snes only.'
+}
+if ($SnesWramWaitDiagnostic -and $Profile -ne 'snes') {
+    throw '-SnesWramWaitDiagnostic is a diagnostic option for -Profile snes only.'
+}
+if (@($SnesSdramPhase180, $SnesMemoryDiagnostic, $SnesUpstreamRamDiagnostic, $SnesWramWaitDiagnostic).Where({ $_ }).Count -gt 1) {
+    throw 'Run one SNES diagnostic at a time.'
+}
 $root = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $root 'PCE_GT_TangNano.gprj'
 $configPath = Join-Path $root 'impl/PCE_GT_TangNano_process_config.json'
@@ -37,15 +56,15 @@ $profileIds = @{
     cd_vdc1 = 2
     cd_vdc1_gg = 2
     cd_vdc1_quiet = 2
-    superset = 3
     snes = 4
 }
-$profiles = if ($Profile -eq 'all') { @('sgx', 'cd', 'superset', 'snes') } else { @($Profile) }
+$profiles = if ($Profile -eq 'all') { @('sgx', 'cd', 'snes') } else { @($Profile) }
 
 New-Item -ItemType Directory -Force -Path $workDir, $outputRoot | Out-Null
 
 foreach ($name in $profiles) {
-    $stem = "PCE_GT_TangNano_$name"
+    $outputName = if ($SnesSdramPhase180) { 'snes_sdram_phase180' } elseif ($SnesMemoryDiagnostic) { 'snes_memory_diag' } elseif ($SnesUpstreamRamDiagnostic) { 'snes_upstream_ram' } elseif ($SnesWramWaitDiagnostic) { 'snes_wram_wait' } else { $name }
+    $stem = "PCE_GT_TangNano_$outputName"
     $projectCopy = Join-Path $root "$stem.gprj"
     $configCopy = Join-Path $root "impl/${stem}_process_config.json"
     $tclScript = Join-Path $workDir "build_$name.tcl"
@@ -58,8 +77,28 @@ foreach ($name in $profiles) {
         $topSourcePath = Join-Path $root "rtl/$topName"
         $topSource = Get-Content $topSourcePath -Raw
         $profileSource = $topSource
+        if ($SnesWramWaitDiagnostic) {
+            $profileSource = $profileSource.Replace(
+                'parameter SNES_WRAM_WAIT = 0',
+                'parameter SNES_WRAM_WAIT = 1')
+        }
+        if ($SnesUpstreamRamDiagnostic) {
+            $profileSource = $profileSource.Replace(
+                'parameter SNES_UPSTREAM_RAM_LAYOUT = 0',
+                'parameter SNES_UPSTREAM_RAM_LAYOUT = 1')
+        }
+        if ($SnesMemoryDiagnostic) {
+            $profileSource = $profileSource.Replace(
+                'parameter SNES_MEMORY_DIAGNOSTIC = 0',
+                'parameter SNES_MEMORY_DIAGNOSTIC = 1')
+        }
+        if ($SnesSdramPhase180) {
+            $profileSource = $profileSource.Replace(
+            'parameter SNES_SDRAM_PHASE = "1010"',
+            'parameter SNES_SDRAM_PHASE = "1000"')
+        }
         if ($name -ne 'snes') {
-            $parameterPattern = "parameter \[1:0\] CORE_PROFILE = 2'd3"
+            $parameterPattern = "parameter \[1:0\] CORE_PROFILE = 2'd1"
             if ([regex]::Matches($topSource, $parameterPattern).Count -ne 1) {
                 throw 'Expected exactly one default CORE_PROFILE parameter in top_tang_nano20k.v.'
             }
@@ -205,7 +244,7 @@ foreach ($name in $profiles) {
                 'rtl/snestang/src/smc_parser.v',
                 'rtl/snestang/src/smp.v',
                 'rtl/snestang/src/snes.v',
-                'rtl/snestang/src/snes2hdmi_nano.v',
+                'rtl/tang/snes_video_640.sv',
                 'rtl/snestang/src/spc700/_spc700_package.v',
                 'rtl/snestang/src/spc700/addrgen.v',
                 'rtl/snestang/src/spc700/addsub.v',
@@ -298,9 +337,7 @@ foreach ($name in $profiles) {
         $buildConfig['OUTPUT_BASE_NAME'] = $stem
         if ($name -eq 'snes') {
             $buildConfig['TopModule'] = 'top_tang_nano20k_snes'
-        }
-        if ($name -eq 'superset') {
-            $buildConfig['Route_Option'] = '1'
+            $buildConfig['GwSyn_Loop_Limit'] = 8192
         }
         [System.IO.File]::WriteAllText(
             $configCopy,
@@ -337,7 +374,7 @@ foreach ($name in $profiles) {
             throw "$stem.bin is $binarySize bytes and exceeds the 1 MiB candidate flash slot."
         }
 
-        $profileOutput = Join-Path $outputRoot $name
+        $profileOutput = Join-Path $outputRoot $outputName
         foreach ($subdir in @('gwsynthesis', 'pnr')) {
             $sourceDir = Join-Path $root "impl/$subdir"
             $destinationDir = Join-Path $profileOutput $subdir

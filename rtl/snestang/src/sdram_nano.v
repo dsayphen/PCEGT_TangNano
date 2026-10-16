@@ -52,6 +52,9 @@ module sdram_snes
     // Clock frequency
     parameter         FREQ = 86_000_000,  
     parameter         SHARED_IOSYS = 0,
+    parameter         SPLIT_WRAM = 0,
+    parameter         UPSTREAM_RAM_LAYOUT = 0,
+    parameter         VIDEO_RAM_LAYOUT = 0,
 
     // Typical SDRAM delays
     parameter [4:0]   CAS  = 2,     // 2/3 cycles, set in mode register
@@ -89,6 +92,12 @@ module sdram_snes
     output reg        cpu_req_ack,
 	input             cpu_we,
 	input       [1:0] cpu_ds,       // which bytes to enable
+
+    input      [16:0] wram_addr,
+    input       [7:0] wram_din,
+    input             wram_req,
+    output reg        wram_ack,
+    input             wram_we,
 
     input      [19:0] bsram_addr,   // only [16:0], max 128KB
     input       [7:0] bsram_din,    // byte access
@@ -187,13 +196,16 @@ localparam PORT_BSRAM = 2'd2;
 
 localparam PORT_ARAM  = 2'd1;
 localparam PORT_RV    = 2'd2;
+localparam PORT_WRAM_SHARED = 3'd3;
+localparam PORT_BSRAM_SHARED = 3'd4;
+localparam PORT_WRAM_VIDEO = 3'd5;
 
 localparam PORT_VRAM  = 2'd1;
 localparam PORT_VRAM1 = 2'd2;
 localparam PORT_VRAM2 = 2'd3;
 
-reg  [1:0] port[3];
-reg  [1:0] next_port[3];
+reg  [2:0] port[3];
+reg  [2:0] next_port[3];
 reg [22:0] next_addr[3];        // 2-bit bank #, then 2MB byte address in bank
 reg [15:0] next_din[3];
 reg  [1:0] next_ds[3];
@@ -201,6 +213,7 @@ reg  [2:0] next_we;
 reg  [2:0] next_oe;
 
 reg clkref_r;
+reg cpu_port_latched;
 always @(posedge clk) clkref_r <= clkref;
 
 reg        refresh;
@@ -225,14 +238,21 @@ always @(*) begin
 	next_oe[0] = 0;
 	next_ds[0] = 0;
 	next_din[0] = 0;
-    if (cpu_req ^ cpu_req_ack) begin
+    if ((cpu_req ^ cpu_req_ack) && (!SHARED_IOSYS || !cpu_port)) begin
 		next_port[0] = PORT_CPU;
 		next_addr[0] = { 1'b0, cpu_addr[21:1], 1'b0 };  // CPU uses bank 0 and 1, WRAM at last 128KB of bank 1
 		next_din[0]  = cpu_din;
 		next_ds[0]   = cpu_ds;
 		next_we[0]   = cpu_we;
 		next_oe[0]   = ~cpu_we;
-	end else if (bsram_req ^ bsram_req_ack) begin
+    end else if (UPSTREAM_RAM_LAYOUT && SPLIT_WRAM && (wram_req ^ wram_ack)) begin
+        next_port[0] = PORT_WRAM_SHARED;
+        next_addr[0] = {6'b01_1111, wram_addr};
+        next_din[0] = {wram_din, wram_din};
+        next_ds[0] = {wram_addr[0], ~wram_addr[0]};
+        next_we[0] = wram_we;
+        next_oe[0] = ~wram_we;
+    end else if ((!SHARED_IOSYS || UPSTREAM_RAM_LAYOUT) && (bsram_req ^ bsram_req_ack)) begin
 		next_port[0] = PORT_BSRAM;
 		next_addr[0] = { 6'b01_1110, bsram_addr[16:0]};  // BSRAM at 2nd last 128KB of bank 1
 		next_din[0] = { bsram_din, bsram_din };
@@ -259,10 +279,29 @@ always @* begin
 		next_oe[1]   = ~aram_we;
 		next_din[1]  = aram_din;
 		next_ds[1]   = aram_16 ? 2'b11 : {aram_addr[0], ~aram_addr[0]};
-	end else if (next_port[0] == PORT_NONE &&           // only allow RV access when bank 0,1 are also idle
+    end else if (SHARED_IOSYS && !UPSTREAM_RAM_LAYOUT && !VIDEO_RAM_LAYOUT &&
+                 (SPLIT_WRAM ? (wram_req ^ wram_ack) :
+                                cpu_port && (cpu_req ^ cpu_req_ack))) begin
+        next_port[1] = PORT_WRAM_SHARED;
+        next_addr[1] = SPLIT_WRAM ? {6'b10_1110, wram_addr} :
+                                   {6'b10_1110, cpu_addr[16:1], 1'b0};
+        next_din[1] = SPLIT_WRAM ? {wram_din, wram_din} : cpu_din;
+        next_ds[1] = SPLIT_WRAM ? {wram_addr[0], ~wram_addr[0]} : cpu_ds;
+        next_we[1] = SPLIT_WRAM ? wram_we : cpu_we;
+        next_oe[1] = ~next_we[1];
+    end else if (SHARED_IOSYS && !UPSTREAM_RAM_LAYOUT &&
+                 (bsram_req ^ bsram_req_ack)) begin
+        next_port[1] = PORT_BSRAM_SHARED;
+        next_addr[1] = {6'b10_1111, bsram_addr[16:0]};
+        next_din[1] = {bsram_din, bsram_din};
+        next_ds[1] = {bsram_addr[0], ~bsram_addr[0]};
+        next_we[1] = bsram_we;
+        next_oe[1] = ~bsram_we;
+    end else if (next_port[0] == PORT_NONE &&           // only allow RV access when bank 0,1 are also idle
             (rv_req ^ rv_req_ack)) begin                // RV uses upper 1MB of bank 2
 		next_port[1] = PORT_RV;
-        if (SHARED_IOSYS ? rv_addr[22:17] == 6'b10_1111 : rv_addr[22:20] == 3'd7)
+        if ((!SHARED_IOSYS && rv_addr[22:20] == 3'd7) ||
+            (SHARED_IOSYS && UPSTREAM_RAM_LAYOUT && rv_addr[22:17] == 6'b10_1111))
             next_addr[1] = {6'b01_1110, rv_addr[16:1], 1'b0};
         else                                            // normal RV address
             next_addr[1] = SHARED_IOSYS ? {2'b10, rv_addr[20:1], 1'b0} :
@@ -305,6 +344,13 @@ always @(*) begin
 		next_oe[2] = ~vram2_we;
 		next_din[2] = { vram2_din, vram2_din };
 		next_ds[2] = 2'b10;
+    end else if (VIDEO_RAM_LAYOUT && SPLIT_WRAM && (wram_req ^ wram_ack)) begin
+        next_port[2] = PORT_WRAM_VIDEO;
+        next_addr[2] = {2'b11, 4'b0001, wram_addr};
+        next_we[2] = wram_we;
+        next_oe[2] = ~wram_we;
+        next_din[2] = {wram_din, wram_din};
+        next_ds[2] = {wram_addr[0], ~wram_addr[0]};
 	end
 end
 
@@ -317,6 +363,13 @@ always @* begin                 // output bsram_dout on the same cycle
         2'b10: bsram_dout = dq_in[23:16];
         2'b11: bsram_dout = dq_in[31:24]; 
         endcase
+    else if (SHARED_IOSYS && cycle[6] && oe_latch[1] && port[1] == PORT_BSRAM_SHARED)
+        case (addr_latch[1][1:0])
+        2'b00: bsram_dout = dq_in[7:0];
+        2'b01: bsram_dout = dq_in[15:8];
+        2'b10: bsram_dout = dq_in[23:16];
+        2'b11: bsram_dout = dq_in[31:24];
+        endcase
     else
         bsram_dout = bsram_dout_reg;
 end
@@ -327,7 +380,9 @@ end
 always @(posedge clk) begin
     if (~resetn) begin
         busy <= 1'b1;
+        cpu_port_latched <= 1'b0;
         cpu_req_ack <= 1'b0;
+        wram_ack <= 1'b0;
         bsram_req_ack <= 1'b0;
         aram_req_ack <= 1'b0;
         vram1_ack <= 1'b0;
@@ -391,6 +446,7 @@ always @(posedge clk) begin
             // RAS
             // bank 0,1 - ROM, WRAM, BSRAM
             if (cycle[0]) begin
+                cpu_port_latched <= cpu_port;
     			port[0] <= next_port[0];
 	    		{ we_latch[0], oe_latch[0] } <= { next_we[0], next_oe[0] };
     			addr_latch[0] <= next_addr[0];
@@ -415,7 +471,7 @@ always @(posedge clk) begin
                     cmd <= CMD_BankActivate; 
                     aram_req_ack <= aram_req; 
                 end
-                PORT_RV: begin
+                PORT_RV, PORT_WRAM_SHARED, PORT_BSRAM_SHARED: begin
                     cmd <= CMD_BankActivate;
                 end
                 default: ;
@@ -465,6 +521,7 @@ always @(posedge clk) begin
                 case (port[0])
                 PORT_CPU:   cpu_req_ack <= cpu_req;
                 PORT_BSRAM: bsram_req_ack <= bsram_req;
+                PORT_WRAM_SHARED: wram_ack <= wram_req;
                 default: ;
                 endcase
             end
@@ -483,8 +540,19 @@ always @(posedge clk) begin
                     SDRAM_BA <= addr_latch[1][22:21];
                 end
             end
-            if (cycle[3] && port[1] == PORT_RV)         // ack RV request on cycle 3
-                rv_req_ack <= rv_req;
+            if (cycle[3]) begin
+                case (port[1])
+                PORT_RV: rv_req_ack <= rv_req;
+                PORT_WRAM_SHARED: begin
+                    if (SPLIT_WRAM)
+                        wram_ack <= wram_req;
+                    else
+                        cpu_req_ack <= cpu_req;
+                end
+                PORT_BSRAM_SHARED: bsram_req_ack <= bsram_req;
+                default: ;
+                endcase
+            end
 
             // VRAM
             if(cycle[7] && (oe_latch[2] || we_latch[2])) begin
@@ -503,6 +571,7 @@ always @(posedge clk) begin
                     PORT_VRAM:   { vram1_ack, vram2_ack } <= { vram1_req, vram2_req };
                     PORT_VRAM1:  vram1_ack <= vram1_req;
                     PORT_VRAM2:  vram2_ack <= vram2_req;
+                    PORT_WRAM_VIDEO: wram_ack <= wram_req;
                     default: ;
                 endcase
             end
@@ -512,10 +581,11 @@ always @(posedge clk) begin
             if (cycle[5] && oe_latch[0]) begin
                 case (port[0])
                 PORT_CPU:   
-                    if (cpu_port) 
+                    if (cpu_port_latched)
                         cpu_port1 <= addr_latch[0][1] ? dq_in[31:16] : dq_in[15:0]; 
                     else 
                         cpu_port0 <= addr_latch[0][1] ? dq_in[31:16] : dq_in[15:0];
+                    PORT_WRAM_SHARED: cpu_port1 <= addr_latch[0][1] ? dq_in[31:16] : dq_in[15:0];
                 PORT_BSRAM: 
                     case ({addr_latch[0][1:0]})
                     2'b00: bsram_dout_reg <= dq_in[7:0];
@@ -532,6 +602,14 @@ always @(posedge clk) begin
                 case (port[1])
                 PORT_ARAM: aram_dout <= addr_latch[1][1] ? dq_in[31:16] : dq_in[15:0];
                 PORT_RV:    rv_dout <= addr_latch[1][1] ? dq_in[31:16] : dq_in[15:0];
+                PORT_WRAM_SHARED: cpu_port1 <= addr_latch[1][1] ? dq_in[31:16] : dq_in[15:0];
+                PORT_BSRAM_SHARED:
+                    case (addr_latch[1][1:0])
+                    2'b00: bsram_dout_reg <= dq_in[7:0];
+                    2'b01: bsram_dout_reg <= dq_in[15:8];
+                    2'b10: bsram_dout_reg <= dq_in[23:16];
+                    2'b11: bsram_dout_reg <= dq_in[31:24];
+                    endcase
                 default: ;
                 endcase
 
@@ -541,6 +619,7 @@ always @(posedge clk) begin
 				PORT_VRAM: { vram2_dout, vram1_dout } <= addr_latch[2][1] ? dq_in[31:16] : dq_in[15:0];
 				PORT_VRAM1: vram1_dout <= addr_latch[2][1] ? dq_in[23:16] : dq_in[7:0];
 				PORT_VRAM2: vram2_dout <= addr_latch[2][1] ? dq_in[31:24] : dq_in[15:8];
+                PORT_WRAM_VIDEO: cpu_port1 <= addr_latch[2][1] ? dq_in[31:16] : dq_in[15:0];
                 default: ;
                 endcase
             end
@@ -549,6 +628,7 @@ always @(posedge clk) begin
 				PORT_VRAM: { vram2_dout, vram1_dout } <= din_latch[2];
 				PORT_VRAM1: vram1_dout <= din_latch[2][7:0];
 				PORT_VRAM2: vram2_dout <= din_latch[2][7:0];
+                PORT_WRAM_VIDEO: cpu_port1 <= din_latch[2];
                 default: ;
                 endcase
             end

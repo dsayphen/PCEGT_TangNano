@@ -65,6 +65,8 @@ module iosys #(
     parameter [22:0] RV_BASE             = 23'h40_0000,
     parameter [31:0] ROM_MAX_SIZE        = 32'h0040_0000,
     parameter        ROM_CLEAR_ENABLE   = 1,
+    parameter        OSD_RAM_STYLE      = "distributed_ram",
+    parameter        OSD_CHARACTER_BITS = 8,
     parameter [15:0] CORE_ID             = 16'd3,
     parameter RECONFIG_ENABLE = 0,
     parameter RECONFIG_INPUT_ONLY = 0,
@@ -617,7 +619,7 @@ picorv32 #(
 // ===========================================================================
 // Peripherals
 // ===========================================================================
-textdisp u_disp (
+textdisp #(.PLANE_RAM_STYLE(OSD_RAM_STYLE), .CHARACTER_BITS(OSD_CHARACTER_BITS)) u_disp (
     .clk         (clk),
     .resetn      (resetn),
     .reg_char_we (textdisp_sel ? mem_wstrb : 4'b0000),

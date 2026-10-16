@@ -7,7 +7,9 @@
 //Device Version: C
 //Created Time: Sat Mar 16 15:45:29 2024
 
-module gowin_pll_snes (clkout, clkoutp, clkoutd, clkin);
+module gowin_pll_snes #(
+    parameter SDRAM_PHASE = "1010"
+) (clkout, clkoutp, clkoutd, clkin);
 
 output clkout;
 output clkoutp;
@@ -47,7 +49,7 @@ defparam rpll_inst.DYN_FBDIV_SEL = "false";
 defparam rpll_inst.FBDIV_SEL = 15;
 defparam rpll_inst.DYN_ODIV_SEL = "false";
 defparam rpll_inst.ODIV_SEL = 8;
-defparam rpll_inst.PSDA_SEL = "1010";
+defparam rpll_inst.PSDA_SEL = SDRAM_PHASE;
 defparam rpll_inst.DYN_DA_EN = "false";
 defparam rpll_inst.DUTYDA_SEL = "1000";
 defparam rpll_inst.CLKOUT_FT_DIR = 1'b1;

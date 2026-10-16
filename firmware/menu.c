@@ -309,44 +309,47 @@ static void cheats_menu(void) {
 static void video_menu(int in_game) {
     static const char *back_label = "Back";
     int active = 0;
-    const int n_items = 4;
+    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
+    const int n_items = snes_profile ? 3 : 4;
     const int first_row = in_game ? 9 : 8;
 
     menu_header("Video Settings", in_game, MENU_FRAME_WIDTH);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
+            int item = snes_profile ? i + 1 : i;
             cursor(4, first_row + i);
             putchar(i == active ? '>' : ' ');
 
             char label[24];
 
-            if (i == 3) {
+            if (item == 3) {
                 print_field(6, first_row + i, back_label, 20);
                 continue;
             }
 
-            make_menu_label(label, i + 4);
+            make_menu_label(label, item + 4);
             print_field(6, first_row + i, label, 20);
         }
         selection_row(first_row + active);
 
         uint32_t e = joy_edge();
+        int command = snes_profile ? active + 1 : active;
         if (e & JOY_UP) {
             active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {
             active = active < n_items - 1 ? active + 1 : 0;
-        } else if ((e & JOY_B) || ((e & JOY_A) && active == 3)) {
+        } else if ((e & JOY_B) || ((e & JOY_A) && command == 3)) {
             return;
-        } else if ((e & JOY_A) && active == 0) {
+        } else if ((e & JOY_A) && command == 0) {
             video_color = !video_color;
             reg_color_mode = video_color;
             video_config_save();
-        } else if ((e & JOY_A) && active == 1) {
+        } else if ((e & JOY_A) && command == 1) {
             video_zoom = (video_zoom + 1) % 3;
             reg_video_zoom = video_zoom;
             video_config_save();
-        } else if ((e & JOY_A) && active == 2) {
+        } else if ((e & JOY_A) && command == 2) {
             video_scanline = (video_scanline + 1) % 4;
             reg_scanline = video_scanline;
             video_config_save();
@@ -483,12 +486,12 @@ int pause_menu(void) {
     };
     int active = 0;
     const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
-    const int n_items = snes_profile ? 4 : 7;
+    const int snes_items[5] = {0, 2, 3, 5, 6};
+    const int n_items = snes_profile ? 5 : 7;
     const int first_row = 9;
     const int has_cheats = CORE_PROFILE_ID == CORE_PROFILE_PCE ||
                            CORE_PROFILE_ID == CORE_PROFILE_SGX ||
-                           CORE_PROFILE_ID == CORE_PROFILE_CD ||
-                           CORE_PROFILE_ID == CORE_PROFILE_SUPERSET;
+                           CORE_PROFILE_ID == CORE_PROFILE_CD;
 
     if (!snes_profile)
         vdc_timing_dump();
@@ -500,7 +503,7 @@ int pause_menu(void) {
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
-            int item = snes_profile ? (i == 1 ? 3 : i >= 2 ? i + 3 : i) : i;
+            int item = snes_profile ? snes_items[i] : i;
             cursor(4, first_row + i);
             putchar(i == active ? '>' : ' ');
 
@@ -542,7 +545,7 @@ int pause_menu(void) {
         selection_row(first_row + active);
 
         uint32_t e = joy_edge();
-        int command = snes_profile ? (active == 1 ? 3 : active >= 2 ? active + 3 : active) : active;
+        int command = snes_profile ? snes_items[active] : active;
         if (e & JOY_UP) {
             active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {
@@ -602,9 +605,9 @@ void options_menu(void) {
         "Video Settings >", "Audio Settings >", "Debug UART: ",
         "Cheats: ", "Sprites: ", "Choose core >", "Back"
     };
-    const int snes_items[4] = {1, 2, 5, 6};
+    const int snes_items[5] = {0, 1, 2, 5, 6};
     const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
-    const int n_items = snes_profile ? 4 : 7;
+    const int n_items = snes_profile ? 5 : 7;
     int active = 0;
 
     menu_header("Options", 0, MENU_FRAME_WIDTH);

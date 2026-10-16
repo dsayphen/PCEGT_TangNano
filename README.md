@@ -54,16 +54,17 @@ From the repository root, build **both** components:
 & "G:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\gw_sh.exe" tools/build.tcl
 ```
 
-To build the four profile variants, run:
+To build the three profile variants, run:
 
 ```powershell
 & .\tools\build_profiles.ps1 -Profile all
 ```
 
 The script creates temporary Gowin project/config copies and stores each
-profile's bitstream and binary under `impl/profiles/{sgx,cd,superset,snes}/`.
+profile's bitstream and binary under `impl/profiles/{sgx,cd,snes}/`.
 The `all` build selects `sgx` (HuCard, including ordinary PCE games), `cd`
-(CD-Rom), `superset`, and experimental `snes`; PCE is not offered by the core selection menu.
+(CD-Rom), and experimental `snes`. SGX is the default boot profile;
+Superset is no longer built or offered by the core selection menu.
 Each core image is about 887 KiB and fits a 1 MiB flash slot. Core selection
 copies the selected image to the boot address, then requests a reload through
 the tested GPIO29 connection described below.
@@ -83,10 +84,10 @@ Programmer can write the binary at this address.
 
 ### Core selection from the browser
 
-Browser Options (Select) provides **Choose core > HuCard / CD-Rom / Superset / SNES**.
+Browser Options (Select) provides **Choose core > HuCard / CD-Rom / SNES**.
 Selecting a different core asks for confirmation, checks the source slot's
 profile, size and CRC32, then erases/programs/verifies the first 1 MiB of flash.
-The four source slots and the firmware at `0x500000` are not modified.
+The three source slots and the firmware at `0x500000` are not modified.
 When `Core ready` appears, A requests an FPGA reload if the GPIO29/TP1
 hardware is installed and the rebuilt core supports it. Otherwise use the
 TP1 button or switch power off and on. S1 only resets the console and does
@@ -109,8 +110,10 @@ Build the firmware, cores and flash images with:
 & .\tools\prepare_core_slots.ps1 -CombinedImage
 ```
 
-This creates `impl/core-slots/cores_superset_sgx_cd_superset_snes.bin`, a
-5 MiB image containing Superset, SGX, CD-Rom, Superset, then SNES.
+This creates `impl/core-slots/cores_sgx_cd_snes.bin`, a 5 MiB image:
+SGX boot at `0x000000`, SGX source at `0x100000`, CD-Rom at `0x200000`,
+SNES at `0x300000`, and a reserved `FF`-filled slot at `0x400000`.
+Update the firmware when moving SNES from its previous slot.
 Program it as raw SPI flash data at `0x000000`, with erase/program/verify
 limited to `0x000000..0x4FFFFF`. **Never use Bulk Erase.** The firmware is a
 separate file at `0x500000`. Verify programmer readback and power-cycle after
@@ -125,20 +128,20 @@ image with an external programmer.
 
 ### Experimental SNES profile
 
-The [SNESTang](https://github.com/nand2mario/snestang) core is integrated as a
-separate FPGA profile, using this project's shared PicoRV32 firmware, browser,
-OSD, audio controls, saves and core switching. Build it alone with
-`tools/build_profiles.ps1 -Profile snes`. Its source slot is `0x400000`;
-the common firmware remains at `0x500000`.
+The [SNESTang](https://github.com/nand2mario/snestang) core is available as a
+separate profile and shares this project's firmware, browser, OSD, saves and
+core selection. Build it with `tools/build_profiles.ps1 -Profile snes`.
 
-The browser recognizes `.sfc` and `.smc`, including 512-byte copier headers,
-and offers a switch to SNES. LoROM/HiROM images from 32 KiB to 3.75 MiB and
-up to 128 KiB SRAM are supported; saves use `/saves/<game>.srm` when entering
-the pause menu, not on power loss. SNES uses 720p NTSC integer scaling with
-native pad mapping; PCE video/pad/cheat options are hidden in this profile.
-ExHiROM and Super FX, SA-1, CX4, S-DD1, SPC7110 and ST01x images are rejected.
-Gameplay, audio and switching to/from SNES have not been tested on hardware.
-See [source provenance](rtl/snestang/README.md) for the upstream revision and license.
+The browser supports `.sfc` and `.smc` images, including copier headers, and
+SNES saves use `/saves/<game>.srm`. Video output is 640x480 with Integer,
+Stretch and Bilinear zoom modes; scanlines and zoom are available in Video Settings.
+ExHiROM and enhancement-chip games such as Super FX and SA-1 are not supported.
+
+The profile uses the upstream RAM layout, tested with Super Mario World
+(USA, 512 KiB), and accepts ROMs up to 3.75 MiB. The new Bilinear mode still
+needs hardware testing. CD and SNES support remain experimental.
+
+See [SNES source and license information](rtl/snestang/README.md).
 
 ---
 
@@ -304,21 +307,19 @@ CD games support CD audio and ADPCM. CD-ROM support remains experimental.
 
 ## 6. Development
 
-Resource use in the current Gowin profile builds:
+Resource use in the latest successfully placed Gowin builds:
 
-| Profile | Logic | Registers | BSRAM | BSRAM remaining |
+| Profile | Logic (Total) | LUT | Registers | BSRAM |
 | --- | ---: | ---: | ---: | ---: |
-| SGX | 13,649 / 20,736 (66%) | 7,100 / 15,915 (45%) | 43 / 46 (94%) | 3 |
-| CD | 15,480 / 20,736 (75%) | 7,489 / 15,915 (48%) | 41 / 46 (90%) | 5 |
-| Superset | 17,785 / 20,736 (86%) | 8,887 / 15,915 (56%) | 46 / 46 (100%) | 0 |
+| SGX | 13,649 / 20,736 (66%) | 10,516 | 7,100 / 15,915 (45%) | 43 / 46 (94%) |
+| CD | 15,480 / 20,736 (75%) | 12,196 | 7,489 / 15,915 (48%) | 41 / 46 (90%) |
+| SNES | 20,542 / 20,736 (100%) | 16,961 | 7,271 / 15,915 (46%) | 46 / 46 (100%) |
 
 Run the available simulations from the repository root:
 
 ```powershell
 & .\sim\run.ps1
 ```
-
-Regenerate memory initialization data with `python tools/mif2vhd.py`.
 
 ---
 

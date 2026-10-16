@@ -93,9 +93,9 @@ int main(void) {
     prepare(CORE_PROFILE_CD, "game.cue");
     check(core_autorun() == 1 && cd_loads == 1, 5);
     prepare(CORE_PROFILE_SUPERSET, "game.pce");
-    check(core_autorun() == 1 && rom_loads == 1, 6);
+    check(core_autorun() == 0 && !present && !rom_loads, 6);
     prepare(CORE_PROFILE_SUPERSET, "game.cue");
-    check(core_autorun() == 1 && cd_loads == 1, 7);
+    check(core_autorun() == 0 && !present && !cd_loads, 7);
     prepare(CORE_PROFILE_CD, "game.cue");
     test_profile = CORE_PROFILE_SGX;
     check(core_autorun() == 0 && !present && !cd_loads, 8);

@@ -26,6 +26,7 @@ module SPPU(
     output VRAM_WRA_N,
     output VRAM_WRB_N,
     output VRAM_RD_N,
+    output VRAM_READ_CE,
 
     input EXTLATCH,
 
@@ -60,6 +61,7 @@ module SPPU(
 reg DOT_CLK = 1'b0;
 reg DOT_CLKF_CE;        // 1 on first cycle
 reg DOT_CLKR_CE;        // 1 on last cycle
+assign VRAM_READ_CE = ENABLE && DOT_CLKR_CE;
 
 reg [2:0] CLK_CNT = 0;
 reg [7:0] MDR1, MDR2;   // Data output register for PPU1/PPU2
@@ -253,10 +255,8 @@ always @(posedge CLK) begin : clock_gen
         DOT_CLK <= 1'b0;
         DOT_CLKR_CE <= 0;
         DOT_CLKF_CE <= 0;
-    end else begin
-        if (~ENABLE)
-            DOT_CYCLES = 4;
-        else if (V_CNT == 240 && ~BGINTERLACE && FIELD && ~PAL && ~DIS_SHORTLINE)
+    end else if (ENABLE) begin
+        if (V_CNT == 240 && ~BGINTERLACE && FIELD && ~PAL && ~DIS_SHORTLINE)
             DOT_CYCLES = 4;
         else if (H_CNT == 323 && H_CNT == 327)
             DOT_CYCLES = 6;

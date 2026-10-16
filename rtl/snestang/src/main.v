@@ -66,6 +66,7 @@ module main (
 	output            FIELD,
 	output            INTERLACE,
 	output            DOTCLK,
+    output            VRAM_READ_CE,
     output     [14:0] RGB_OUT,
 	output            HBLANKn,
 	output            VBLANKn,
@@ -184,6 +185,7 @@ SNES SNES
 
 	.BLEND(BLEND), .PAL(PAL), .DIS_SHORTLINE(DIS_SHORTLINE),
 	.HIGH_RES(HIGH_RES), .FIELD_OUT(FIELD), .INTERLACE(INTERLACE), .DOTCLK(DOTCLK),
+    .VRAM_READ_CE(VRAM_READ_CE),
 	.V224_MODE(),
 
 	.RGB_OUT(RGB_OUT), .HDE(HBLANKn), .VDE(VBLANKn), .HSYNC(), .VSYNC(),

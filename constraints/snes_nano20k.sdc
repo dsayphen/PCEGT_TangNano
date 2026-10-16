@@ -1,7 +1,7 @@
 create_clock -name sys_clk -period 37.037 -waveform {0 18.519} [get_ports {sys_clk}]
 create_clock -name fclk -period 11.574 -waveform {0 5.787} [get_nets {fclk}]
 create_generated_clock -name mclk -source [get_nets {fclk}] -divide_by 4 [get_nets {mclk}]
-create_clock -name hclk5 -period 2.694 -waveform {0 1.347} [get_nets {hclk5}]
+create_clock -name hclk5 -period 7.937 -waveform {0 3.968} [get_nets {hclk5}]
 create_generated_clock -name hclk -source [get_nets {hclk5}] -divide_by 5 [get_nets {hclk}]
 
 set_multicycle_path 3 -setup -end -from [get_clocks {mclk}] -to [get_clocks {fclk}]

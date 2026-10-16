@@ -19,7 +19,7 @@
 //
 
 module top_tang_nano20k #(
-    parameter [1:0] CORE_PROFILE = 2'd3,
+    parameter [1:0] CORE_PROFILE = 2'd1,
     parameter [1:0] CORE_LOGIC_PROFILE = CORE_PROFILE,
     parameter CORE_EXTRA_SGX = 0,
     parameter CORE_EXTRA_VDC1 = 0,

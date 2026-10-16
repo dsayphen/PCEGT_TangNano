@@ -1,7 +1,13 @@
 // SNES profile for the Tang Nano 20K, using the shared PCE PicoRV32 IOSys.
 // The SNESTang core sources and license are kept under rtl/snestang/src.
 
-module top_tang_nano20k_snes (
+module top_tang_nano20k_snes #(
+    parameter SNES_SDRAM_PHASE = "1010",
+    parameter SNES_MEMORY_DIAGNOSTIC = 0,
+    parameter SNES_UPSTREAM_RAM_LAYOUT = 1,
+    parameter SNES_VIDEO_RAM_LAYOUT = 0,
+    parameter SNES_WRAM_WAIT = 0
+) (
     input  wire       sys_clk,
     input  wire       s1,
     input  wire       s2,
@@ -54,7 +60,7 @@ wire hclk5;
 wire hclk;
 wire hdmi_locked;
 
-gowin_pll_snes u_pll_snes (
+gowin_pll_snes #(.SDRAM_PHASE(SNES_SDRAM_PHASE)) u_pll_snes (
     .clkin  (sys_clk),
     .clkout (fclk),
     .clkoutp(fclk_p),
@@ -175,6 +181,12 @@ wire [7:0]  brm_host_data;
 wire        brm_host_we;
 wire        brm_host_access;
 wire        sdram_busy;
+wire [1:0] vram1_diag_errors, vram2_diag_errors;
+wire [7:0] vram1_diag_writes, vram2_diag_writes;
+wire vram1_diag_not_ready;
+wire [15:0] vram1_diag_first;
+wire [15:0] diag_frame_samples, diag_frame_late;
+wire vram_diag_reset = loading || game_reset || !image_valid;
 assign brm_host_q = 8'd0;
 
 iosys #(
@@ -182,7 +194,8 @@ iosys #(
     .FIRMWARE_FLASH_ADDR (24'h50_0000),
     .FIRMWARE_SIZE       (128*1024),
     .RV_BASE             (23'h40_0000),
-    .ROM_MAX_SIZE        (32'h003c_0040),
+    .ROM_MAX_SIZE        (SNES_UPSTREAM_RAM_LAYOUT ? 32'h003c_0040 : 32'h0040_0040),
+    .OSD_CHARACTER_BITS  (7),
     .ROM_CLEAR_ENABLE    (0),
     .CORE_ID             (CORE_ID_SNES),
     .RECONFIG_ENABLE     (1),
@@ -256,13 +269,13 @@ iosys #(
     .cd_data_end         (1'b0),
     .cd_reset             (1'b0),
     .cd_fifo_halffull    (1'b0),
-    .cd_phase_dbg        (8'd0),
-    .cdda_usedw_dbg      (14'd0),
-    .adpcm_dbg           (8'd0),
-    .refresh_gap_dbg     (8'd0),
-    .vid_dcc_dbg         (2'd0),
-    .vid_hdw_dbg         (7'd0),
-    .vid_hds_dbg         (7'd0),
+    .cd_phase_dbg        (SNES_MEMORY_DIAGNOSTIC ? diag_frame_samples[15:8] : 8'd0),
+    .cdda_usedw_dbg      (SNES_MEMORY_DIAGNOSTIC ? diag_frame_late[15:2] : 14'd0),
+    .adpcm_dbg           (SNES_MEMORY_DIAGNOSTIC ? 8'hd6 : 8'd0),
+    .refresh_gap_dbg     (SNES_MEMORY_DIAGNOSTIC ? {4'd0, vram2_diag_errors, vram1_diag_errors} : 8'd0),
+    .vid_dcc_dbg         (SNES_MEMORY_DIAGNOSTIC ? vram1_diag_first[15:14] : 2'd0),
+    .vid_hdw_dbg         (SNES_MEMORY_DIAGNOSTIC ? vram1_diag_first[13:7] : 7'd0),
+    .vid_hds_dbg         (SNES_MEMORY_DIAGNOSTIC ? vram1_diag_first[6:0] : 7'd0),
     .vid_hsw_dbg         (5'd0),
     .vid_hde_dbg         (7'd0),
     .vid_vsw_dbg         (5'd0),
@@ -376,6 +389,7 @@ wire [15:0] aram_dout;
 wire        aram_16 = 1'b0;
 wire        dot_clk_ce;
 wire        dotclk;
+wire        ppu_read_ce;
 wire        hblankn;
 wire        vblankn;
 wire [8:0]  x_out;
@@ -393,9 +407,6 @@ wire        snes_joy1_clk;
 wire        snes_joy2_clk;
 wire [1:0]  snes_joy1_di;
 wire [1:0]  snes_joy2_di;
-wire [7:0]  overlay_x;
-wire [7:0]  overlay_y;
-wire [14:0] overlay_color = {osd_rgb[7:3], osd_rgb[15:11], osd_rgb[23:19]};
 wire [11:0] game_pad = game_buttons;
 
 wire [15:0] cpu_port0;
@@ -410,9 +421,19 @@ reg [22:0]  cpu_addr = 23'd0;
 reg         cpu_we = 1'b0;
 wire [22:0] rom_addr = loading ? loader_addr : ROM_ADDR[22:0];
 reg [22:0] rom_addr_sd = 23'h7fffff;
-reg [16:0] wram_addr_sd = 17'h1ffff;
-reg        wram_wr_r = 1'b0;
-reg        wram_rd_r = 1'b0;
+wire [16:0] wram_addr_sd;
+wire [7:0] wram_data_sd;
+wire wram_request;
+wire wram_ack;
+wire wram_write;
+reg wram_ack_settled = 0;
+always @(posedge mclk) begin
+    if (!sys_resetn)
+        wram_ack_settled <= 0;
+    else
+        wram_ack_settled <= wram_ack;
+end
+wire wram_wait = SNES_WRAM_WAIT && (wram_request != wram_ack_settled);
 wire       wram_rd = ~WRAM_CE_N & ~WRAM_RD_N;
 wire       wram_wr = ~WRAM_CE_N & ~WRAM_WE_N;
 reg        bsram_req = 1'b0;
@@ -431,47 +452,48 @@ reg        aram_rd_r = 1'b0;
 reg        aram_wr_r = 1'b0;
 reg        aram_req = 1'b0;
 wire       aram_req_ack;
-reg [14:0] vram1_addr_sd = 15'h7fff;
-reg [14:0] vram2_addr_sd = 15'h7fff;
-reg        vram1_we_n_old = 1'b1;
-reg        vram2_we_n_old = 1'b1;
-reg        vram1_req = 1'b0;
-reg        vram2_req = 1'b0;
+wire [14:0] vram1_addr_sd;
+wire [14:0] vram2_addr_sd;
+wire        vram1_req;
+wire        vram2_req;
 wire       vram1_ack;
 wire       vram2_ack;
-reg [7:0]  vram1_din = 8'd0;
-reg [7:0]  vram2_din = 8'd0;
+wire [7:0] vram1_din;
+wire [7:0] vram2_din;
+wire vram1_write;
+wire vram2_write;
 
 always @(posedge mclk) begin
     if (!sys_resetn) begin
         cpu_req <= 1'b0;
         cpu_we <= 1'b0;
+        cpu_addr <= 23'd0;
+        cpu_din <= 16'd0;
+        cpu_ds <= 2'b11;
+        cpu_port <= 1'b0;
+        rom_addr_sd <= 23'h7fffff;
+        bsram_req <= 1'b0;
+        bsram_we <= 1'b0;
+        bsram_addr <= 20'd0;
+        bsram_din <= 8'd0;
+        bsram_rd_r <= 1'b0;
+        bsram_wr_r <= 1'b0;
+        aram_req <= 1'b0;
+        aram_addr_sd <= 16'hffff;
+        aram_rd_r <= 1'b0;
+        aram_wr_r <= 1'b0;
     end else begin
         if ((loading && loader_do_valid && header_finished && loader_addr[0] &&
              cpu_req == cpu_req_ack) ||
             (!loading && !ROM_CE_N && rom_addr_sd != rom_addr &&
              cpu_req == cpu_req_ack)) begin
-            rom_addr_sd <= rom_addr;
+            rom_addr_sd <= loading ? 23'h7fffff : rom_addr;
             cpu_addr <= rom_addr;
             cpu_req <= ~cpu_req;
             cpu_we <= loading;
             cpu_din <= {loader_do, loader_do_r};
             cpu_ds <= 2'b11;
             cpu_port <= 1'b0;
-        end
-
-        wram_rd_r <= ~WRAM_CE_N & ~WRAM_RD_N;
-        wram_wr_r <= ~WRAM_CE_N & ~WRAM_WE_N;
-        if (((wram_rd && WRAM_ADDR[16:1] != wram_addr_sd[16:1]) ||
-             (wram_rd && !wram_rd_r) || (wram_wr && !wram_wr_r)) &&
-            cpu_req == cpu_req_ack) begin
-            wram_addr_sd <= WRAM_ADDR;
-            cpu_req <= ~cpu_req;
-            cpu_addr <= {6'b111111, WRAM_ADDR[16:0]};
-            cpu_we <= wram_wr;
-            cpu_ds <= {WRAM_ADDR[0], ~WRAM_ADDR[0]};
-            cpu_din <= {WRAM_D, WRAM_D};
-            cpu_port <= 1'b1;
         end
 
         bsram_rd_r <= bsram_rd;
@@ -493,22 +515,49 @@ always @(posedge mclk) begin
             aram_addr_sd <= ARAM_ADDR;
         end
 
-        vram1_we_n_old <= VRAM1_WE_N;
-        if ((!VRAM1_WE_N && vram1_we_n_old) ||
-            (VRAM1_ADDR[14:0] != vram1_addr_sd && !VRAM_OE_N)) begin
-            vram1_addr_sd <= VRAM1_ADDR[14:0];
-            vram1_din <= VRAM1_DO;
-            vram1_req <= ~vram1_req;
-        end
-        vram2_we_n_old <= VRAM2_WE_N;
-        if ((!VRAM2_WE_N && vram2_we_n_old) ||
-            (VRAM2_ADDR[14:0] != vram2_addr_sd && !VRAM_OE_N)) begin
-            vram2_addr_sd <= VRAM2_ADDR[14:0];
-            vram2_din <= VRAM2_DO;
-            vram2_req <= ~vram2_req;
-        end
     end
 end
+
+snes_vram_port #(.ADDRESS_WIDTH(17), .READ_IGNORE_LOW_BITS(1)) u_wram_port (
+    .clk(mclk), .resetn(sys_resetn), .address(WRAM_ADDR), .data(WRAM_D),
+    .read_n(~(wram_rd && !loading)), .write_n(~(wram_wr && !loading)), .ack(wram_ack),
+    .request(wram_request), .memory_address(wram_addr_sd), .memory_data(wram_data_sd),
+    .memory_write(wram_write)
+);
+
+snes_vram_port #(.DIAGNOSTIC(SNES_MEMORY_DIAGNOSTIC)) u_vram_port1 (
+    .clk(mclk), .resetn(sys_resetn), .address(VRAM1_ADDR[14:0]), .data(VRAM1_DO),
+    .read_n(VRAM_OE_N), .write_n(VRAM1_WE_N), .ack(vram1_ack),
+    .request(vram1_req), .memory_address(vram1_addr_sd), .memory_data(vram1_din),
+    .memory_write(vram1_write),
+    .diagnostic_reset(vram_diag_reset),
+    .sample_read(ppu_read_ce && hblankn && vblankn && !VRAM_OE_N),
+    .diagnostic_errors(vram1_diag_errors), .diagnostic_writes(vram1_diag_writes),
+    .diagnostic_not_ready(vram1_diag_not_ready), .diagnostic_first(vram1_diag_first)
+);
+
+generate
+    if (SNES_MEMORY_DIAGNOSTIC) begin : g_frame_diagnostic
+        snes_diag_frame_counter u_counter (
+            .clk(mclk), .resetn(sys_resetn), .clear(vram_diag_reset), .frame_active(vblankn),
+            .sample(ppu_read_ce && hblankn && vblankn && !VRAM_OE_N),
+            .not_ready(vram1_diag_not_ready),
+            .last_samples(diag_frame_samples), .last_not_ready(diag_frame_late)
+        );
+    end else begin : g_no_frame_diagnostic
+        assign diag_frame_samples = 0;
+        assign diag_frame_late = 0;
+    end
+endgenerate
+snes_vram_port #(.DIAGNOSTIC(SNES_MEMORY_DIAGNOSTIC)) u_vram_port2 (
+    .clk(mclk), .resetn(sys_resetn), .address(VRAM2_ADDR[14:0]), .data(VRAM2_DO),
+    .read_n(VRAM_OE_N), .write_n(VRAM2_WE_N), .ack(vram2_ack),
+    .request(vram2_req), .memory_address(vram2_addr_sd), .memory_data(vram2_din),
+    .memory_write(vram2_write),
+    .diagnostic_reset(vram_diag_reset),
+    .sample_read(ppu_read_ce && hblankn && vblankn && !VRAM_OE_N),
+    .diagnostic_errors(vram2_diag_errors), .diagnostic_writes(vram2_diag_writes)
+);
 
 wire        rv_req_ack;
 wire [15:0] rv_dout;
@@ -585,7 +634,7 @@ end
 wire        core_resetn = sys_resetn & image_valid & ~loading & ~game_reset &
                           ~button_reset;
 wire        enable = core_resetn & ~sdram_busy & loaded & ~game_pause &
-                     ~pause_snes_for_frame_sync;
+                     ~pause_snes_for_frame_sync & ~wram_wait;
 wire [19:0] audio_l_scaled = {audio_l, 4'd0};
 wire [19:0] audio_r_scaled = {audio_r, 4'd0};
 wire [19:0] audio_l_filtered;
@@ -606,6 +655,7 @@ main #(.USE_DSPn(1'b1)) u_snes (
     .ARAM_ADDR(ARAM_ADDR), .ARAM_Q(ARAM_Q), .ARAM_D(ARAM_D), .ARAM_CE_N(ARAM_CE_N), .ARAM_OE_N(ARAM_OE_N), .ARAM_WE_N(ARAM_WE_N),
     .BLEND(1'b0), .PAL(1'b0), .DIS_SHORTLINE(1'b0), .HIGH_RES(), .FIELD(), .INTERLACE(),
     .DOTCLK(dotclk), .RGB_OUT(rgb_out), .HBLANKn(hblankn), .VBLANKn(vblankn), .X_OUT(x_out), .Y_OUT(y_out),
+    .VRAM_READ_CE(ppu_read_ce),
     .JOY1_DI(snes_joy1_di), .JOY2_DI(snes_joy2_di), .JOY_STRB(snes_joy_strb),
     .JOY1_CLK(snes_joy1_clk), .JOY2_CLK(snes_joy2_clk), .JOY1_P6(), .JOY2_P6(), .JOY2_P6_in(1'b1),
     .AUDIO_L(audio_l), .AUDIO_R(audio_r), .AUDIO_READY(audio_ready), .AUDIO_EN(1'b1),
@@ -621,7 +671,9 @@ wire [7:0] bsram_dout;
 wire [7:0] vram1_dout;
 wire [7:0] vram2_dout;
 
-sdram_snes #(.SHARED_IOSYS(1)) u_sdram (
+sdram_snes #(.SHARED_IOSYS(1), .SPLIT_WRAM(1),
+             .UPSTREAM_RAM_LAYOUT(SNES_UPSTREAM_RAM_LAYOUT),
+             .VIDEO_RAM_LAYOUT(SNES_VIDEO_RAM_LAYOUT)) u_sdram (
     .clk(fclk), .mclk(mclk), .clkref(dot_clk_ce), .resetn(sys_resetn), .busy(sdram_busy),
     .SDRAM_DQ(IO_sdram_dq), .SDRAM_A(O_sdram_addr), .SDRAM_BA(O_sdram_ba),
     .SDRAM_nCS(O_sdram_cs_n), .SDRAM_nWE(O_sdram_wen_n), .SDRAM_nRAS(O_sdram_ras_n),
@@ -629,14 +681,16 @@ sdram_snes #(.SHARED_IOSYS(1)) u_sdram (
     .cpu_addr(cpu_addr[22:1]), .cpu_din(cpu_din), .cpu_port(cpu_port),
     .cpu_port0(cpu_port0), .cpu_port1(cpu_port1), .cpu_req(cpu_req), .cpu_req_ack(cpu_req_ack),
     .cpu_we(cpu_we), .cpu_ds(cpu_ds),
+    .wram_addr(wram_addr_sd), .wram_din(wram_data_sd), .wram_req(wram_request),
+    .wram_ack(wram_ack), .wram_we(wram_write),
     .bsram_addr(bsram_addr), .bsram_dout(bsram_dout), .bsram_din(bsram_din),
     .bsram_req(bsram_req), .bsram_req_ack(bsram_req_ack), .bsram_we(bsram_we),
     .aram_16(aram_16), .aram_addr(ARAM_ADDR), .aram_din({ARAM_D, ARAM_D}), .aram_dout(aram_dout),
     .aram_req(aram_req), .aram_req_ack(aram_req_ack), .aram_we(aram_wr),
     .vram1_addr(vram1_addr_sd), .vram1_din(vram1_din), .vram1_dout(vram1_dout),
-    .vram1_req(vram1_req), .vram1_ack(vram1_ack), .vram1_we(~vram1_we_n_old),
+    .vram1_req(vram1_req), .vram1_ack(vram1_ack), .vram1_we(vram1_write),
     .vram2_addr(vram2_addr_sd), .vram2_din(vram2_din), .vram2_dout(vram2_dout),
-    .vram2_req(vram2_req), .vram2_ack(vram2_ack), .vram2_we(~vram2_we_n_old),
+    .vram2_req(vram2_req), .vram2_ack(vram2_ack), .vram2_we(vram2_write),
     .rv_addr(rv_addr_sdram), .rv_din(rv_din_sdram), .rv_ds(rv_ds), .rv_dout(rv_dout),
     .rv_req(rv_req), .rv_req_ack(rv_req_ack), .rv_we(rv_we), .refreshing(refresh),
     .total_refresh()
@@ -658,21 +712,19 @@ controller_adapter u_controller2 (
 assign snes_joy1_di[1] = 1'b1;
 assign snes_joy2_di[1] = 1'b1;
 
-snes2hdmi u_snes2hdmi (
+snes_video_640 u_snes2hdmi (
     .clk(mclk), .resetn(sys_resetn), .snes_refresh(snes_refresh_req),
     .pause_snes_for_frame_sync(pause_snes_for_frame_sync),
     .dotclk(dotclk), .hblank(~hblankn), .vblank(~vblankn), .rgb5(rgb_out),
-    .xs(x_out), .ys(y_out), .overlay(osd_on), .overlay_x(overlay_x), .overlay_y(overlay_y),
-    .overlay_color(overlay_color),
+    .xs(x_out), .ys(y_out), .zoom(video_zoom), .scanline(scanline),
+    .overlay(osd_on), .overlay_text(osd_text),
+    .overlay_x(osd_x), .overlay_y(osd_y), .overlay_de(osd_de),
+    .overlay_color(osd_rgb),
     .audio_l(audio_hdmi ? audio_l_filtered[19:4] : 16'd0),
     .audio_r(audio_hdmi ? audio_r_filtered[19:4] : 16'd0),
-    .audio_ready(audio_ready), .audio_en(), .clk_pixel(hclk), .clk_5x_pixel(hclk5), .locked(hdmi_locked),
+    .audio_ready(audio_ready), .clk_pixel(hclk), .clk_5x_pixel(hclk5), .locked(hdmi_locked),
     .tmds_clk_n(tmds_clk_n), .tmds_clk_p(tmds_clk_p), .tmds_d_n(tmds_d_n), .tmds_d_p(tmds_d_p)
 );
-
-assign osd_x = 11'd64 + {2'd0, overlay_x, 1'b0};
-assign osd_y = 10'd16 + {1'b0, overlay_y, 1'b0};
-assign osd_de = 1'b1;
 
 audio_tone u_audio_tone (
     .clk(mclk), .resetn(sys_resetn), .volume(audio_volume), .bass(audio_bass), .treble(audio_treble),
@@ -689,4 +741,151 @@ assign O_sdram_clk = fclk_p;
 assign led[0] = ~(hdmi_locked & ~sdram_busy);
 assign led[1] = ~(image_valid & ~loading & loaded);
 
+endmodule
+
+module snes_vram_port #(
+    parameter ADDRESS_WIDTH = 15,
+    parameter READ_IGNORE_LOW_BITS = 0,
+    parameter DIAGNOSTIC = 0
+) (
+    input wire clk,
+    input wire resetn,
+    input wire [ADDRESS_WIDTH-1:0] address,
+    input wire [7:0] data,
+    input wire read_n,
+    input wire write_n,
+    input wire ack,
+    output reg request = 0,
+    output reg [ADDRESS_WIDTH-1:0] memory_address = 0,
+    output reg [7:0] memory_data = 0,
+    output reg memory_write = 0,
+    input wire diagnostic_reset,
+    input wire sample_read,
+    output wire [1:0] diagnostic_errors,
+    output wire [7:0] diagnostic_writes,
+    output wire diagnostic_not_ready,
+    output wire [15:0] diagnostic_first
+);
+reg write_previous = 1;
+reg valid = 0;
+reg write_pending = 0;
+reg [ADDRESS_WIDTH-1:0] pending_address = 0;
+reg [7:0] pending_data = 0;
+wire new_write = !write_n && write_previous;
+wire read_not_ready = sample_read && (!valid || memory_write || request != ack ||
+    (memory_address >> READ_IGNORE_LOW_BITS) != (address >> READ_IGNORE_LOW_BITS));
+generate
+    if (DIAGNOSTIC) begin : g_diagnostic
+        reg [1:0] errors = 0;
+        reg [7:0] writes = 0;
+        reg [15:0] first_failure = 0;
+        assign diagnostic_errors = errors;
+        assign diagnostic_writes = writes;
+        assign diagnostic_not_ready = read_not_ready;
+        assign diagnostic_first = first_failure;
+        always @(posedge clk) begin
+            if (!resetn || diagnostic_reset) begin
+                errors <= 0;
+                writes <= 0;
+                first_failure <= 0;
+            end else begin
+                if (read_not_ready) begin
+                    errors[0] <= 1;
+                    if (!errors[0])
+                        first_failure <= {request, ack, address[6:0], memory_address[6:0]};
+                end
+                if (new_write && write_pending && request != ack)
+                    errors[1] <= 1;
+                if (new_write)
+                    writes <= writes + 1'b1;
+            end
+        end
+    end else begin : g_no_diagnostic
+        assign diagnostic_errors = 0;
+        assign diagnostic_writes = 0;
+        assign diagnostic_not_ready = 0;
+        assign diagnostic_first = 0;
+    end
+endgenerate
+always @(posedge clk) begin
+    if (!resetn) begin
+        request <= 0;
+        memory_address <= 0;
+        memory_data <= 0;
+        memory_write <= 0;
+        write_previous <= 1;
+        valid <= 0;
+        write_pending <= 0;
+        pending_address <= 0;
+        pending_data <= 0;
+    end else begin
+        write_previous <= write_n;
+        if (new_write) begin
+            pending_address <= address;
+            pending_data <= data;
+            write_pending <= 1;
+        end
+        if (request == ack) begin
+            if (write_pending) begin
+                memory_address <= pending_address;
+                memory_data <= pending_data;
+                memory_write <= 1;
+                valid <= 1;
+                request <= ~request;
+                write_pending <= new_write;
+            end else if (new_write) begin
+                memory_address <= address;
+                memory_data <= data;
+                memory_write <= 1;
+                valid <= 1;
+                request <= ~request;
+                write_pending <= 0;
+            end else if (!read_n && (!valid || memory_write ||
+                (memory_address >> READ_IGNORE_LOW_BITS) != (address >> READ_IGNORE_LOW_BITS))) begin
+                memory_address <= address;
+                memory_data <= 0;
+                memory_write <= 0;
+                valid <= 1;
+                request <= ~request;
+            end
+        end
+    end
+end
+endmodule
+
+module snes_diag_frame_counter (
+    input wire clk,
+    input wire resetn,
+    input wire clear,
+    input wire frame_active,
+    input wire sample,
+    input wire not_ready,
+    output reg [15:0] last_samples = 0,
+    output reg [15:0] last_not_ready = 0
+);
+reg active_previous = 0;
+reg [15:0] samples = 0;
+reg [15:0] failures = 0;
+always @(posedge clk) begin
+    if (!resetn || clear) begin
+        active_previous <= 0;
+        samples <= 0;
+        failures <= 0;
+        last_samples <= 0;
+        last_not_ready <= 0;
+    end else begin
+        active_previous <= frame_active;
+        if (active_previous && !frame_active) begin
+            last_samples <= samples;
+            last_not_ready <= failures;
+            samples <= 0;
+            failures <= 0;
+        end else if (frame_active && sample) begin
+            if (samples != 16'hffff)
+                samples <= samples + 1'b1;
+            if (not_ready && failures != 16'hffff)
+                failures <= failures + 1'b1;
+        end
+    end
+end
 endmodule

@@ -59,8 +59,8 @@ void title(void) {
     case CORE_PROFILE_CD:
         profile = "CD-ROM";
         break;
-    case CORE_PROFILE_SUPERSET:
-        profile = "Superset";
+    case CORE_PROFILE_SNES:
+        profile = "SNES";
         break;
     default:
         profile = "Unknown core";

@@ -1,0 +1,96 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE gowin-fpga-project[]>
+<Project>
+  <Template>FPGA</Template>
+  <Version>5</Version>
+  <Device name="GW2AR-18C" pn="GW2AR-LV18QN88C8/I7">gw2ar18c-000</Device>
+  <FileList>
+    <File path="rtl/arcade.sv" type="file.verilog" enable="1" />
+    <File path="rtl/cheatcodes.sv" type="file.verilog" enable="1" />
+    <File path="rtl/color_mix.sv" type="file.verilog" enable="1" />
+    <File path="rtl/tang/audio_tone.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/audio_sampler_48k.sv" type="file.verilog" enable="1" />
+    <File path="rtl/tang/dvi_tx.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/hdmi_audio_packetizer.sv" type="file.verilog" enable="1" />
+    <File path="rtl/tang/i2s_tx.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/iosys/font_rom.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/iosys/iosys.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/iosys/picorv32.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/iosys/simplespimaster.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/iosys/simpleuart.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/iosys/spi_master.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/iosys/spiflash.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/iosys/textdisp.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/pce_pad.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/pce_sdram_ctrl_3ch.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/pll_clocks.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/rom_loader.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/rom_source_arb.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/rv_uart_diagnostic.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/rv_memory_probe.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/rv_stack_watch.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/snes_gamepad.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/tmds_encoder.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/uart_rx.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/video_scandoubler.v" type="file.verilog" enable="1" />
+    <File path="impl/profile-build/top_tang_nano20k_snes.v" type="file.verilog" enable="1" />
+    <File path="src/gowin_dp/gowin_dpb_line.v" type="file.verilog" enable="1" />
+    <File path="src/gowin_dp/gowin_dpb_sat.v" type="file.verilog" enable="1" />
+    <File path="constraints/tang_nano20k.cst" type="file.cst" enable="1" />
+    <File path="constraints/snes_nano20k.sdc" type="file.sdc" enable="1" />
+    <File path="rtl/snestang/src/65C816/ALU.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/65C816/AddSubBCD.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/65C816/AddrGen.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/65C816/BCDAdder.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/65C816/P65C816.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/65C816/adder4.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/65C816/bit_adder.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/65C816/common.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/65C816/mcode.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/CEGen.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/chip/DSP/DSP_LHRomMap.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/chip/DSP/DSPn.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/chip/DSP/OBC1.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/chip/DSP/SRTC.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/chip/dsp/dsp_data_ram.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/controller_adapter.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/cpu.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/dsp.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/dual_clk_fifo.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/gowin_dpb_cgram.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/gowin_dpb_hoam.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/gowin_dpb_oam.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/hdmi2/audio_clock_regeneration_packet.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/hdmi2/audio_info_frame.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/hdmi2/audio_sample_packet.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/hdmi2/auxiliary_video_information_info_frame.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/hdmi2/hdmi.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/hdmi2/packet_assembler.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/hdmi2/packet_picker.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/hdmi2/serializer.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/hdmi2/source_product_description_info_frame.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/hdmi2/tmds_channel.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/main.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/pllr/gowin_pll_hdmi.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/pllr/gowin_pll_snes.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/ppu.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/ppucgram.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/ppuhoam.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/ppuoam.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/sdram_nano.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/smc_parser.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/smp.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/snes.v" type="file.verilog" enable="1" />
+    <File path="rtl/tang/snes_video_640.sv" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/spc700/_spc700_package.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/spc700/addrgen.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/spc700/addsub.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/spc700/alu.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/spc700/bcdadj.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/spc700/mcode.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/spc700/muldiv.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/spc700/spc700.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/swram.v" type="file.verilog" enable="1" />
+    <File path="rtl/snestang/src/uart_tx_V2.v" type="file.verilog" enable="1" />
+  </FileList>
+</Project>

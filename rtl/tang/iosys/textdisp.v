@@ -43,6 +43,8 @@
 module textdisp #(
     parameter COLS   = 32,
     parameter ROWS   = 20,
+    parameter PLANE_RAM_STYLE = "distributed_ram",
+    parameter CHARACTER_BITS = 8,
     parameter X0     = 64,      // left edge of the text area, in pixels
     parameter Y0     = 80,      // top edge of the text area, in pixels
     // 8:8:8 colours
@@ -85,8 +87,8 @@ wire char_we = reg_char_we[0] && (cmd == 2'd0) && ({1'b0, text_y} < ROWS6);
 // COLS is 32, so the row start is just a shift
 wire [9:0] char_waddr = {text_y, text_x};
 
-(* syn_ramstyle = "distributed_ram" *)
-reg [7:0] plane [0:PLANE-1];
+(* syn_ramstyle = PLANE_RAM_STYLE *)
+reg [CHARACTER_BITS-1:0] plane [0:PLANE-1];
 
 // Start on a blank screen: the softcore only clears the plane once its
 // firmware has been fetched from flash, which takes ~100 ms after power-on.
@@ -97,7 +99,7 @@ initial
 
 always @(posedge clk)
     if (char_we)
-        plane[char_waddr] <= text_char;
+        plane[char_waddr] <= CHARACTER_BITS == 7 && text_char[7] ? 8'h3f : text_char;
 
 // overlay enable, owned by the clk domain
 reg overlay_r = 1'b1;
