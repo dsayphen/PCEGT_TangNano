@@ -9,6 +9,14 @@ module snes_video_640 (
     input wire [8:0] ys,
     input wire [1:0] zoom,
     input wire [1:0] scanline,
+    input wire pause_pending,
+    input wire pause_ready,
+    output reg pause_display,
+    output reg pause_row_request,
+    input wire pause_buffer_write,
+    input wire [9:0] pause_buffer_address,
+    input wire [2:0] pause_buffer_bank,
+    input wire [14:0] pause_buffer_data,
     input wire overlay,
     input wire overlay_text,
     input wire [23:0] overlay_color,
@@ -33,11 +41,33 @@ wire [10:0] cx, frame_width;
 wire [9:0] cy, frame_height;
 reg [1:0] zoom_meta = 0, zoom_pixel = 0;
 reg [1:0] scan_meta = 0, scan_pixel = 0;
+reg pause_meta = 0, pause_pixel = 0;
+reg ready_meta = 0, ready_pixel = 0;
+reg requested_odd = 1;
 always @(posedge clk_pixel) begin
     zoom_meta <= zoom;
-    zoom_pixel <= zoom_meta;
+    if (!pause_display || (cx == 0 && cy == 480))
+        zoom_pixel <= zoom_meta;
     scan_meta <= scanline;
     scan_pixel <= scan_meta;
+    pause_meta <= pause_pending;
+    pause_pixel <= pause_meta;
+    ready_meta <= pause_ready;
+    ready_pixel <= ready_meta;
+    if (!resetn) begin
+        pause_display <= 0;
+        requested_odd <= 1;
+        pause_row_request <= 0;
+    end else begin
+        if (cx == 799 && cy == 524)
+            pause_display <= ready_pixel;
+        if (!pause_display)
+            requested_odd <= 1;
+        else if (render_active && source_y[0] != requested_odd) begin
+            requested_odd <= source_y[0];
+            pause_row_request <= ~pause_row_request;
+        end
+    end
 end
 
 wire [10:0] render_x = cx == 11'd799 ? 11'd0 : cx + 11'd1;
@@ -158,10 +188,11 @@ always @(posedge clk) begin
         write_row_counter <= write_row;
     end
     dotclk_previous <= dotclk;
-    write_enable <= resetn && dotclk && !dotclk_previous && !hblank && !vblank && ys[7:0] < 224;
-    write_address <= {write_row, xs[8:2]};
-    write_bank <= {write_group, xs[1]};
-    write_data <= rgb5;
+    write_enable <= resetn && (pause_buffer_write ||
+                    (!pause_ready && dotclk && !dotclk_previous && !hblank && !vblank && ys[7:0] < 224));
+    write_address <= pause_buffer_write ? pause_buffer_address : {write_row, xs[8:2]};
+    write_bank <= pause_buffer_write ? pause_buffer_bank : {write_group, xs[1]};
+    write_data <= pause_buffer_write ? pause_buffer_data : rgb5;
     if (write_enable) begin
         case (write_bank)
             0: lines_ee[write_address] <= write_data;
@@ -239,7 +270,8 @@ endfunction
 wire [7:0] red = dark_pixel ? shade(red_raw, scan_pixel) : red_raw;
 wire [7:0] green = dark_pixel ? shade(green_raw, scan_pixel) : green_raw;
 wire [7:0] blue = dark_pixel ? shade(blue_raw, scan_pixel) : blue_raw;
-wire [23:0] game_rgb = active_pixel ? {red, green, blue} : 24'd0;
+wire [23:0] game_rgb = active_pixel && (!pause_pixel || pause_display) ?
+                       {red, green, blue} : 24'd0;
 wire [23:0] rgb = overlay ? (overlay_text ? overlay_color :
     {1'b0, game_rgb[23:17], 1'b0, game_rgb[15:9], 1'b0, game_rgb[7:1]}) : game_rgb;
 

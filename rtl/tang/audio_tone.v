@@ -9,7 +9,9 @@
 // bass/treble are 0..10 with 5 = flat (see iosys.v audio_bass/audio_treble).
 // volume is 0..10, 0 = mute, 10 = unity gain.
 //
-module audio_tone (
+module audio_tone #(
+    parameter TONE_ENABLE = 1
+) (
     input  wire        clk,
     input  wire        resetn,
     input  wire [3:0]  volume,
@@ -67,9 +69,10 @@ wire signed [24:0] shaped_r = {{5{in_r_q[19]}}, in_r_q} +
                               ((treble_trim * hp_r) >>> TREBLE_SHIFT);
 
 // The bass/treble multiply-adds above can overflow 20 bits, saturate here.
-wire signed [19:0] shaped_l_sat =
+// TONE_ENABLE=0 keeps only the master volume (used where the FPGA is full).
+wire signed [19:0] shaped_l_sat = !TONE_ENABLE ? in_l_q :
     (shaped_l[24] != shaped_l[23]) ? {shaped_l[24], {19{~shaped_l[24]}}} : shaped_l[19:0];
-wire signed [19:0] shaped_r_sat =
+wire signed [19:0] shaped_r_sat = !TONE_ENABLE ? in_r_q :
     (shaped_r[24] != shaped_r[23]) ? {shaped_r[24], {19{~shaped_r[24]}}} : shaped_r[19:0];
 
 
@@ -83,8 +86,10 @@ always @(posedge clk) begin
         out_l <= 20'sd0;
         out_r <= 20'sd0;
     end else begin
-        lp_l <= lp_l + (hp_l >>> 4);
-        lp_r <= lp_r + (hp_r >>> 4);
+        if (TONE_ENABLE) begin
+            lp_l <= lp_l + (hp_l >>> 4);
+            lp_r <= lp_r + (hp_r >>> 4);
+        end
 
         out_l <= gained_l[27:8];
         out_r <= gained_r[27:8];

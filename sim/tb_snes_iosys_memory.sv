@@ -51,7 +51,8 @@ sdram_snes #(.SHARED_IOSYS(1), .FREQ(1000000)) dut (
     .vram2_addr(vram2_addr), .vram2_din(vram2_din), .vram2_req(vram2_req), .vram2_we(vram_we),
     .vram1_ack(vram1_ack), .vram2_ack(vram2_ack), .vram1_dout(vram1_q), .vram2_dout(vram2_q),
     .rv_addr(rv_addr), .rv_din(rv_din), .rv_ds(2'b11), .rv_req(rv_req), .rv_we(rv_we),
-    .rv_req_ack(rv_ack), .rv_dout(rv_q)
+    .rv_req_ack(rv_ack), .rv_dout(rv_q),
+    .frame_req(1'b0), .frame_we(1'b0), .frame_addr(16'd0), .frame_din(15'd0)
 );
 sdram_model #(.READ_HOLD_CYCLES(1)) memory (
     .DQ(dq), .A(memory_addr), .BA(memory_bank), .nCS(memory_cs), .nRAS(memory_ras),

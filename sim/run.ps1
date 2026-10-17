@@ -123,7 +123,7 @@ $gowinPrimSim = if ($env:GOWIN_HOME) {
 } else {
     'G:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\simlib\gw2a\prim_sim.v'
 }
-foreach ($tb in @('tb_snes_frame_probe', 'tb_snes_port_diag', 'tb_snes_vram_stream', 'tb_snes_video', 'tb_snes_video_stream', 'tb_snes_video_stream_bilinear', 'tb_snes_iosys_memory', 'tb_flash_pio', 'tb_textdisp', 'tb_dvi_video_window', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vram_clear', 'tb_arcade_ram', 'tb_rv_uart_diagnostic', 'tb_rv_x22', 'tb_rv_memory_probe')) {
+foreach ($tb in @('tb_snes_frame_probe', 'tb_snes_port_diag', 'tb_snes_vram_stream', 'tb_snes_video', 'tb_snes_video_stream', 'tb_snes_video_stream_bilinear', 'tb_snes_pause_frame', 'tb_snes_iosys_memory', 'tb_flash_pio', 'tb_textdisp', 'tb_dvi_video_window', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vram_clear', 'tb_arcade_ram', 'tb_rv_uart_diagnostic', 'tb_rv_x22', 'tb_rv_memory_probe')) {
     if ($tb -eq 'tb_dvi_video_window' -and -not (Test-Path $gowinPrimSim)) {
         Write-Warning 'Gowin GW2A simulation library unavailable; skipping tb_dvi_video_window.'
         continue
@@ -131,10 +131,11 @@ foreach ($tb in @('tb_snes_frame_probe', 'tb_snes_port_diag', 'tb_snes_vram_stre
     $files = switch ($tb) {
         'tb_snes_frame_probe' { @('sim/tb_snes_vram_stream.sv', 'rtl/top_tang_nano20k_snes.v') }
         'tb_snes_port_diag' { @('sim/tb_snes_vram_stream.sv', 'rtl/top_tang_nano20k_snes.v') }
-        'tb_snes_vram_stream' { @('sim/tb_snes_vram_stream.sv', 'rtl/top_tang_nano20k_snes.v', 'rtl/snestang/src/sdram_nano.v', 'sim/sdram_model.v') }
+        'tb_snes_vram_stream' { @('sim/tb_snes_vram_stream.sv', 'rtl/top_tang_nano20k_snes.v', 'rtl/tang/snes_pause_frame.sv', 'rtl/snestang/src/sdram_nano.v', 'sim/sdram_model.v') }
         'tb_snes_video' { @('sim/tb_snes_video.sv', 'rtl/tang/snes_video_640.sv', 'rtl/snestang/src/dual_clk_fifo.v') }
         'tb_snes_video_stream' { @('sim/tb_snes_video.sv', 'rtl/tang/snes_video_640.sv', 'rtl/snestang/src/dual_clk_fifo.v') }
         'tb_snes_video_stream_bilinear' { @('sim/tb_snes_video.sv', 'rtl/tang/snes_video_640.sv', 'rtl/snestang/src/dual_clk_fifo.v') }
+        'tb_snes_pause_frame' { @('sim/tb_snes_pause_frame.sv', 'sim/tb_snes_video.sv', 'rtl/tang/snes_pause_frame.sv', 'rtl/tang/snes_video_640.sv', 'rtl/snestang/src/dual_clk_fifo.v', 'rtl/snestang/src/sdram_nano.v', 'sim/sdram_model.v') }
         'tb_snes_iosys_memory' { @('sim/tb_snes_iosys_memory.sv', 'sim/sdram_model.v', 'rtl/snestang/src/sdram_nano.v') }
     'tb_flash_pio' { @('sim/tb_flash_pio.v', 'rtl/tang/iosys/spiflash.v', 'rtl/tang/iosys/spi_master.v') }
         'tb_rv_memory_probe' { @('sim/tb_rv_memory_probe.v', 'rtl/tang/rv_memory_probe.v', 'rtl/tang/rv_stack_watch.v') }
@@ -151,7 +152,7 @@ foreach ($tb in @('tb_snes_frame_probe', 'tb_snes_port_diag', 'tb_snes_vram_stre
     $flags = @('-g2005-sv')
     if ($tb -in @('tb_snes_port_diag', 'tb_snes_frame_probe')) { $flags = @('-g2012', '-i', '-s', $tb) }
     if ($tb -eq 'tb_snes_vram_stream') { $flags = @('-g2012', '-i', '-s', $tb) }
-    if ($tb -in @('tb_snes_video', 'tb_snes_video_stream', 'tb_snes_video_stream_bilinear')) { $flags = @('-g2012', '-s', $tb) }
+    if ($tb -in @('tb_snes_video', 'tb_snes_video_stream', 'tb_snes_video_stream_bilinear', 'tb_snes_pause_frame')) { $flags = @('-g2012', '-s', $tb) }
     if ($tb -eq 'tb_dvi_video_window') { $flags += @('-s', $tb) }
     & $iverilog @flags -o "sim/$tb.vvp" @files
     if ($LASTEXITCODE) { throw "iverilog failed for $tb" }

@@ -245,6 +245,7 @@ foreach ($name in $profiles) {
                 'rtl/snestang/src/smp.v',
                 'rtl/snestang/src/snes.v',
                 'rtl/tang/snes_video_640.sv',
+                'rtl/tang/snes_pause_frame.sv',
                 'rtl/snestang/src/spc700/_spc700_package.v',
                 'rtl/snestang/src/spc700/addrgen.v',
                 'rtl/snestang/src/spc700/addsub.v',

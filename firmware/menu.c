@@ -363,48 +363,56 @@ static void audio_menu(int in_game) {
     static const char *labels[7] = {
         "Volume", "Bass", "Treble", "Output", "CD-DA", "ADPCM audio", "Back"
     };
+    // The SNES profile has master volume only: bass/treble do not fit in its FPGA build.
+    static const uint8_t snes_game_items[] = { 0, 6 };
+    static const uint8_t snes_browser_items[] = { 0, 3, 6 };
+    static const uint8_t pce_game_items[] = { 0, 1, 2, 6 };
+    static const uint8_t pce_browser_items[] = { 0, 1, 2, 3, 4, 5, 6 };
     int active = 0;
     const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
-    const int n_items = in_game ? 4 : snes_profile ? 5 : 7;
+    const uint8_t *items = snes_profile ? (in_game ? snes_game_items : snes_browser_items)
+                                        : (in_game ? pce_game_items : pce_browser_items);
+    const int n_items = snes_profile ? (in_game ? 2 : 3) : (in_game ? 4 : 7);
     const int first_row = in_game ? 9 : 8;
 
     menu_header("Audio Settings", in_game, MENU_FRAME_WIDTH);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
+            const int item = items[i];
             cursor(4, first_row + i);
             putchar(i == active ? '>' : ' ');
 
             char label[24];
             int j = 0;
-            const char *prefix = i == n_items - 1 ? "Back" : labels[i];
+            const char *prefix = labels[item];
             while (*prefix)
                 label[j++] = *prefix++;
 
-            if (i < 3) {
-                int val = (i == 0) ? audio_volume : (i == 1) ? audio_bass : audio_treble;
+            if (item < 3) {
+                int val = (item == 0) ? audio_volume : (item == 1) ? audio_bass : audio_treble;
                 char num[4];
                 int len;
 
                 label[j++] = ':';
                 label[j++] = ' ';
-                if (i > 0 && val > 0) {
+                if (item > 0 && val > 0) {
                     label[j++] = '+';
-                } else if (i > 0 && val < 0) {
+                } else if (item > 0 && val < 0) {
                     label[j++] = '-';
                     val = -val;
                 }
                 len = u8_to_str(num, (uint8_t)val);
                 for (int k = 0; k < len; k++)
                     label[j++] = num[k];
-            } else if (!in_game && i == 3) {
+            } else if (item == 3) {
                 const char *value = audio_output_hdmi ? "HDMI" : "Speaker";
                 label[j++] = ':';
                 label[j++] = ' ';
                 while (*value)
                     label[j++] = *value++;
-            } else if (!in_game && !snes_profile && (i == 4 || i == 5)) {
-                const char *value = (i == 4 ? audio_cdda_enabled : audio_adpcm_enabled)
+            } else if (item == 4 || item == 5) {
+                const char *value = (item == 4 ? audio_cdda_enabled : audio_adpcm_enabled)
                     ? "On" : "Off";
                 label[j++] = ':';
                 label[j++] = ' ';
@@ -422,53 +430,25 @@ static void audio_menu(int in_game) {
             active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {
             active = active < n_items - 1 ? active + 1 : 0;
-        } else if (e & JOY_LEFT) {
-            if (active == 0 && audio_volume > 0) {
-                audio_volume--;
-                audio_apply();
-                audio_config_save();
-            } else if (active == 1 && audio_bass > -5) {
-                audio_bass--;
-                audio_apply();
-                audio_config_save();
-            } else if (active == 2 && audio_treble > -5) {
-                audio_treble--;
-                audio_apply();
-                audio_config_save();
-            } else if (!in_game && active == 3) {
+        } else if (e & (JOY_LEFT | JOY_RIGHT)) {
+            const int step = (e & JOY_LEFT) ? -1 : 1;
+            const int item = items[active];
+            int changed = 1;
+            if (item == 0 && audio_volume + step >= 0 && audio_volume + step <= 10)
+                audio_volume += step;
+            else if (item == 1 && audio_bass + step >= -5 && audio_bass + step <= 5)
+                audio_bass += step;
+            else if (item == 2 && audio_treble + step >= -5 && audio_treble + step <= 5)
+                audio_treble += step;
+            else if (item == 3)
                 audio_output_hdmi = !audio_output_hdmi;
-                audio_apply();
-                audio_config_save();
-            } else if (!in_game && !snes_profile && (active == 4 || active == 5)) {
-                if (active == 4)
-                    audio_cdda_enabled = !audio_cdda_enabled;
-                else
-                    audio_adpcm_enabled = !audio_adpcm_enabled;
-                audio_apply();
-                audio_config_save();
-            }
-        } else if (e & JOY_RIGHT) {
-            if (active == 0 && audio_volume < 10) {
-                audio_volume++;
-                audio_apply();
-                audio_config_save();
-            } else if (active == 1 && audio_bass < 5) {
-                audio_bass++;
-                audio_apply();
-                audio_config_save();
-            } else if (active == 2 && audio_treble < 5) {
-                audio_treble++;
-                audio_apply();
-                audio_config_save();
-            } else if (!in_game && active == 3) {
-                audio_output_hdmi = !audio_output_hdmi;
-                audio_apply();
-                audio_config_save();
-            } else if (!in_game && !snes_profile && (active == 4 || active == 5)) {
-                if (active == 4)
-                    audio_cdda_enabled = !audio_cdda_enabled;
-                else
-                    audio_adpcm_enabled = !audio_adpcm_enabled;
+            else if (item == 4)
+                audio_cdda_enabled = !audio_cdda_enabled;
+            else if (item == 5)
+                audio_adpcm_enabled = !audio_adpcm_enabled;
+            else
+                changed = 0;
+            if (changed) {
                 audio_apply();
                 audio_config_save();
             }
@@ -497,7 +477,7 @@ int pause_menu(void) {
         vdc_timing_dump();
     audio_paused = 1;
     audio_apply();
-    pce_pause(1);
+    pce_pause_frame();
     save_game_saves(0);
     menu_header("Game paused", 1, MENU_FRAME_WIDTH);
 

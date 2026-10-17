@@ -200,7 +200,23 @@ static inline int pce_load_end(void) {
 }
 
 static inline void pce_pause(int pause) {
-    reg_game_ctrl = pause ? 1 : 0;
+    reg_game_ctrl = pause ? 1u | (reg_game_ctrl & 4u) : 0u;
+}
+
+static inline void pce_pause_frame(void) {
+    if (CORE_PROFILE_ID != CORE_PROFILE_SNES) {
+        pce_pause(1);
+        return;
+    }
+    reg_game_ctrl = 5u;
+    uint32_t started = time_millis();
+    while (!(reg_game_ctrl & 256u)) {
+        if ((uint32_t)(time_millis() - started) >= 250u) {
+            uart_print("pause: SNES frame capture timeout\n");
+            reg_game_ctrl = 1u;
+            return;
+        }
+    }
 }
 
 static inline void pce_reset(void) {

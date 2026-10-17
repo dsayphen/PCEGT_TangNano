@@ -135,6 +135,12 @@ core selection. Build it with `tools/build_profiles.ps1 -Profile snes`.
 The browser supports `.sfc` and `.smc` images, including copier headers, and
 SNES saves use `/saves/<game>.srm`. Video output is 640x480 with Integer,
 Stretch and Bilinear zoom modes; scanlines and zoom are available in Video Settings.
+The in-game pause menu captures a complete 256x224 frame in SDRAM and displays
+it behind the OSD, rather than repeating the stopped line buffer. The background
+is briefly black while the capture completes. This requires both the updated
+SNES bitstream and firmware; hardware validation of the frozen background is pending.
+To fit the FPGA, the SNES profile has no bass/treble controls (master volume
+remains) and no UART firmware messages.
 ExHiROM and enhancement-chip games such as Super FX and SA-1 are not supported.
 
 The profile uses the upstream RAM layout, tested with Super Mario World
@@ -152,7 +158,7 @@ See [SNES source and license information](rtl/snestang/README.md).
 | 27 MHz clock | 4 | |
 | `s1` (button) | 88 | **reset** the console |
 | `uart_rx` | 70 | from the on-board BL616 USB-serial bridge |
-| `uart_tx` | 69 | firmware messages at 115200 baud |
+| `uart_tx` | 69 | firmware messages at 115200 baud (PCE profiles) |
 | `led[1:0]` | 16,15 | status, active low |
 | HDMI TMDS clk ± | 33 / 34 | |
 | HDMI TMDS d0/d1/d2 ± | 35/36, 37/38, 39/40 | |

@@ -144,6 +144,14 @@ module sdram_snes
     output reg        rv_req_ack,   // ready for new requests. read data available on NEXT mclk
     input             rv_we,
 
+    // Pause frame: 112 KiB at bank 3 offset 0, below WRAM/VRAM.
+    input             frame_req,
+    output reg        frame_ack,
+    input             frame_we,
+    input      [15:0] frame_addr,
+    input      [14:0] frame_din,
+    output reg [14:0] frame_dout,
+
     output            refreshing,
     output reg [23:0] total_refresh,
 
@@ -199,6 +207,7 @@ localparam PORT_RV    = 2'd2;
 localparam PORT_WRAM_SHARED = 3'd3;
 localparam PORT_BSRAM_SHARED = 3'd4;
 localparam PORT_WRAM_VIDEO = 3'd5;
+localparam PORT_FRAME = 3'd6;
 
 localparam PORT_VRAM  = 2'd1;
 localparam PORT_VRAM1 = 2'd2;
@@ -351,6 +360,13 @@ always @(*) begin
         next_oe[2] = ~wram_we;
         next_din[2] = {wram_din, wram_din};
         next_ds[2] = {wram_addr[0], ~wram_addr[0]};
+    end else if (!refresh && !need_refresh && (frame_req ^ frame_ack)) begin
+        next_port[2] = PORT_FRAME;
+        next_addr[2] = {2'b11, 4'd0, frame_addr, 1'b0};
+        next_we[2] = frame_we;
+        next_oe[2] = ~frame_we;
+        next_din[2] = {1'b0, frame_din};
+        next_ds[2] = 2'b11;
 	end
 end
 
@@ -388,7 +404,10 @@ always @(posedge clk) begin
         vram1_ack <= 1'b0;
         vram2_ack <= 1'b0;
         rv_req_ack <= 1'b0;
+        frame_ack <= 1'b0;
         total_refresh <= 24'd0;
+        refresh <= 1'b0;
+        refresh_cnt <= 9'd0;
         dq_oen <= 1;
         SDRAM_DQM <= 4'b1111;
         normal <= 0;
@@ -614,6 +633,11 @@ always @(posedge clk) begin
                 endcase
 
             // VRAM
+            if (cycle[2] && port[2] == PORT_FRAME) begin
+                frame_ack <= frame_req;
+                if (oe_latch[2])
+                    frame_dout <= addr_latch[2][1] ? dq_in[30:16] : dq_in[14:0];
+            end
             if (cycle[2] && oe_latch[2]) begin
                 case (port[2])
 				PORT_VRAM: { vram2_dout, vram1_dout } <= addr_latch[2][1] ? dq_in[31:16] : dq_in[15:0];

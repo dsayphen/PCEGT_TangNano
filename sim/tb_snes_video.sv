@@ -15,6 +15,8 @@ wire osd_de;
 snes_video_640 dut (
     .clk(clk), .resetn(resetn), .dotclk(dotclk), .hblank(hblank), .vblank(vblank),
     .rgb5(source_color), .xs(source_x), .ys(source_y), .zoom(zoom), .scanline(2'd0),
+    .pause_pending(1'b0), .pause_ready(1'b0), .pause_buffer_write(1'b0),
+    .pause_buffer_address(10'd0), .pause_buffer_bank(3'd0), .pause_buffer_data(15'd0),
     .overlay(overlay), .overlay_text(overlay_text), .overlay_color(24'habcdef),
     .overlay_x(osd_x), .overlay_y(osd_y), .overlay_de(osd_de),
     .audio_l(16'd0), .audio_r(16'd0), .audio_ready(1'b0), .snes_refresh(1'b0),
@@ -156,6 +158,8 @@ snes_video_640 dut (
     .clk(clk), .resetn(resetn), .dotclk(source_tick[1]),
     .hblank(source_tick >= 1024), .vblank(source_row >= 224), .rgb5(source_color),
     .xs({source_tick[9:2], 1'b0}), .ys({source_field, ppu_row}), .zoom(2'(MODE)), .scanline(2'd0),
+    .pause_pending(1'b0), .pause_ready(1'b0), .pause_buffer_write(1'b0),
+    .pause_buffer_address(10'd0), .pause_buffer_bank(3'd0), .pause_buffer_data(15'd0),
     .overlay(1'b0), .overlay_text(1'b0), .overlay_color(24'd0),
     .audio_l(16'd0), .audio_r(16'd0), .audio_ready(1'b0),
     .snes_refresh(source_tick >= 1100 && source_tick < 1140),
