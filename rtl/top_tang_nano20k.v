@@ -865,7 +865,7 @@ video_scandoubler u_scandoubler (
     .osd_de     (osd_de)
 );
 
-// Composite/monochrome color matrix (mix = 0..5, see rtl/color_mix.sv);
+// Composite/monochrome color matrix (mix = 0..5, see rtl/pce/color_mix.sv);
 // sync/de pass straight through, unaffected by the horizontal blur filter.
 color_mix u_color_mix (
     .clk_vid    (clk_pix),

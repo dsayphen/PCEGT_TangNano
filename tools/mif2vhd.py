@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate rtl/mem_init_pkg.vhd from the Altera .mif memory initialisation files.
+"""Generate rtl/pce/mem_init_pkg.vhd from the Altera .mif memory initialisation files.
 
 GowinSynthesis does not support the Altera `init_file` attribute (nor VHDL
 file I/O at elaboration time), so the two initialised memories of the core are
@@ -11,8 +11,8 @@ the .mif sources changes:
 Only the two files that the TurboGrafx-16 core actually initialises are
 handled:
 
-  rtl/HUC6280/voltab_small.mif      256 x 12  PSG attenuation table
-  rtl/huc6260_palette_init.mif      512 x  9  VCE power-on palette
+  rtl/pce/HUC6280/voltab_small.mif  256 x 12  PSG attenuation table
+  rtl/pce/huc6260_palette_init.mif  512 x  9  VCE power-on palette
 """
 
 import os
@@ -22,11 +22,11 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SOURCES = [
-    ("VOLTAB_INIT", os.path.join(ROOT, "rtl", "HUC6280", "voltab_small.mif"), 256, 12),
-    ("PALETTE_INIT", os.path.join(ROOT, "rtl", "huc6260_palette_init.mif"), 512, 9),
+    ("VOLTAB_INIT", os.path.join(ROOT, "rtl", "pce", "HUC6280", "voltab_small.mif"), 256, 12),
+    ("PALETTE_INIT", os.path.join(ROOT, "rtl", "pce", "huc6260_palette_init.mif"), 512, 9),
 ]
 
-OUT = os.path.join(ROOT, "rtl", "mem_init_pkg.vhd")
+OUT = os.path.join(ROOT, "rtl", "pce", "mem_init_pkg.vhd")
 
 ENTRY_RE = re.compile(r"^\s*([0-9a-fA-F]+)\s*:\s*([0-9a-fA-F]+)\s*;", re.M)
 

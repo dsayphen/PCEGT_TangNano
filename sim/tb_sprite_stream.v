@@ -2,9 +2,9 @@
 // Stress test that reproduces the tightest VRAM0 access pattern the real
 // HUC6270 uses when fetching sprite tile planes (SG0..SG3): RAM_RD stays
 // asserted continuously (it is a level, not a pulse - see the combinational
-// process around RAM_RD in rtl/huc6270.vhd) while RAM_A changes with every
+// process around RAM_RD in rtl/pce/huc6270.vhd) while RAM_A changes with every
 // dot clock tick (clkref), the fastest case being one address per 4
-// `clk` (43.2 MHz) cycles - see DOTCLOCK(1)='1' in rtl/huc6260.vhd.
+// `clk` (43.2 MHz) cycles - see DOTCLOCK(1)='1' in rtl/pce/huc6260.vhd.
 //
 // tb_iosys.v already checks two isolated back-to-back reads with a gap where
 // vram_rd drops between them. This test instead holds vram_rd permanently
@@ -449,7 +449,7 @@ endtask
 // SGX scenario: VDC0 and VDC1 both stream tiles concurrently at full dot
 // clock rate, exactly as they do on real hardware once SGX_SUPPORT is
 // active (both HUC6270 instances are clocked by the same VDC_CLKEN/clkref
-// from the shared VCE, see rtl/pce_top_extram.vhd). No existing testbench
+// from the shared VCE, see rtl/pce/pce_top_extram.vhd). No existing testbench
 // before this one ever drove vram1_addr/vram1_rd while vram_addr/vram_rd
 // were also live, so genuine VDC0+VDC1 concurrency was previously untested.
 // ===========================================================================
@@ -458,7 +458,7 @@ task stream_both_vdcs;
     begin
         errcount_before = errors;
     // RAM_A and RAM_RD are driven by the same combinational process in
-    // the real HUC6270 (see rtl/huc6270.vhd, the unclocked
+    // the real HUC6270 (see rtl/pce/huc6270.vhd, the unclocked
     // process(SLOT, BG_RAM_ADDR, SPR_RAM_ADDR, ...) block): they always
     // change atomically together. Asserting *_rd here before setting
     // the first address would (unrealistically) present a stale

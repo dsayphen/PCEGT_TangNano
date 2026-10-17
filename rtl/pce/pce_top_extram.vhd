@@ -296,7 +296,7 @@ end component;
 
 -- Declared as a component (instead of a direct entity instantiation) so that
 -- the CD-ROM unit and its FIFOs only have to be part of the project when
--- CD_SUPPORT /= 0.  Mirrors rtl/cd/cd.vhd.
+-- CD_SUPPORT /= 0.  Mirrors rtl/pce/cd/cd.vhd.
 component cd is
 	generic(
 		CDDA_O_WIDTH : integer := 16

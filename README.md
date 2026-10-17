@@ -307,6 +307,13 @@ CD games support CD audio and ADPCM. CD-ROM support remains experimental.
 
 ## 6. Development
 
+RTL sources are grouped by core: `rtl/pce/` contains the PC Engine /
+SuperGrafx core, including `HUC6280/`, `cd/` and memory initialisation files;
+`rtl/snestang/` contains the SNES core. Board integration remains in
+`rtl/tang/`, with both `top_tang_nano20k*.v` wrappers directly under `rtl/`.
+The main Gowin project references these paths; profile projects are generated
+from it by `tools/build_profiles.ps1`.
+
 Resource use in the latest successfully placed Gowin builds:
 
 | Profile | Logic (Total) | LUT | Registers | BSRAM |

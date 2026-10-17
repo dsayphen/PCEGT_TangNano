@@ -164,7 +164,7 @@ foreach ($tb in @('tb_snes_frame_probe', 'tb_snes_port_diag', 'tb_snes_vram_stre
 $ghdl = Get-Command ghdl -ErrorAction SilentlyContinue
 if ($ghdl) {
     $ghdlFlags = @('--std=08', '-fsynopsys', '-frelaxed', '--work=pce_vce_timing_test', "--workdir=$env:TEMP")
-    & $ghdl.Source -a @ghdlFlags rtl/mem_init_pkg.vhd rtl/dpram.vhd rtl/huc6260.vhd sim/tb_vce_frame_timing.vhd
+    & $ghdl.Source -a @ghdlFlags rtl/pce/mem_init_pkg.vhd rtl/pce/dpram.vhd rtl/pce/huc6260.vhd sim/tb_vce_frame_timing.vhd
     if ($LASTEXITCODE) { throw 'GHDL compilation failed for tb_vce_frame_timing' }
     $out = & $ghdl.Source -r @ghdlFlags tb_vce_frame_timing --assert-level=error --ieee-asserts=disable
     $out | Write-Host
