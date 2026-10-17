@@ -6,6 +6,7 @@ always #20 clk_pixel = ~clk_pixel;
 reg resetn = 0;
 reg [1:0] zoom = 0;
 reg overlay = 0, overlay_text = 0;
+reg game_active = 1;
 reg dotclk = 0, hblank = 1, vblank = 1;
 reg [8:0] source_x = 0, source_y = 0;
 reg [14:0] source_color = 0;
@@ -15,8 +16,7 @@ wire osd_de;
 snes_video_640 dut (
     .clk(clk), .resetn(resetn), .dotclk(dotclk), .hblank(hblank), .vblank(vblank),
     .rgb5(source_color), .xs(source_x), .ys(source_y), .zoom(zoom), .scanline(2'd0),
-    .pause_pending(1'b0), .pause_ready(1'b0), .pause_buffer_write(1'b0),
-    .pause_buffer_address(10'd0), .pause_buffer_bank(3'd0), .pause_buffer_data(15'd0),
+    .game_active(game_active),
     .overlay(overlay), .overlay_text(overlay_text), .overlay_color(24'habcdef),
     .overlay_x(osd_x), .overlay_y(osd_y), .overlay_de(osd_de),
     .audio_l(16'd0), .audio_r(16'd0), .audio_ready(1'b0), .snes_refresh(1'b0),
@@ -111,17 +111,38 @@ initial begin
         end
         if (active_pixels != (mode ? 640*480 : 512*448))
             $fatal(1, "incorrect active pixel count");
+        game_active = 0;
+        overlay = 1;
+        overlay_text = 0;
+        repeat (4) @(negedge clk_pixel);
+        repeat (800*525) begin
+            if (dut.rgb !== 24'd0)
+                $fatal(1, "Browser background not black mode=%0d x=%0d y=%0d", mode, dut.cx, dut.cy);
+            @(negedge clk_pixel);
+        end
+        overlay_text = 1;
+        repeat (4) @(negedge clk_pixel);
+        if (dut.rgb !== 24'habcdef)
+            $fatal(1, "Browser OSD hidden by black background");
+        game_active = 1;
+        overlay = 0;
+        overlay_text = 0;
+        repeat (4) @(negedge clk_pixel);
+        wait(dut.cx == 100 && dut.cy == 100);
+        @(negedge clk_pixel);
+        if (dut.game_rgb === 24'd0 || ^dut.game_rgb === 1'bx)
+            $fatal(1, "Stopped line buffer not visible after browser exit");
     end
     overlay = 1;
     overlay_text = 1;
     repeat (5) @(negedge clk_pixel);
     if (dut.rgb !== 24'habcdef)
         $fatal(1, "OSD glyph color mismatch");
-    $display("tb_snes_video PASSED: 640x480 timing, integer/stretch/bilinear pixels, edge clamp and OSD");
+    $display("tb_snes_video PASSED: zoom pixels, stopped line buffer, black browser background and OSD");
     $finish;
 end
 initial begin
-    #150000000;
+    #250000000;
     $fatal(1, "Video test timeout");
 end
 endmodule
@@ -158,8 +179,7 @@ snes_video_640 dut (
     .clk(clk), .resetn(resetn), .dotclk(source_tick[1]),
     .hblank(source_tick >= 1024), .vblank(source_row >= 224), .rgb5(source_color),
     .xs({source_tick[9:2], 1'b0}), .ys({source_field, ppu_row}), .zoom(2'(MODE)), .scanline(2'd0),
-    .pause_pending(1'b0), .pause_ready(1'b0), .pause_buffer_write(1'b0),
-    .pause_buffer_address(10'd0), .pause_buffer_bank(3'd0), .pause_buffer_data(15'd0),
+    .game_active(1'b1),
     .overlay(1'b0), .overlay_text(1'b0), .overlay_color(24'd0),
     .audio_l(16'd0), .audio_r(16'd0), .audio_ready(1'b0),
     .snes_refresh(source_tick >= 1100 && source_tick < 1140),

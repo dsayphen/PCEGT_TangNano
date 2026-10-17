@@ -20,7 +20,8 @@ int is_rom(const char *name) {
     if (n < 5)
         return 0;
     return strcasecmp(name + n - 4, ".pce") == 0 ||
-           strcasecmp(name + n - 4, ".sgx") == 0 || is_snes(name);
+           strcasecmp(name + n - 4, ".sgx") == 0 || is_snes(name) ||
+           is_nes(name) || is_gameboy(name);
 }
 
 int is_snes(const char *name) {
@@ -28,6 +29,16 @@ int is_snes(const char *name) {
     return length >= 5 &&
            (strcasecmp(name + length - 4, ".sfc") == 0 ||
             strcasecmp(name + length - 4, ".smc") == 0);
+}
+
+int is_nes(const char *name) {
+    int length = (int)strlen(name);
+    return length >= 5 && strcasecmp(name + length - 4, ".nes") == 0;
+}
+
+int is_gameboy(const char *name) {
+    int length = (int)strlen(name);
+    return length >= 4 && strcasecmp(name + length - 3, ".gb") == 0;
 }
 
 int is_cue(const char *name) {
@@ -260,6 +271,105 @@ static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_l
     return found ? 0 : -1;
 }
 
+static int gameboy_mapper_supported(uint8_t mapper) {
+    return mapper == 0x00 || mapper == 0x01 || mapper == 0x02 ||
+           mapper == 0x03 || mapper == 0x08 || mapper == 0x09 ||
+           (mapper >= 0x0f && mapper <= 0x13) ||
+           (mapper >= 0x19 && mapper <= 0x1e);
+}
+
+static int load_nintendo8_rom(const char *fname, uint32_t size) {
+    FIL file;
+    UINT read;
+    uint8_t header[16];
+    uint32_t total = 0;
+    int last_percent = -1;
+
+    if (CORE_PROFILE_ID != CORE_PROFILE_NINTENDO8 ||
+        size < (is_nes(fname) ? 16u : 0x150u) || size > 0x3e0000u) {
+        message("Unsupported image", "Max size is just under 4 MiB");
+        return -1;
+    }
+
+    strcpy(path_buf, pwd);
+    if (pwd[1])
+        strcat(path_buf, "/");
+    strcat(path_buf, fname);
+    if (f_open(&file, path_buf, FA_READ) != FR_OK) {
+        message("Cannot open", fname);
+        return -1;
+    }
+
+    if (is_nes(fname)) {
+        if (f_read(&file, header, sizeof(header), &read) != FR_OK ||
+            read != sizeof(header)) {
+            f_close(&file);
+            message("Cannot read NES header", fname);
+            return -1;
+        }
+    } else if (f_lseek(&file, 0x147u) != FR_OK ||
+               f_read(&file, header, 1, &read) != FR_OK || read != 1) {
+        f_close(&file);
+        message("Cannot read GB header", fname);
+        return -1;
+    }
+    if (is_nes(fname) &&
+        (header[0] != 'N' || header[1] != 'E' ||
+         header[2] != 'S' || header[3] != 0x1a)) {
+        f_close(&file);
+        message("Invalid NES image", fname);
+        return -1;
+    }
+    if (is_gameboy(fname) && !gameboy_mapper_supported(header[0])) {
+        f_close(&file);
+        message("Unsupported GB mapper", fname);
+        return -1;
+    }
+
+    if (f_lseek(&file, 0) != FR_OK) {
+        f_close(&file);
+        message("Cannot seek image", fname);
+        return -1;
+    }
+
+    extract_filename(current_game_name, fname);
+    current_game_snes_ram_size = 0;
+    loading_status("");
+    show_rom_progress(0, size);
+    nintendo8_load_start(size, is_nes(fname));
+    while (total < size) {
+        UINT want = (UINT)imin((int)(size - total), sizeof(io_buf));
+        if (f_read(&file, io_buf, want, &read) != FR_OK || read != want)
+            goto failed;
+        for (UINT index = 0; index < read; index += 4) {
+            uint32_t word = 0xffffffffu;
+            UINT remaining = read - index;
+            if (remaining > 4)
+                remaining = 4;
+            memcpy(&word, io_buf + index, remaining);
+            pce_load_word(word);
+        }
+        total += read;
+        int percent = (int)(total * 100u / size);
+        if (percent != last_percent) {
+            last_percent = percent;
+            show_rom_progress(total, size);
+        }
+    }
+    f_close(&file);
+    if (pce_load_end() != 0) {
+        message("ROM transfer timeout", fname);
+        return -1;
+    }
+    return 0;
+
+failed:
+    f_close(&file);
+    (void)pce_load_end();
+    message("Read error", fname);
+    return -1;
+}
+
 // ---------------------------------------------------------------------------
 // ROM loading
 //
@@ -268,6 +378,8 @@ static int parse_cue_bin_path(const char *cue_path, char *bin_path, size_t bin_l
 // (size & 0x3FF) == 0x200, exactly like the UART loader does.
 // ---------------------------------------------------------------------------
 int load_rom(const char *fname, uint32_t size) {
+    if (is_nes(fname) || is_gameboy(fname))
+        return load_nintendo8_rom(fname, size);
     if (is_snes(fname))
         return load_snes_rom(fname, size);
 

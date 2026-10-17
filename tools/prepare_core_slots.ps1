@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+$inputDirectoryProvided = -not [string]::IsNullOrWhiteSpace($InputDirectory)
 if (-not $InputDirectory) { $InputDirectory = Join-Path $root 'impl/pnr' }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root 'impl/core-slots' }
 $slotSize = 1MB
@@ -34,12 +35,19 @@ if ([CoreSlotCrc]::Compute([Text.Encoding]::ASCII.GetBytes('123456789')) -ne [ui
 $profiles = @(
     @{ Name = 'sgx'; Id = 1; Slot = 1; Label = 'HuCard' },
     @{ Name = 'cd'; Id = 2; Slot = 2; Label = 'CD-Rom' },
-    @{ Name = 'snes'; Id = 4; Slot = 3; Label = 'SNES' }
+    @{ Name = 'snes'; Id = 4; Slot = 3; Label = 'Nintendo' },
+    @{ Name = 'nesgb'; Id = 5; Slot = 4; Label = 'Nintendo 8-bit' }
 )
 
+$profileSources = @{}
 foreach ($profile in $profiles) {
     $source = Join-Path $InputDirectory ("PCE_GT_TangNano_{0}.bin" -f $profile.Name)
+    if (-not $inputDirectoryProvided) {
+        $archivedSource = Join-Path $root ("impl/profiles/{0}/pnr/PCE_GT_TangNano_{0}.bin" -f $profile.Name)
+        if (Test-Path $archivedSource) { $source = $archivedSource }
+    }
     if (-not (Test-Path $source)) { throw "Missing bitstream: $source" }
+    $profileSources[$profile.Name] = $source
     $size = (Get-Item $source).Length
     if ($size -le 0 -or $size -gt $manifestOffset) {
         throw "$source must contain 1..$manifestOffset bytes."
@@ -48,7 +56,7 @@ foreach ($profile in $profiles) {
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 foreach ($profile in $profiles) {
-    $source = Join-Path $InputDirectory ("PCE_GT_TangNano_{0}.bin" -f $profile.Name)
+    $source = $profileSources[$profile.Name]
     $binary = [IO.File]::ReadAllBytes($source)
     $crc = [CoreSlotCrc]::Compute($binary)
     $slot = New-Object byte[] $slotSize
@@ -71,7 +79,7 @@ foreach ($profile in $profiles) {
         $profile.Label, $destination, ($profile.Slot * $slotSize), $binary.Length, $crc)
 }
 if ($CombinedImage) {
-    $order = @('sgx', 'sgx', 'cd', 'snes', $null)
+    $order = @('sgx', 'sgx', 'cd', 'snes', 'nesgb')
     $combined = New-Object byte[] ($order.Count * $slotSize)
     for ($index = 0; $index -lt $combined.Length; $index++) { $combined[$index] = 255 }
     for ($slotIndex = 0; $slotIndex -lt $order.Count; $slotIndex++) {
@@ -81,10 +89,10 @@ if ($CombinedImage) {
         if ($bytes.Length -ne $slotSize) { throw "Invalid slot size: $sourceSlot" }
         [Array]::Copy($bytes, 0, $combined, ($slotIndex * $slotSize), $slotSize)
     }
-    $destination = Join-Path $OutputDirectory 'cores_sgx_cd_snes.bin'
+    $destination = Join-Path $OutputDirectory 'cores_sgx_cd_snes_nesgb.bin'
     [IO.File]::WriteAllBytes($destination, $combined)
     Write-Host ("Combined cores: {0} -> 0x000000, {1} bytes; firmware not included." -f
         $destination, $combined.Length)
 }
 Write-Host 'Program these slot images as raw SPI flash data, without erasing the entire flash.'
-Write-Host 'All three bitstreams must include flash PIO support. Keep firmware at 0x500000.'
+Write-Host 'All four bitstreams must include flash PIO support. Keep firmware at 0x500000.'

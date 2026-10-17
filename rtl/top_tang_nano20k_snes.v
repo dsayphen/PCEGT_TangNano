@@ -154,8 +154,6 @@ wire        rom_pop;
 wire [1:0]  video_zoom;
 wire [1:0]  scanline;
 wire        game_pause;
-wire        game_pause_frame;
-wire        pause_ready;
 wire        game_reset;
 wire        pad_mode;
 wire        pad_mode_sf2;
@@ -234,8 +232,6 @@ iosys #(
     .video_zoom          (video_zoom),
     .scanline            (scanline),
     .game_pause          (game_pause),
-    .game_pause_frame    (game_pause_frame),
-    .game_pause_ready    (pause_ready),
     .game_reset          (game_reset),
     .system_reset        (system_reset),
     .pad_mode            (pad_mode),
@@ -639,35 +635,8 @@ end
 
 wire        core_resetn = sys_resetn & image_valid & ~loading & ~game_reset &
                           ~button_reset;
-wire        pause_hold, pause_display, pause_row_request;
-wire        frame_req, frame_ack, frame_we;
-wire [15:0] frame_address;
-wire [14:0] frame_data, frame_q;
-wire        pause_buffer_write;
-wire [9:0]  pause_buffer_address;
-wire [2:0]  pause_buffer_bank;
-wire [14:0] pause_buffer_data;
-wire        enable_request = core_resetn & ~sdram_busy & loaded & ~pause_hold &
-                             ~(game_pause & ~game_pause_frame) &
-                             ~pause_snes_for_frame_sync & ~wram_wait;
-// dot_clk_ce (SDRAM clkref) only advances while enabled and the controller
-// realigns its 2-mclk slot ring on each clkref edge. Odd-length stalls would
-// shift that edge by half a slot and corrupt in-flight SDRAM accesses.
-reg         enable_odd_stall = 1'b0;
-wire        enable = enable_request & ~enable_odd_stall;
-always @(posedge mclk)
-    enable_odd_stall <= ~enable & ~enable_odd_stall;
-
-snes_pause_frame u_pause_frame (
-    .clk(mclk), .resetn(sys_resetn), .running(core_resetn && loaded),
-    .pause(game_pause_frame), .dotclk(dotclk), .hblank(~hblankn), .vblank(~vblankn),
-    .xs(x_out), .ys(y_out), .rgb(rgb_out), .hold_core(pause_hold), .ready(pause_ready),
-    .display_active(pause_display), .row_request(pause_row_request),
-    .memory_req(frame_req), .memory_ack(frame_ack), .memory_we(frame_we),
-    .memory_address(frame_address), .memory_data(frame_data), .memory_q(frame_q),
-    .buffer_write(pause_buffer_write), .buffer_address(pause_buffer_address),
-    .buffer_bank(pause_buffer_bank), .buffer_data(pause_buffer_data)
-);
+wire        enable = core_resetn & ~sdram_busy & loaded & ~game_pause &
+                     ~pause_snes_for_frame_sync & ~wram_wait;
 wire [19:0] audio_l_scaled = {audio_l, 4'd0};
 wire [19:0] audio_r_scaled = {audio_r, 4'd0};
 wire [19:0] audio_l_filtered;
@@ -726,8 +695,6 @@ sdram_snes #(.SHARED_IOSYS(1), .SPLIT_WRAM(1),
     .vram2_req(vram2_req), .vram2_ack(vram2_ack), .vram2_we(vram2_write),
     .rv_addr(rv_addr_sdram), .rv_din(rv_din_sdram), .rv_ds(rv_ds), .rv_dout(rv_dout),
     .rv_req(rv_req), .rv_req_ack(rv_req_ack), .rv_we(rv_we), .refreshing(refresh),
-    .frame_req(frame_req), .frame_ack(frame_ack), .frame_we(frame_we),
-    .frame_addr(frame_address), .frame_din(frame_data), .frame_dout(frame_q),
     .total_refresh()
 );
 
@@ -752,10 +719,7 @@ snes_video_640 u_snes2hdmi (
     .pause_snes_for_frame_sync(pause_snes_for_frame_sync),
     .dotclk(dotclk), .hblank(~hblankn), .vblank(~vblankn), .rgb5(rgb_out),
     .xs(x_out), .ys(y_out), .zoom(video_zoom), .scanline(scanline),
-    .pause_pending(game_pause), .pause_ready(pause_ready),
-    .pause_display(pause_display), .pause_row_request(pause_row_request),
-    .pause_buffer_write(pause_buffer_write), .pause_buffer_address(pause_buffer_address),
-    .pause_buffer_bank(pause_buffer_bank), .pause_buffer_data(pause_buffer_data),
+    .game_active(image_valid && !loading && loaded),
     .overlay(osd_on), .overlay_text(osd_text),
     .overlay_x(osd_x), .overlay_y(osd_y), .overlay_de(osd_de),
     .overlay_color(osd_rgb),

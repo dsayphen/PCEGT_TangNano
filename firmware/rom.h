@@ -9,6 +9,8 @@
 
 int is_rom(const char *name);
 int is_snes(const char *name);
+int is_nes(const char *name);
+int is_gameboy(const char *name);
 int is_cue(const char *name);
 int load_rom(const char *fname, uint32_t size);
 

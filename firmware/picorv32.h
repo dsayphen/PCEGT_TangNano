@@ -48,6 +48,7 @@
 #define CORE_PROFILE_CD       2u
 #define CORE_PROFILE_SUPERSET 3u
 #define CORE_PROFILE_SNES     4u
+#define CORE_PROFILE_NINTENDO8 5u
 #define CORE_PROFILE_ID       (reg_core_id & 0xffffu)
 #define reg_audio          (*(volatile uint32_t*)0x02000064)
 #define reg_cd_events      (*(volatile uint32_t*)0x02000070)
@@ -183,6 +184,10 @@ static inline void pce_load_start(uint32_t size_bytes, int sgx) {
     reg_romload_ctrl = 1 | (sgx ? 2 : 0);
     reg_romload_size = size_bytes;
 }
+static inline void nintendo8_load_start(uint32_t size_bytes, int nes) {
+    reg_romload_ctrl = 1 | (nes ? 4 : 0);
+    reg_romload_size = size_bytes;
+}
 static inline void pce_load_word(uint32_t w) {
     reg_romload_data = w;
 }
@@ -200,23 +205,7 @@ static inline int pce_load_end(void) {
 }
 
 static inline void pce_pause(int pause) {
-    reg_game_ctrl = pause ? 1u | (reg_game_ctrl & 4u) : 0u;
-}
-
-static inline void pce_pause_frame(void) {
-    if (CORE_PROFILE_ID != CORE_PROFILE_SNES) {
-        pce_pause(1);
-        return;
-    }
-    reg_game_ctrl = 5u;
-    uint32_t started = time_millis();
-    while (!(reg_game_ctrl & 256u)) {
-        if ((uint32_t)(time_millis() - started) >= 250u) {
-            uart_print("pause: SNES frame capture timeout\n");
-            reg_game_ctrl = 1u;
-            return;
-        }
-    }
+    reg_game_ctrl = pause ? 1 : 0;
 }
 
 static inline void pce_reset(void) {

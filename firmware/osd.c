@@ -60,7 +60,10 @@ void title(void) {
         profile = "CD-ROM";
         break;
     case CORE_PROFILE_SNES:
-        profile = "SNES";
+        profile = "Nintendo";
+        break;
+    case CORE_PROFILE_NINTENDO8:
+        profile = "Nintendo 8-bit";
         break;
     default:
         profile = "Unknown core";

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('pce', 'sgx', 'sgx_rv_diag', 'sgx_no_hdmi_audio', 'sgx_gpio26_input', 'sgx_gpio29_input', 'sgx_gpio29_pulse', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'snes', 'all')]
+    [ValidateSet('pce', 'sgx', 'sgx_rv_diag', 'sgx_no_hdmi_audio', 'sgx_gpio26_input', 'sgx_gpio29_input', 'sgx_gpio29_pulse', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'snes', 'nesgb', 'all')]
     [string]$Profile = 'all',
     [string]$GowinShell,
     [switch]$SnesSdramPhase180,
@@ -57,8 +57,9 @@ $profileIds = @{
     cd_vdc1_gg = 2
     cd_vdc1_quiet = 2
     snes = 4
+    nesgb = 5
 }
-$profiles = if ($Profile -eq 'all') { @('sgx', 'cd', 'snes') } else { @($Profile) }
+$profiles = if ($Profile -eq 'all') { @('sgx', 'cd', 'snes', 'nesgb') } else { @($Profile) }
 
 New-Item -ItemType Directory -Force -Path $workDir, $outputRoot | Out-Null
 
@@ -71,7 +72,13 @@ foreach ($name in $profiles) {
     $constraintsCopy = Join-Path $workDir "$stem.cst"
     $id = $profileIds[$name]
 
-    $topName = if ($name -eq 'snes') { 'top_tang_nano20k_snes.v' } else { 'top_tang_nano20k.v' }
+    $topName = if ($name -eq 'snes') {
+        'top_tang_nano20k_snes.v'
+    } elseif ($name -eq 'nesgb') {
+        'top_tang_nano20k_nesgb.v'
+    } else {
+        'top_tang_nano20k.v'
+    }
     $profileTop = Join-Path $workDir $topName
     try {
         $topSourcePath = Join-Path $root "rtl/$topName"
@@ -97,7 +104,7 @@ foreach ($name in $profiles) {
             'parameter SNES_SDRAM_PHASE = "1010"',
             'parameter SNES_SDRAM_PHASE = "1000"')
         }
-        if ($name -ne 'snes') {
+        if ($name -notin @('snes', 'nesgb')) {
             $parameterPattern = "parameter \[1:0\] CORE_PROFILE = 2'd1"
             if ([regex]::Matches($topSource, $parameterPattern).Count -ne 1) {
                 throw 'Expected exactly one default CORE_PROFILE parameter in top_tang_nano20k.v.'
@@ -245,7 +252,6 @@ foreach ($name in $profiles) {
                 'rtl/snestang/src/smp.v',
                 'rtl/snestang/src/snes.v',
                 'rtl/tang/snes_video_640.sv',
-                'rtl/tang/snes_pause_frame.sv',
                 'rtl/snestang/src/spc700/_spc700_package.v',
                 'rtl/snestang/src/spc700/addrgen.v',
                 'rtl/snestang/src/spc700/addsub.v',
@@ -281,6 +287,98 @@ foreach ($name in $profiles) {
                 throw 'Expected exactly one timing constraints file in PCE_GT_TangNano.gprj.'
             }
             $sdcFile[0].SetAttribute('path', 'constraints/snes_nano20k.sdc')
+        } elseif ($name -eq 'nesgb') {
+            $topFile[0].SetAttribute('path', 'impl/profile-build/top_tang_nano20k_nesgb.v')
+            $topFile[0].SetAttribute('enable', '1')
+
+            $nesgbSources = @(
+                'rtl/nestang/src/nano20k/config.v',
+                'rtl/nestang/src/nano20k/gowin_pll_hdmi.v',
+                'rtl/nestang/src/nano20k/gowin_pll_nes.v',
+                'rtl/nestang/src/EEPROM_24C0x.sv',
+                'rtl/nestang/src/apu.v',
+                'rtl/nestang/src/cart.sv',
+                'rtl/nestang/src/compat.v',
+                'rtl/nestang/src/dpram.v',
+                'rtl/nestang/src/game_loader.v',
+                'rtl/nestang/src/nes.v',
+                'rtl/nestang/src/nes2hdmi.sv',
+                'rtl/nestang/src/ppu.v',
+                'rtl/nestang/src/sdram_nes.v',
+                'rtl/nestang/src/mappers/FDS.sv',
+                'rtl/nestang/src/mappers/generic.sv',
+                'rtl/nestang/src/mappers/iir_filter.v',
+                'rtl/nestang/src/mappers/JYCompany.sv',
+                'rtl/nestang/src/mappers/misc.sv',
+                'rtl/nestang/src/mappers/MMC1.sv',
+                'rtl/nestang/src/mappers/MMC2.sv',
+                'rtl/nestang/src/mappers/MMC3.sv',
+                'rtl/nestang/src/mappers/MMC5.sv',
+                'rtl/nestang/src/mappers/Namco.sv',
+                'rtl/nestang/src/mappers/Sachen.sv',
+                'rtl/nestang/src/mappers/Sunsoft.sv',
+                'rtl/nestang/src/mappers/VRC.sv',
+                'rtl/nestang/src/t65/T65_Pack.v',
+                'rtl/nestang/src/t65/T65.v',
+                'rtl/nestang/src/t65/T65_ALU.v',
+                'rtl/nestang/src/t65/T65_MCode.v',
+                'rtl/nestang/src/hdmi2/audio_clock_regeneration_packet.sv',
+                'rtl/nestang/src/hdmi2/audio_info_frame.sv',
+                'rtl/nestang/src/hdmi2/audio_sample_packet.sv',
+                'rtl/nestang/src/hdmi2/auxiliary_video_information_info_frame.sv',
+                'rtl/nestang/src/hdmi2/hdmi.sv',
+                'rtl/nestang/src/hdmi2/packet_assembler.sv',
+                'rtl/nestang/src/hdmi2/packet_picker.sv',
+                'rtl/nestang/src/hdmi2/serializer.sv',
+                'rtl/nestang/src/hdmi2/source_product_description_info_frame.sv',
+                'rtl/nestang/src/hdmi2/tmds_channel.sv',
+                'rtl/gb/verilogboy/alu.v',
+                'rtl/gb/verilogboy/boy.v',
+                'rtl/gb/verilogboy/brom.v',
+                'rtl/gb/verilogboy/clk_div.v',
+                'rtl/gb/verilogboy/common.v',
+                'rtl/gb/verilogboy/control.v',
+                'rtl/gb/verilogboy/cpu.v',
+                'rtl/gb/verilogboy/dma.v',
+                'rtl/gb/verilogboy/edgedet.v',
+                'rtl/gb/verilogboy/ppu.v',
+                'rtl/gb/verilogboy/regfile.v',
+                'rtl/gb/verilogboy/serial.v',
+                'rtl/gb/verilogboy/singleport_ram.v',
+                'rtl/gb/verilogboy/singlereg.v',
+                'rtl/gb/verilogboy/sound.v',
+                'rtl/gb/verilogboy/sound_channel_mix.v',
+                'rtl/gb/verilogboy/sound_length_ctr.v',
+                'rtl/gb/verilogboy/sound_noise.v',
+                'rtl/gb/verilogboy/sound_square.v',
+                'rtl/gb/verilogboy/sound_vol_env.v',
+                'rtl/gb/verilogboy/sound_wave.v',
+                'rtl/gb/verilogboy/timer.v',
+                'rtl/gb/gb_cart_mapper.sv'
+            )
+            foreach ($source in $nesgbSources) {
+                if (-not (Test-Path (Join-Path $root $source))) {
+                    throw "Missing NES/Game Boy source: $source"
+                }
+                $sourceEntry = $project.CreateElement('File')
+                $sourceEntry.SetAttribute('path', $source)
+                $sourceEntry.SetAttribute('type', 'file.verilog')
+                $sourceEntry.SetAttribute('enable', '1')
+                [void]$project.Project.FileList.AppendChild($sourceEntry)
+            }
+            $pceVhdl = @($project.Project.FileList.File | Where-Object {
+                $_.GetAttribute('type') -eq 'file.vhdl'
+            })
+            foreach ($vhdlFile in $pceVhdl) {
+                [void]$project.Project.FileList.RemoveChild($vhdlFile)
+            }
+            $sdcFile = @($project.Project.FileList.File | Where-Object {
+                $_.GetAttribute('type') -eq 'file.sdc'
+            })
+            if ($sdcFile.Count -ne 1) {
+                throw 'Expected exactly one timing constraints file in PCE_GT_TangNano.gprj.'
+            }
+            $sdcFile[0].SetAttribute('path', 'constraints/nintendo8_nano20k.sdc')
         } else {
             $topFile[0].SetAttribute('path', 'impl/profile-build/top_tang_nano20k.v')
         }
@@ -339,6 +437,8 @@ foreach ($name in $profiles) {
         if ($name -eq 'snes') {
             $buildConfig['TopModule'] = 'top_tang_nano20k_snes'
             $buildConfig['GwSyn_Loop_Limit'] = 8192
+        } elseif ($name -eq 'nesgb') {
+            $buildConfig['TopModule'] = 'top_tang_nano20k_nesgb'
         }
         [System.IO.File]::WriteAllText(
             $configCopy,

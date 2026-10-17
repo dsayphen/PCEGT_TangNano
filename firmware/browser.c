@@ -250,6 +250,22 @@ static void move_cursor(int old_i, int new_i) {
     selection_row(ROW_FIRST + new_i);
 }
 
+void browser_default_dir(void) {
+    const char *dir;
+    FILINFO info;
+
+    switch (CORE_PROFILE_ID) {
+    case CORE_PROFILE_PCE:
+    case CORE_PROFILE_SGX: dir = "/pce"; break;
+    case CORE_PROFILE_CD: dir = "/pcecd"; break;
+    case CORE_PROFILE_SNES: dir = "/snes"; break;
+    case CORE_PROFILE_NINTENDO8: dir = "/nintendo8"; break;
+    default: return;
+    }
+    if (f_stat(dir, &info) == FR_OK && (info.fattrib & AM_DIR))
+        strcpy(pwd, dir);
+}
+
 // Runs the browser until a ROM has been loaded.
 void browse(void) {
     int page = 0;

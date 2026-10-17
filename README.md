@@ -3,7 +3,8 @@
 A PC Engine / SuperGrafx port of the
 [mist-devel/TurboGrafx16_FPGA](https://github.com/mist-devel/TurboGrafx16_FPGA)
 core to the **Sipeed Tang Nano 20K** (Gowin `GW2AR-LV18QN88C8/I7`). CD-ROM
-support is experimental.
+support is experimental. The board also has experimental SNES and combined
+NES / original Game Boy profiles.
 
 The PicoRV32 firmware boots from SPI flash, browses a FAT-formatted microSD
 card on the OSD and loads HuCard or System Card images into SDRAM. The USB-UART
@@ -33,6 +34,9 @@ SNES pad -> HuC6280 / VDC / VCE -> line doubler -> DVI over HDMI
 | CD-ROM² / Super CD | experimental CUE/BIN, System Card, CDDA, SCSI data and ADPCM |
 | Arcade Card | available in CD mode |
 | SuperGrafx (second VDC / VPC) | yes (`SGX_SUPPORT = 1`) |
+| NES + original Game Boy | experimental combined `nesgb` profile |
+| Game Boy cartridges | ROM-only, MBC1, MBC3 without RTC, and MBC5 |
+| Game Boy Color | not supported; the Game Boy core is DMG-only |
 | Cheats | per-game `.cht` files |
 | Backup RAM (BRAM), Populous SRAM | saved per game on microSD at firmware-menu entry (not on power loss) |
 | Multitap, mouse, MB128 | not implemented |
@@ -54,20 +58,21 @@ From the repository root, build **both** components:
 & "G:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\bin\gw_sh.exe" tools/build.tcl
 ```
 
-To build the three profile variants, run:
+To build the four profile variants, run:
 
 ```powershell
 & .\tools\build_profiles.ps1 -Profile all
 ```
 
 The script creates temporary Gowin project/config copies and stores each
-profile's bitstream and binary under `impl/profiles/{sgx,cd,snes}/`.
+profile's bitstream and binary under
+`impl/profiles/{sgx,cd,snes,nesgb}/`.
 The `all` build selects `sgx` (HuCard, including ordinary PCE games), `cd`
-(CD-Rom), and experimental `snes`. SGX is the default boot profile;
-Superset is no longer built or offered by the core selection menu.
-Each core image is about 887 KiB and fits a 1 MiB flash slot. Core selection
-copies the selected image to the boot address, then requests a reload through
-the tested GPIO29 connection described below.
+(CD-Rom), experimental `snes`, and experimental `nesgb` (Nintendo 8-bit).
+SGX is the default boot profile; Superset is no longer built or offered by
+the core selection menu. Each core image fits a 1 MiB flash slot. Core
+selection copies the selected image to the boot address, then requests a
+reload through the tested GPIO29 connection described below.
 
 The resulting FPGA bitstream is `impl/pnr/PCE_GT_TangNano.fs`. Program it
 with the Gowin Programmer or `openFPGALoader`:
@@ -84,10 +89,11 @@ Programmer can write the binary at this address.
 
 ### Core selection from the browser
 
-Browser Options (Select) provides **Choose core > HuCard / CD-Rom / SNES**.
+Browser Options (Select) provides
+**Choose core > HuCard / CD-Rom / Nintendo / Nintendo 8-bit**.
 Selecting a different core asks for confirmation, checks the source slot's
 profile, size and CRC32, then erases/programs/verifies the first 1 MiB of flash.
-The three source slots and the firmware at `0x500000` are not modified.
+The four source slots and the firmware at `0x500000` are not modified.
 When `Core ready` appears, A requests an FPGA reload if the GPIO29/TP1
 hardware is installed and the rebuilt core supports it. Otherwise use the
 TP1 button or switch power off and on. S1 only resets the console and does
@@ -110,10 +116,9 @@ Build the firmware, cores and flash images with:
 & .\tools\prepare_core_slots.ps1 -CombinedImage
 ```
 
-This creates `impl/core-slots/cores_sgx_cd_snes.bin`, a 5 MiB image:
+This creates `impl/core-slots/cores_sgx_cd_snes_nesgb.bin`, a 5 MiB image:
 SGX boot at `0x000000`, SGX source at `0x100000`, CD-Rom at `0x200000`,
-SNES at `0x300000`, and a reserved `FF`-filled slot at `0x400000`.
-Update the firmware when moving SNES from its previous slot.
+SNES at `0x300000`, and Nintendo 8-bit at `0x400000`.
 Program it as raw SPI flash data at `0x000000`, with erase/program/verify
 limited to `0x000000..0x4FFFFF`. **Never use Bulk Erase.** The firmware is a
 separate file at `0x500000`. Verify programmer readback and power-cycle after
@@ -135,10 +140,10 @@ core selection. Build it with `tools/build_profiles.ps1 -Profile snes`.
 The browser supports `.sfc` and `.smc` images, including copier headers, and
 SNES saves use `/saves/<game>.srm`. Video output is 640x480 with Integer,
 Stretch and Bilinear zoom modes; scanlines and zoom are available in Video Settings.
-The in-game pause menu captures a complete 256x224 frame in SDRAM and displays
-it behind the OSD, rather than repeating the stopped line buffer. The background
-is briefly black while the capture completes. This requires both the updated
-SNES bitstream and firmware; hardware validation of the frozen background is pending.
+The in-game pause menu stops the core without capturing a frame; the stopped
+24-line buffer may repeat behind the OSD. Returning to the browser hides the
+game background in black while leaving the OSD visible. This requires both
+the updated SNES bitstream and firmware.
 To fit the FPGA, the SNES profile has no bass/treble controls (master volume
 remains) and no UART firmware messages.
 ExHiROM and enhancement-chip games such as Super FX and SA-1 are not supported.
@@ -148,6 +153,24 @@ The profile uses the upstream RAM layout, tested with Super Mario World
 needs hardware testing. CD and SNES support remain experimental.
 
 See [SNES source and license information](rtl/snestang/README.md).
+
+### Experimental Nintendo 8-bit profile
+
+Build the combined NES and Game Boy bitstream with
+`tools/build_profiles.ps1 -Profile nesgb`. It uses the NES core from NESTang
+without MMC5 and the DMG-only VerilogBoy core. Game Boy cartridges support
+ROM-only, MBC1, MBC3 without RTC, and MBC5; Game Boy RAM save persistence is
+not implemented. `.gbc` files and Game Boy Color-only features are not
+supported. A color-capable game's monochrome-compatible mode may work when
+loaded as a `.gb` image.
+
+The SNES pad controls both cores: B or A maps to NES/GB A, and Y or X maps
+to NES/GB B. The D-pad, Select and Start retain their functions. Game inputs
+are masked while the menu is open. The NES interface supplies only the
+standard controller's serial data; unused expansion inputs and the
+unconnected second port report no buttons pressed.
+
+See the source and license files under `rtl/nestang/` and `rtl/gb/`.
 
 ---
 
@@ -205,6 +228,9 @@ can still be reset with S1.
 In the firmware browser, Up/Down select a file, Left/Right change pages, A
 opens a directory or loads a `.pce`, `.sgx` or `.cue`, and B goes to the parent
 directory. A folder ending in `(CD)` automatically opens its first CUE file.
+At startup the browser opens the core's default folder when it exists:
+`/pce` for HuCard, `/pcecd` for CD-ROM and `/snes` for Nintendo (SNES);
+otherwise it starts at the card root. B still goes up to the root.
 The SuperGrafx profile can also load standard `.pce` HuCard games.
 During a game, Select+Start opens the firmware pause menu (Resume, Reset,
 Return to browser, gamepad mode and video/audio settings). Hold Select for
@@ -326,7 +352,7 @@ Resource use in the latest successfully placed Gowin builds:
 | --- | ---: | ---: | ---: | ---: |
 | SGX | 13,649 / 20,736 (66%) | 10,516 | 7,100 / 15,915 (45%) | 43 / 46 (94%) |
 | CD | 15,480 / 20,736 (75%) | 12,196 | 7,489 / 15,915 (48%) | 41 / 46 (90%) |
-| SNES | 20,542 / 20,736 (100%) | 16,961 | 7,271 / 15,915 (46%) | 46 / 46 (100%) |
+| SNES | 20,205 / 20,736 (98%) | 16,815 | 7,151 / 15,915 (45%) | 46 / 46 (100%) |
 
 Run the available simulations from the repository root:
 
@@ -344,6 +370,11 @@ Run the available simulations from the repository root:
 * `rtl/tang/sdram.v`: **nand2mario**, taken from
   [sipeed/TangNano-20K-example](https://github.com/sipeed/TangNano-20K-example)
   (`nestang/src/sdram.v`), GPLv3.
+* NES core: selected sources from
+  [nand2mario/nestang](https://github.com/nand2mario/nestang), GPLv3; the
+  upstream license is preserved under `rtl/nestang/`.
+* Game Boy DMG core: VerilogBoy by Wenting Zhang, as used by GBTang; the
+  upstream OHDL-1.0 license is preserved under `rtl/gb/`.
 * rPLL / CLKDIV / `OSER10` / `ELVDS_OBUF` usage follows the Sipeed Tang Nano 20K
   examples and NESTang (GPLv3).
 * HDMI audio packet scheduling follows HDMI 1.4a packet organization and was

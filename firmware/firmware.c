@@ -67,7 +67,8 @@ static int mount_card(void) {
 // ---------------------------------------------------------------------------
 int main(void) {
     // 43.2 MHz / 375 = 115200 baud
-    uart_init(CORE_PROFILE_ID == CORE_PROFILE_SNES ? 188 : 375);
+    uart_init(CORE_PROFILE_ID == CORE_PROFILE_SNES ||
+              CORE_PROFILE_ID == CORE_PROFILE_NINTENDO8 ? 188 : 375);
 
     uint32_t sp_val;
     __asm__ volatile ("mv %0, sp" : "=r"(sp_val));
@@ -95,6 +96,7 @@ int main(void) {
     video_config_load();
     audio_config_load();
 
+    browser_default_dir();
     uart_print("main: entering browser\n");
     if (!core_autorun())
         browse();

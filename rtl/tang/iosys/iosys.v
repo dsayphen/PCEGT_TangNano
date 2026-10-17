@@ -107,6 +107,7 @@ module iosys #(
     output reg         image_valid,
     output reg  [7:0]  rom_sz,
     output reg  [22:0] rom_offset,
+    output reg         nes_mode,
     output reg         sgx_mode,
     output reg         cd_mode,
     output reg         rom_pop,
@@ -185,8 +186,6 @@ module iosys #(
 
     // ---- in-game controls -------------------------------------------------
     output reg         game_pause,
-    output reg         game_pause_frame,
-    input wire         game_pause_ready,
     output reg         game_reset,
     output reg         system_reset,
     output reg         pad_mode,
@@ -548,7 +547,6 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    joy_sel      ? {20'b0, joy1} :
                    zoom_sel     ? {30'b0, video_zoom} :
                    scan_sel     ? {30'b0, scanline} :
-                   game_ctrl_sel ? {23'd0, game_pause_ready, 5'd0, game_pause_frame, 1'b0, game_pause} :
                    uart_div_sel ? uart_div_do :
                    uart_dat_sel ? uart_dat_do :
                    time_sel     ? time_reg :
@@ -886,6 +884,7 @@ always @(posedge clk) begin
             loading       <= 1'b1;
             image_valid   <= 1'b0;
             cd_mode       <= 1'b0;
+            nes_mode      <= mem_wdata[2];
             sgx_mode      <= mem_wdata[1];
             rl_addr       <= 23'd0;
             rl_cnt        <= 3'd0;
@@ -911,13 +910,11 @@ always @(posedge clk) begin
 
     if (game_ctrl_sel && (mem_wstrb != 4'b0)) begin
         game_pause <= mem_wdata[0];
-        game_pause_frame <= mem_wdata[2];
         game_reset <= mem_wdata[1];
         if (mem_wdata[3]) begin
             // Return to browser: purge the previous ROM and VDC0 VRAM before
             // rebooting, so no old SDRAM transaction survives the reset.
             game_pause       <= 1'b0;
-            game_pause_frame <= 1'b0;
             loading          <= 1'b1;
             image_valid      <= 1'b0;
             rl_cnt           <= 3'd0;
@@ -927,6 +924,7 @@ always @(posedge clk) begin
             rl_clear_phase   <= 1'b0;
             rl_reboot_pending <= 1'b1;
             cd_mode           <= 1'b0;
+            nes_mode          <= 1'b0;
         end
         if (mem_wdata[4]) begin
             loading      <= 1'b0;
@@ -998,13 +996,13 @@ always @(posedge clk) begin
         image_valid  <= 1'b0;
         rom_sz       <= 8'd0;
         rom_offset   <= 23'd0;
+        nes_mode     <= 1'b0;
         sgx_mode     <= 1'b0;
         cd_mode      <= 1'b0;
         rom_pop      <= 1'b0;
         video_zoom   <= 2'd1;      // stretch, matches the previous fixed behaviour
         scanline     <= 2'd0;      // off, matches the previous fixed behaviour
         game_pause   <= 1'b0;
-        game_pause_frame <= 1'b0;
         game_reset   <= 1'b0;
         system_reset <= 1'b0;
         pad_mode     <= 1'b0;

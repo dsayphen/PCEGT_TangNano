@@ -360,7 +360,6 @@ iosys #(
     .video_zoom       (video_zoom),
     .scanline         (scanline),
     .game_pause       (game_pause),
-    .game_pause_ready (1'b0),
     .game_reset       (game_reset),
     .system_reset     (system_reset),
     .pad_mode         (pad_mode),

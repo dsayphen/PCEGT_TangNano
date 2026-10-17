@@ -34,12 +34,15 @@ const char *core_name(uint32_t profile) {
     switch (profile) {
     case CORE_PROFILE_SGX: return "HuCard";
     case CORE_PROFILE_CD: return "CD-Rom";
-    case CORE_PROFILE_SNES: return "SNES";
+    case CORE_PROFILE_SNES: return "Nintendo";
+    case CORE_PROFILE_NINTENDO8: return "Nintendo 8-bit";
     default: return "Unknown";
     }
 }
 
 uint32_t core_game_profile(const char *game) {
+    if (is_nes(game) || is_gameboy(game))
+        return CORE_PROFILE_NINTENDO8;
     if (is_snes(game))
         return CORE_PROFILE_SNES;
     if (is_cue(game))
@@ -312,7 +315,7 @@ int core_offer_switch(uint32_t profile, const char *game) {
     uint8_t identity[3];
     int modified = 0;
     if (profile != CORE_PROFILE_SGX && profile != CORE_PROFILE_CD &&
-        profile != CORE_PROFILE_SNES)
+        profile != CORE_PROFILE_SNES && profile != CORE_PROFILE_NINTENDO8)
         return 0;
     if (reg_flash_ctrl & FPGA_RELOAD_OUTPUT_TEST) {
         message("GPIO pulse diagnostic core", "Core copying disabled");
@@ -337,7 +340,9 @@ int core_offer_switch(uint32_t profile, const char *game) {
     flash_end();
     if (!identity[0] || identity[0] == 255 || identity[2] < 0x17 || identity[2] > 0x19)
         goto failed;
-    uint32_t source = (profile == CORE_PROFILE_SNES ? 3u : profile) * SLOT_SIZE;
+    uint32_t source = profile == CORE_PROFILE_SNES ? 3u :
+                      profile == CORE_PROFILE_NINTENDO8 ? 4u : profile;
+    source *= SLOT_SIZE;
     if (flash_read(source + MANIFEST_OFFSET, &manifest, sizeof(manifest)) != 0 ||
         manifest.magic != CORE_MAGIC || manifest.version != 1 ||
         manifest.profile != profile || manifest.size == 0 ||
@@ -426,13 +431,14 @@ failed:
 
 void core_menu(void) {
     static const uint32_t profiles[] = {
-        CORE_PROFILE_SGX, CORE_PROFILE_CD, CORE_PROFILE_SNES
+        CORE_PROFILE_SGX, CORE_PROFILE_CD, CORE_PROFILE_SNES,
+        CORE_PROFILE_NINTENDO8
     };
     int active = 0;
     for (;;) {
         clear();
         print_field(3, 5, "Choose core", OSD_COLS - 3);
-        for (int index = 0; index < 3; index++) {
+        for (int index = 0; index < 4; index++) {
             uint32_t profile = profiles[index];
             cursor(2, 8 + index);
             putchar(index == active ? '>' : ' ');
@@ -440,9 +446,9 @@ void core_menu(void) {
             if (profile == CORE_PROFILE_ID)
                 print_field(21, 8 + index, "Active", 6);
         }
-        cursor(2, 11);
-        putchar(active == 3 ? '>' : ' ');
-        print_field(4, 11, "Test FPGA reload", OSD_COLS - 5);
+        cursor(2, 12);
+        putchar(active == 4 ? '>' : ' ');
+        print_field(4, 12, "Test FPGA reload", OSD_COLS - 5);
         selection_row(8 + active);
         status("A=Select  B=Back");
         for (;;) {
@@ -450,15 +456,15 @@ void core_menu(void) {
             if (edge & (JOY_B | JOY_SELECT))
                 return;
             if (edge & JOY_UP) {
-                active = active ? active - 1 : 3;
+                active = active ? active - 1 : 4;
                 break;
             }
             if (edge & JOY_DOWN) {
-                active = active == 3 ? 0 : active + 1;
+                active = active == 4 ? 0 : active + 1;
                 break;
             }
             if (edge & JOY_A) {
-                if (active == 3) {
+                if (active == 4) {
                     test_fpga_reload();
                     break;
                 }

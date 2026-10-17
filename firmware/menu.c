@@ -477,7 +477,7 @@ int pause_menu(void) {
         vdc_timing_dump();
     audio_paused = 1;
     audio_apply();
-    pce_pause_frame();
+    pce_pause(1);
     save_game_saves(0);
     menu_header("Game paused", 1, MENU_FRAME_WIDTH);
 

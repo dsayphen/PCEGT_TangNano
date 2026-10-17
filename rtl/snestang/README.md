@@ -31,36 +31,22 @@ The HDMI PLL now produces
 for the larger buffer. Bilinear interpolation uses weights 0, 1/2 and 1 on
 each axis to fit the FPGA without reducing the buffer depth.
 
-The in-game menu requests a full-frame pause through game-control bit 2
-(together with pause bit 0). Readback bit 8 acknowledges that capture and
-prefill have completed; firmware waits for this before saving SRAM. Ordinary
-pause requests still halt immediately, including save restoration at ROM load.
-The snapshot occupies 112 KiB at physical SDRAM 0x600000..0x61BFFF, below the
-optional video-bank WRAM at 0x620000 and VRAM at 0x7F0000. Its low-priority
-port uses spare VRAM-channel slots and yields to refresh. During capture the
-PPU waits for each pixel write; after capture it stops in VBlank. On playback,
-two rows are prefetched and subsequent rows refill the existing 24-line buffer
-two lines ahead of scanout. Zoom changes latch during HDMI VBlank so refill
-order stays intact. No additional BSRAM is needed. Capture temporarily blanks
-the game background but leaves the OSD and HDMI timing active.
-The integrated `tb_snes_pause_frame` bench checks the full SDRAM image and
-displayed pixels in all three zoom modes, cancellation, resume, reset and
-SDRAM refresh during capture. Hardware validation is still required.
+The in-game menu uses the ordinary game-control pause bit 0 before saving
+SRAM. Full-frame capture has been removed after failed hardware tests.
+While paused, the stopped 24-line buffer remains visible and may repeat behind
+the OSD. Returning to the browser invalidates the game image; the video module
+synchronizes `game_active` to the pixel clock and masks only the game layer to
+black when no game is loaded or while loading. HDMI timing and the OSD remain
+active, and an in-game pause does not trigger this mask.
+The `tb_snes_video` bench checks the stopped buffer, black browser background
+and visible OSD in all three zoom modes.
 
-The SDRAM scheduler realigns its 2-mclk slot ring on each `dot_clk_ce`
-(clkref) edge, and that pulse only advances while ENABLE is high. An odd-length
-stall therefore moved the edge by half a slot and corrupted in-flight SDRAM
-accesses: per-pixel capture stalls crashed the 65816 while the SPC700 kept
-playing. The top now extends every ENABLE stall to an even number of mclk
-cycles, and the pause bench uses the hardware clkref phase and fails on any
-mid-slot realignment.
-
-The pause capture made the profile exceed placement capacity. The SNES top
-therefore sets `UART_ENABLE=0` in IOSys (UART writes complete without output;
+To conserve logic, the SNES top sets `UART_ENABLE=0` in IOSys (UART writes complete without output;
 `RV_DIAGNOSTIC` still forces the UART) and `TONE_ENABLE=0` in `audio_tone`
 (master volume only); the firmware hides Bass/Treble for this profile.
-Gowin 1.9.11.03 result: Logic 20379/20736, CLS 10343/10368, registers 7209,
-BSRAM 46/46; fclk 86.5/86.4 MHz, mclk 22.1/21.6 MHz, hclk 40.5/25.2 MHz (TNS 0).
+Gowin 1.9.11.03 result without frame capture: Logic 20205/20736,
+CLS 10286/10368, registers 7151, BSRAM 46/46; fclk 93.2/86.4 MHz,
+mclk 23.8/21.6 MHz, hclk 49.2/25.2 MHz (TNS 0).
 
 The ROM header heuristics in `firmware/rom.c` are adapted from the upstream
 PicoRV32 firmware at tag `v0.7` (GPLv3).
