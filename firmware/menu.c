@@ -244,7 +244,8 @@ static void make_menu_label(char *buf, int type) {
     if (type == 3) {
         prefix = "Gamepad: ";
         value = game_pad_mode == 2 ? "SF2" :
-                game_pad_mode == 1 ? "6 buttons" : "2 buttons";
+                game_pad_mode == 1 ? "6 buttons" :
+                CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE ? "3 buttons" : "2 buttons";
     } else if (type == 4) {
         prefix = "Color: ";
         value = CORE_PROFILE_ID != CORE_PROFILE_NINTENDO8 ? color_names[video_color] :
@@ -519,10 +520,12 @@ int pause_menu(void) {
         "Resume Game", "Reset Game", "Return to browser"
     };
     int active = 0;
-    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES ||
-                             CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE;
+    const int md_profile = CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE;
+    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES || md_profile;
     const int snes_items[5] = {0, 2, 3, 5, 6};
-    const int n_items = snes_profile ? 5 : 7;
+    const int md_items[6] = {0, 1, 2, 3, 5, 6};
+    const int *profile_items = md_profile ? md_items : snes_items;
+    const int n_items = md_profile ? 6 : snes_profile ? 5 : 7;
     const int first_row = 9;
     const int has_cheats = CORE_PROFILE_ID == CORE_PROFILE_PCE ||
                            CORE_PROFILE_ID == CORE_PROFILE_SGX ||
@@ -538,7 +541,7 @@ int pause_menu(void) {
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
-            int item = snes_profile ? snes_items[i] : i;
+            int item = snes_profile ? profile_items[i] : i;
             cursor(4, first_row + i);
             putchar(i == active ? '>' : ' ');
 
@@ -580,7 +583,7 @@ int pause_menu(void) {
         selection_row(first_row + active);
 
         uint32_t e = joy_edge();
-        int command = snes_profile ? snes_items[active] : active;
+        int command = snes_profile ? profile_items[active] : active;
         if (e & JOY_UP) {
             active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {

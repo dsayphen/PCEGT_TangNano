@@ -39,13 +39,16 @@ module megadrive_menu_probe #(
     wire [31:0] host_wdata, host_rdata;
     wire [3:0] host_be;
     wire host_we, host_req, host_ack, ram_initializing, protocol_fault, memory_fault;
+    wire pad_mode, pad_mode_sf2;
     // SNES {R,L,X,A,Right,Left,Down,Up,Start,Select,Y,B} to MD {Z,Y,X,Mode,Start,C,B,A,U,D,L,R}.
-    wire [11:0] md_joy1 = osd_active ? 12'b0 :
-        {joy1[11:9], joy1[2], joy1[3], joy1[8], joy1[0], joy1[1],
-         joy1[4], joy1[5], joy1[6], joy1[7]};
-    wire [11:0] md_joy2 = osd_active ? 12'b0 :
-        {joy2[11:9], joy2[2], joy2[3], joy2[8], joy2[0], joy2[1],
-         joy2[4], joy2[5], joy2[6], joy2[7]};
+    // SF2 layout: SNES Y/X/L punches -> MD X/Y/Z, SNES B/A/R kicks -> MD A/B/C.
+    function automatic [11:0] md_map(input [11:0] j, input sf2);
+        md_map = sf2 ?
+            {j[10], j[9], j[1], j[2], j[3], j[11], j[8], j[0], j[4], j[5], j[6], j[7]} :
+            {j[11:9], j[2], j[3], j[8], j[0], j[1], j[4], j[5], j[6], j[7]};
+    endfunction
+    wire [11:0] md_joy1 = osd_active ? 12'b0 : md_map(joy1, pad_mode_sf2);
+    wire [11:0] md_joy2 = osd_active ? 12'b0 : md_map(joy2, pad_mode_sf2);
     reg [24:1] rom_words;
     always @(posedge mclk) begin
         if (!reset_n) rom_words <= 0;
@@ -67,7 +70,7 @@ module megadrive_menu_probe #(
         .ld_busy(ld_busy), .ld_idle(ld_idle), .loading(loading), .image_valid(image_valid),
         .rom_sz(), .rom_offset(), .nes_mode(), .sgx_mode(), .cd_mode(), .rom_pop(),
         .video_zoom(video_zoom), .scanline(scanline), .game_pause(game_pause),
-        .game_reset(game_reset), .system_reset(system_reset), .pad_mode(), .pad_mode_sf2(),
+        .game_reset(game_reset), .system_reset(system_reset), .pad_mode(pad_mode), .pad_mode_sf2(pad_mode_sf2),
         .cheat_apply(), .cheat_reset(), .cheat_code(), .color_mode(), .nintendo_color(),
         .audio_volume(audio_volume), .audio_bass(audio_bass), .audio_treble(audio_treble),
         .audio_hdmi(audio_hdmi), .audio_cdda_enable(), .audio_adpcm_enable(),
@@ -106,7 +109,7 @@ module megadrive_menu_probe #(
         .mclk(mclk), .clk_z80(clk_z80), .clk_sdram(clk_sdram), .reset_n(reset_n),
         .loading(loading || !image_valid || ram_initializing || protocol_fault),
         .console_reset(game_reset || button_reset),
-        .pause(game_pause), .joy1(md_joy1), .joy2(md_joy2), .rom_size(rom_words),
+        .pause(game_pause), .j3but(!pad_mode), .joy1(md_joy1), .joy2(md_joy2), .rom_size(rom_words),
         .console_region(console_region),
         .host_addr(host_addr), .host_wdata(host_wdata), .host_be(host_be),
         .host_we(host_we), .host_req(host_req), .host_ack(host_ack), .host_rdata(host_rdata),

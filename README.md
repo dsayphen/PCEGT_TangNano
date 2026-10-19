@@ -269,6 +269,12 @@ mapping. In SF2 mode, SNES A/B/X/Y/L/R map to PCE II/III/V/IV/VI/I
 respectively. A saved per-game setting still overrides the default; the
 in-game Gamepad option cycles through all three modes.
 
+On the Mega Drive core, the same pause-menu Gamepad option selects `3 buttons`
+(`pad_mode=0`), `6 buttons` (`1`, the default) or `SF2` (`2`). The standard
+mapping is SNES B/A/Y = MD B/C/A, X/L/R = MD X/Y/Z and Select = Mode. In SF2
+mode, SNES Y/X/L map to MD X/Y/Z (punches) and B/A/R to MD A/B/C (kicks).
+Choose 3 buttons for the rare games that misbehave with a 6-button pad.
+
 Browser **Options** also provides a sprite limit of 16 or 32 per scanline,
 saved in `/config/system.cfg`; it is intentionally not exposed in the in-game
 pause menu. The Tang Nano wrapper keeps the VDC `SP64` fetch mode disabled.

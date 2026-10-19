@@ -184,14 +184,20 @@ static int write_game_config(const char *game_name, int pad_mode,
     static const char header[] =
         "# PCEngine / SuperGrafx game settings\n"
         "# pad_mode: 0 = 2 buttons, 1 = 6 buttons, 2 = 6-button SF2 mapping\n";
+    static const char md_header[] =
+        "# Mega Drive game settings\n"
+        "# pad_mode: 0 = 3 buttons, 1 = 6 buttons, 2 = 6-button SF2 mapping\n";
+    const int md = CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE;
+    const char *head = md ? md_header : header;
+    const UINT head_len = md ? sizeof(md_header) - 1 : sizeof(header) - 1;
     if (build_game_path(path, sizeof(path), "/config/", game_name,
                         ".cfg", 1) != 0)
         return -1;
     f_mkdir("/config");
     if (f_open(&file, path, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
         return -1;
-    if (f_write(&file, header, sizeof(header) - 1, &bw) != FR_OK ||
-        bw != sizeof(header) - 1 ||
+    if (f_write(&file, head, head_len, &bw) != FR_OK ||
+        bw != head_len ||
         f_write(&file, "pad_mode=", 9, &bw) != FR_OK || bw != 9) {
         f_close(&file);
         return -1;
@@ -217,6 +223,9 @@ static int write_game_config(const char *game_name, int pad_mode,
 void game_pad_mode_load(const char *game_name) {
     char ignored_cheats[256] = "";
     game_pad_mode = game_pad_mode_sf2_default(game_name);
+    // Mega Drive keeps its historical 6-button pad unless a game config says otherwise.
+    if (CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE && game_pad_mode == 0)
+        game_pad_mode = 1;
     reg_pad_mode = game_pad_mode;
     if (!game_name || !*game_name)
         return;

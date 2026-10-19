@@ -4,7 +4,7 @@ module megadrive_sdram_probe #(
     parameter [22:0] WORK_RAM_BASE = 23'h600000,
     parameter [22:0] CART_RAM_BASE = 23'h620000
 ) (
-    input wire mclk, clk_z80, clk_sdram, reset_n, loading, pause, console_reset,
+    input wire mclk, clk_z80, clk_sdram, reset_n, loading, pause, console_reset, j3but,
     input wire [1:0] console_region,
     input wire [11:0] joy1, joy2,
     input wire [24:1] rom_size,
@@ -39,7 +39,7 @@ module megadrive_sdram_probe #(
     megadrive_probe console (
         .mclk(mclk), .clk_z80(clk_z80), .reset_n(reset_n && core_enable),
         .pal(console_region[1]), .export_region(!console_region[0]),
-        .loading(loading), .pause(pause), .joy1(joy1), .joy2(joy2), .rom_size(rom_size),
+        .loading(loading), .pause(pause), .j3but(j3but), .joy1(joy1), .joy2(joy2), .rom_size(rom_size),
         .mem_addr(mem_addr), .mem_rdata(mem_rdata), .mem_wdata(mem_wdata),
         .mem_we(mem_we), .mem_be(mem_be), .mem_req(mem_req), .mem_ack(mem_ack),
         .red(red), .green(green), .blue(blue), .hs(hs), .vs(vs),

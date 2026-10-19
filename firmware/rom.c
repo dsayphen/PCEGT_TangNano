@@ -472,6 +472,7 @@ static int load_megadrive_rom(const char *fname, uint32_t size) {
         }
     }
     f_close(&file);
+    game_pad_mode_load(current_game_name);
     if (pce_load_end() != 0) {
         pce_stop();
         message("ROM transfer timeout", fname);
