@@ -34,7 +34,7 @@ SNES pad -> HuC6280 / VDC / VCE -> line doubler -> DVI over HDMI
 | CD-ROM² / Super CD | experimental CUE/BIN, System Card, CDDA, SCSI data and ADPCM |
 | Arcade Card | available in CD mode |
 | SuperGrafx (second VDC / VPC) | yes (`SGX_SUPPORT = 1`) |
-| SNES | yes, `snes` profile (no enhancement chips) |
+| SNES | yes, `snes` profile, LoROM/HiROM up to 4 MiB (no enhancement chips) |
 | Mega Drive / Genesis | yes, `megadrive` profile |
 | NES + Game Boy / Game Boy Color | experimental combined `nesgb` profile |
 | Game Boy cartridges | ROM-only, MBC1, MBC3 without RTC, and MBC5; ROMs up to 0x3D8000 bytes |
@@ -343,7 +343,7 @@ Resource use in the latest successfully placed Gowin builds:
 | --- | ---: | ---: | ---: | ---: |
 | SGX | 13,649 / 20,736 (66%) | 10,516 | 7,100 / 15,915 (45%) | 43 / 46 (94%) |
 | CD | 15,480 / 20,736 (75%) | 12,196 | 7,489 / 15,915 (48%) | 41 / 46 (90%) |
-| SNES | 20,084 / 20,736 (97%) | 16,694 | 7,151 / 15,915 (45%) | 46 / 46 (100%) |
+| SNES | 20,253 / 20,736 (98%) | 16,836 | 7,194 / 15,915 (46%) | 46 / 46 (100%) |
 | Nintendo 8-bit (NES + GB/GBC) | 18,119 / 20,736 (88%) | 15,588 | 7,397 / 15,915 (47%) | 46 / 46 (100%) |
 | Mega Drive | 19,593 / 20,736 (95%) | 13,915 | 10,271 / 15,915 (65%) | 46 / 46 (100%) |
 

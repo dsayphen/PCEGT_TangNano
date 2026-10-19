@@ -55,6 +55,10 @@ module sdram_snes
     parameter         SPLIT_WRAM = 0,
     parameter         UPSTREAM_RAM_LAYOUT = 0,
     parameter         VIDEO_RAM_LAYOUT = 0,
+    // With UPSTREAM_RAM_LAYOUT, banks 0/1 end with SRAM/WRAM at 0x3C0000.
+    // When rom_hi_en is set, ROM 0x3C0000..0x3FFFFF lives in bank 2 at
+    // 0x5C0000 instead and is served on the ARAM channel.
+    parameter         ROM_HIGH_SHARED = 0,
 
     // Typical SDRAM delays
     parameter [4:0]   CAS  = 2,     // 2/3 cycles, set in mode register
@@ -92,6 +96,13 @@ module sdram_snes
     output reg        cpu_req_ack,
 	input             cpu_we,
 	input       [1:0] cpu_ds,       // which bytes to enable
+
+    // Last 256KB of a 4MB ROM (ROM_HIGH_SHARED). rom_hi_rd/rom_hi_addr come
+    // straight from the CPU address bus (no request register) to save one mclk.
+    input             rom_hi_en,
+    input             rom_hi_rd,
+    input      [21:1] rom_hi_addr,
+    output reg [15:0] rom_hi_q,
 
     input      [16:0] wram_addr,
     input       [7:0] wram_din,
@@ -199,6 +210,8 @@ localparam PORT_RV    = 2'd2;
 localparam PORT_WRAM_SHARED = 3'd3;
 localparam PORT_BSRAM_SHARED = 3'd4;
 localparam PORT_WRAM_VIDEO = 3'd5;
+localparam PORT_ROM_HI = 3'd6;
+localparam PORT_CPU_HI = 3'd7;
 
 localparam PORT_VRAM  = 2'd1;
 localparam PORT_VRAM1 = 2'd2;
@@ -229,6 +242,16 @@ always @(posedge clk) begin
 		need_refresh <= 1;
 end
 
+wire cpu_hi = ROM_HIGH_SHARED && rom_hi_en && !cpu_port && cpu_addr[21:18] == 4'hF;
+reg [21:1] rom_hi_done;
+reg        rom_hi_valid;
+// Registered every fclk: rom_hi_addr/rom_hi_rd change on mclk edges and are
+// stable for 3 fclk before the cycle[1] accept edge (mclk->fclk multicycle).
+reg        rom_hi_pending;
+always @(posedge clk)
+    rom_hi_pending <= ROM_HIGH_SHARED && rom_hi_en && rom_hi_rd &&
+                      (!rom_hi_valid || rom_hi_addr != rom_hi_done);
+
 // ROM: bank 0,1
 // WRAM, BSRAM: bank 1
 always @(*) begin
@@ -238,7 +261,7 @@ always @(*) begin
 	next_oe[0] = 0;
 	next_ds[0] = 0;
 	next_din[0] = 0;
-    if ((cpu_req ^ cpu_req_ack) && (!SHARED_IOSYS || !cpu_port)) begin
+    if ((cpu_req ^ cpu_req_ack) && (!SHARED_IOSYS || !cpu_port) && !cpu_hi) begin
 		next_port[0] = PORT_CPU;
 		next_addr[0] = { 1'b0, cpu_addr[21:1], 1'b0 };  // CPU uses bank 0 and 1, WRAM at last 128KB of bank 1
 		next_din[0]  = cpu_din;
@@ -279,6 +302,18 @@ always @* begin
 		next_oe[1]   = ~aram_we;
 		next_din[1]  = aram_din;
 		next_ds[1]   = aram_16 ? 2'b11 : {aram_addr[0], ~aram_addr[0]};
+    end else if (cpu_hi && (cpu_req ^ cpu_req_ack)) begin
+        next_port[1] = PORT_CPU_HI;
+        next_addr[1] = {5'b10_111, cpu_addr[17:1], 1'b0};
+        next_din[1] = cpu_din;
+        next_ds[1] = cpu_ds;
+        next_we[1] = cpu_we;
+        next_oe[1] = ~cpu_we;
+    end else if (rom_hi_pending) begin
+        next_port[1] = PORT_ROM_HI;
+        next_addr[1] = {5'b10_111, rom_hi_addr[17:1], 1'b0};
+        next_ds[1] = 2'b11;
+        next_oe[1] = 1'b1;
     end else if (SHARED_IOSYS && !UPSTREAM_RAM_LAYOUT && !VIDEO_RAM_LAYOUT &&
                  (SPLIT_WRAM ? (wram_req ^ wram_ack) :
                                 cpu_port && (cpu_req ^ cpu_req_ack))) begin
@@ -388,6 +423,8 @@ always @(posedge clk) begin
         vram1_ack <= 1'b0;
         vram2_ack <= 1'b0;
         rv_req_ack <= 1'b0;
+        rom_hi_valid <= 1'b0;
+        rom_hi_done <= 21'd0;
         total_refresh <= 24'd0;
         refresh <= 1'b0;
         refresh_cnt <= 9'd0;
@@ -476,8 +513,19 @@ always @(posedge clk) begin
                 PORT_RV, PORT_WRAM_SHARED, PORT_BSRAM_SHARED: begin
                     cmd <= CMD_BankActivate;
                 end
+                PORT_ROM_HI: begin
+                    cmd <= CMD_BankActivate;
+                    rom_hi_done <= rom_hi_addr;
+                    rom_hi_valid <= 1'b1;
+                end
+                PORT_CPU_HI: begin
+                    cmd <= CMD_BankActivate;
+                    rom_hi_valid <= 1'b0;
+                end
                 default: ;
                 endcase 
+                if (!rom_hi_en)
+                    rom_hi_valid <= 1'b0;
                 write_delay <= oe_latch[0] & next_we[1];     // delay aram write when cpu is read
             end
 
@@ -552,6 +600,7 @@ always @(posedge clk) begin
                         cpu_req_ack <= cpu_req;
                 end
                 PORT_BSRAM_SHARED: bsram_req_ack <= bsram_req;
+                PORT_CPU_HI: cpu_req_ack <= cpu_req;
                 default: ;
                 endcase
             end
@@ -604,6 +653,8 @@ always @(posedge clk) begin
                 case (port[1])
                 PORT_ARAM: aram_dout <= addr_latch[1][1] ? dq_in[31:16] : dq_in[15:0];
                 PORT_RV:    rv_dout <= addr_latch[1][1] ? dq_in[31:16] : dq_in[15:0];
+                PORT_ROM_HI: rom_hi_q <= addr_latch[1][1] ? dq_in[31:16] : dq_in[15:0];
+                PORT_CPU_HI: cpu_port0 <= addr_latch[1][1] ? dq_in[31:16] : dq_in[15:0];
                 PORT_WRAM_SHARED: cpu_port1 <= addr_latch[1][1] ? dq_in[31:16] : dq_in[15:0];
                 PORT_BSRAM_SHARED:
                     case (addr_latch[1][1:0])

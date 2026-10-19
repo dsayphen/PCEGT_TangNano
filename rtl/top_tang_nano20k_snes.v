@@ -5,6 +5,8 @@ module top_tang_nano20k_snes #(
     parameter SNES_SDRAM_PHASE = "1010",
     parameter SNES_MEMORY_DIAGNOSTIC = 0,
     parameter SNES_UPSTREAM_RAM_LAYOUT = 1,
+    // 4 MiB ROMs: last 256 KiB in SDRAM bank 2 (requires the upstream layout).
+    parameter SNES_ROM_HIGH_SHARED = 1,
     parameter SNES_VIDEO_RAM_LAYOUT = 0,
     parameter SNES_WRAM_WAIT = 0
 ) (
@@ -195,7 +197,8 @@ iosys #(
     .FIRMWARE_FLASH_ADDR (24'h50_0000),
     .FIRMWARE_SIZE       (128*1024),
     .RV_BASE             (23'h40_0000),
-    .ROM_MAX_SIZE        (SNES_UPSTREAM_RAM_LAYOUT ? 32'h003c_0040 : 32'h0040_0040),
+    .ROM_MAX_SIZE        ((!SNES_UPSTREAM_RAM_LAYOUT || SNES_ROM_HIGH_SHARED) ?
+                          32'h0040_0040 : 32'h003c_0040),
     .OSD_CHARACTER_BITS  (7),
     .ROM_CLEAR_ENABLE    (0),
     .CORE_ID             (CORE_ID_SNES),
@@ -318,6 +321,7 @@ reg [7:0]  loader_do_r;
 reg [22:0] loader_addr = 23'd0;
 reg        loading_r = 1'b0;
 reg        loaded = 1'b0;
+reg        rom_hi_en = 1'b0;
 
 smc_parser u_smc_parser (
     .clk             (mclk),
@@ -338,15 +342,20 @@ always @(posedge mclk) begin
         loaded <= 1'b0;
         loader_addr <= 23'd0;
         loader_do_r <= 8'd0;
+        rom_hi_en <= 1'b0;
     end else begin
         loading_r <= loading;
         if (loading && !loading_r) begin
             loader_addr <= 23'd0;
             loaded <= 1'b0;
+            rom_hi_en <= 1'b0;
         end
         if (loader_do_valid && header_finished) begin
             loader_addr <= loader_addr + 23'd1;
             loader_do_r <= loader_do;
+            if (SNES_UPSTREAM_RAM_LAYOUT && SNES_ROM_HIGH_SHARED &&
+                loader_addr[21:18] == 4'hF)
+                rom_hi_en <= 1'b1;
         end
         if (!loading && loading_r)
             loaded <= 1'b1;
@@ -424,6 +433,8 @@ reg [15:0]  cpu_din = 16'd0;
 reg [22:0]  cpu_addr = 23'd0;
 reg         cpu_we = 1'b0;
 wire [22:0] rom_addr = loading ? loader_addr : ROM_ADDR[22:0];
+wire        rom_hi_access = rom_hi_en && ROM_ADDR[21:18] == 4'hF;
+wire [15:0] rom_hi_q;
 reg [22:0] rom_addr_sd = 23'h7fffff;
 wire [16:0] wram_addr_sd;
 wire [7:0] wram_data_sd;
@@ -490,7 +501,7 @@ always @(posedge mclk) begin
         if ((loading && loader_do_valid && header_finished && loader_addr[0] &&
              cpu_req == cpu_req_ack) ||
             (!loading && !ROM_CE_N && rom_addr_sd != rom_addr &&
-             cpu_req == cpu_req_ack)) begin
+             !rom_hi_access && cpu_req == cpu_req_ack)) begin
             rom_addr_sd <= loading ? 23'h7fffff : rom_addr;
             cpu_addr <= rom_addr;
             cpu_req <= ~cpu_req;
@@ -669,7 +680,8 @@ main #(.USE_DSPn(1'b1)) u_snes (
     .DBG_SEL(8'd0), .DBG_REG(8'd0), .DBG_REG_WR(1'b0), .DBG_DAT_IN(8'd0), .DBG_DAT_OUT(), .DBG_BREAK()
 );
 
-assign ROM_Q = (ROM_WORD || ~ROM_ADDR[0]) ? cpu_port0 : {cpu_port0[7:0], cpu_port0[15:8]};
+wire [15:0] rom_q_word = rom_hi_access ? rom_hi_q : cpu_port0;
+assign ROM_Q = (ROM_WORD || ~ROM_ADDR[0]) ? rom_q_word : {rom_q_word[7:0], rom_q_word[15:8]};
 assign BSRAM_Q = bsram_dout;
 assign ARAM_Q = ARAM_ADDR[0] ? aram_dout[15:8] : aram_dout[7:0];
 
@@ -679,6 +691,7 @@ wire [7:0] vram2_dout;
 
 sdram_snes #(.SHARED_IOSYS(1), .SPLIT_WRAM(1),
              .UPSTREAM_RAM_LAYOUT(SNES_UPSTREAM_RAM_LAYOUT),
+             .ROM_HIGH_SHARED(SNES_UPSTREAM_RAM_LAYOUT && SNES_ROM_HIGH_SHARED),
              .VIDEO_RAM_LAYOUT(SNES_VIDEO_RAM_LAYOUT)) u_sdram (
     .clk(fclk), .mclk(mclk), .clkref(dot_clk_ce), .resetn(sys_resetn), .busy(sdram_busy),
     .SDRAM_DQ(IO_sdram_dq), .SDRAM_A(O_sdram_addr), .SDRAM_BA(O_sdram_ba),
@@ -687,6 +700,8 @@ sdram_snes #(.SHARED_IOSYS(1), .SPLIT_WRAM(1),
     .cpu_addr(cpu_addr[22:1]), .cpu_din(cpu_din), .cpu_port(cpu_port),
     .cpu_port0(cpu_port0), .cpu_port1(cpu_port1), .cpu_req(cpu_req), .cpu_req_ack(cpu_req_ack),
     .cpu_we(cpu_we), .cpu_ds(cpu_ds),
+    .rom_hi_en(rom_hi_en), .rom_hi_rd(rom_hi_access && !loading && !ROM_CE_N),
+    .rom_hi_addr(ROM_ADDR[21:1]), .rom_hi_q(rom_hi_q),
     .wram_addr(wram_addr_sd), .wram_din(wram_data_sd), .wram_req(wram_request),
     .wram_ack(wram_ack), .wram_we(wram_write),
     .bsram_addr(bsram_addr), .bsram_dout(bsram_dout), .bsram_din(bsram_din),

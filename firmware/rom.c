@@ -166,8 +166,8 @@ static int load_snes_rom(const char *fname, uint32_t size) {
     uint32_t total = 0;
     int last_percent = -1;
     if (CORE_PROFILE_ID != CORE_PROFILE_SNES ||
-        (size & 0x3ffu) != offset || payload < 32768u || payload > 0x3c0000u) {
-        message("Unsupported SNES image", "32 KiB to 3.75 MiB maximum");
+        (size & 0x3ffu) != offset || payload < 32768u ||                 payload > 0x400000u) {
+                message("Unsupported SNES image", "32 KiB to 4 MiB maximum");
         return -1;
     }
 

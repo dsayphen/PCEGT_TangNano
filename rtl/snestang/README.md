@@ -13,6 +13,11 @@ SD browser, OSD, save services and flash core switching are shared.
 The normal profile enables `UPSTREAM_RAM_LAYOUT`: WRAM and SRAM use the
 original ROM-side channel at 0x3E0000 and 0x3C0000. Firmware RAM remains at
 0x400000 and ARAM at 0x5A0000; the firmware's save window is redirected to SRAM.
+For 4 MiB ROMs, ROM 0x3C0000-0x3FFFFF is stored in bank 2 at 0x5C0000 and read
+on the ARAM channel (`ROM_HIGH_SHARED`). ARAM keeps priority; the request is
+taken directly from the CPU address bus so data still arrives within six mclk
+after one ARAM collision (`sim/tb_snes_rom_hi.sv`). Smaller ROMs do not use it.
+4 MiB titles were confirmed on hardware.
 The CPU response selector is captured at transaction acceptance.
 The board wrapper enables `SPLIT_WRAM`: ROM and WRAM requests have independent
 payloads and acknowledgements, so a simultaneous DMA read/write cannot replace
@@ -44,9 +49,8 @@ and visible OSD in all three zoom modes.
 To conserve logic, the SNES top sets `UART_ENABLE=0` in IOSys (UART writes complete without output;
 `RV_DIAGNOSTIC` still forces the UART) and `TONE_ENABLE=0` in `audio_tone`
 (master volume only); the firmware hides Bass/Treble for this profile.
-Gowin 1.9.11.03 result without frame capture: Logic 20205/20736,
-CLS 10286/10368, registers 7151, BSRAM 46/46; fclk 93.2/86.4 MHz,
-mclk 23.8/21.6 MHz, hclk 49.2/25.2 MHz (TNS 0).
+Gowin 1.9.11.03 result: Logic 20253/20736,
+CLS 10302/10368, registers 7194, BSRAM 46/46 (TNS 0).
 
 The ROM header heuristics in `firmware/rom.c` are adapted from the upstream
 PicoRV32 firmware at tag `v0.7` (GPLv3).
@@ -56,7 +60,7 @@ profile. PAL PPU timing produces a 50 Hz frame cadence, but the Nano 20K video
 scaler has a fixed 60 Hz HDMI output and a rolling line buffer; enabling PAL
 causes severe slowdown and repeated image rows. The PAL input is therefore
 held low until a PAL-aware frame-buffer/output mode is implemented.
-Other current limits: one SNES pad, LoROM/HiROM up to 3.75 MiB (3,932,160 bytes),
+Other current limits: one SNES pad, LoROM/HiROM up to 4 MiB,
 128 KiB SRAM maximum. ExHiROM, Super FX, SA-1, CX4, S-DD1, SPC7110 and ST01x
 are rejected. Audio worked in the previous profile; graphics fixes and VGA
 output require hardware retesting.
