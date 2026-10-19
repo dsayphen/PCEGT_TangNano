@@ -66,7 +66,7 @@ void title(void) {
         profile = "Nintendo 8-bit";
         break;
     case CORE_PROFILE_MEGADRIVE:
-        profile = "Sega MD";
+        profile = "Sega";
         break;
     default:
         profile = "Unknown core";

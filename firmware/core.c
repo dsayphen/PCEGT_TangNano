@@ -47,7 +47,7 @@ const char *core_name(uint32_t profile) {
     case CORE_PROFILE_CD: return "CD-Rom";
     case CORE_PROFILE_SNES: return "Nintendo";
     case CORE_PROFILE_NINTENDO8: return "Nintendo 8-bit";
-    case CORE_PROFILE_MEGADRIVE: return "Mega Drive (exp)";
+    case CORE_PROFILE_MEGADRIVE: return "Mega Drive";
     default: return "Unknown";
     }
 }

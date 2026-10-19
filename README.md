@@ -3,13 +3,13 @@
 A PC Engine / SuperGrafx port of the
 [mist-devel/TurboGrafx16_FPGA](https://github.com/mist-devel/TurboGrafx16_FPGA)
 core to the **Sipeed Tang Nano 20K** (Gowin `GW2AR-LV18QN88C8/I7`). CD-ROM
-support is experimental. The board also has experimental SNES and combined
-NES / Game Boy / Game Boy Color profiles.
+support is experimental. The board also has SNES and Mega Drive profiles, and
+an experimental combined NES / Game Boy / Game Boy Color profile.
 
 The PicoRV32 firmware boots from SPI flash, browses a FAT-formatted microSD
-card on the OSD and loads HuCard or System Card images into SDRAM. The USB-UART
-loader is also available as a fallback. Video uses the HDMI connector (DVI
-signalling); audio uses the board's I2S amplifier/headphone output, not HDMI.
+card on the OSD and loads game images into SDRAM. The USB-UART loader is also
+available as a fallback for HuCards. Video uses the HDMI connector; audio uses
+the board's speaker/headphone output or HDMI.
 
 ```
 microSD -> PicoRV32 + OSD -> SDRAM (HuCard / System Card, CD/ADPCM RAM)
@@ -34,6 +34,8 @@ SNES pad -> HuC6280 / VDC / VCE -> line doubler -> DVI over HDMI
 | CD-ROM² / Super CD | experimental CUE/BIN, System Card, CDDA, SCSI data and ADPCM |
 | Arcade Card | available in CD mode |
 | SuperGrafx (second VDC / VPC) | yes (`SGX_SUPPORT = 1`) |
+| SNES | yes, `snes` profile (no enhancement chips) |
+| Mega Drive / Genesis | yes, `megadrive` profile |
 | NES + Game Boy / Game Boy Color | experimental combined `nesgb` profile |
 | Game Boy cartridges | ROM-only, MBC1, MBC3 without RTC, and MBC5; ROMs up to 0x3D8000 bytes |
 | Game Boy Color | `.gb` and `.gbc`; CGB mode follows header byte 0x143; mid-frame palette changes are approximated |
@@ -68,7 +70,8 @@ The script creates temporary Gowin project/config copies and stores each
 profile's bitstream and binary under
 `impl/profiles/{sgx,cd,snes,nesgb}/`.
 The `all` build selects `sgx` (HuCard, including ordinary PCE games), `cd`
-(CD-Rom), experimental `snes`, and experimental `nesgb` (Nintendo 8-bit).
+(CD-Rom), `snes`, and experimental `nesgb` (Nintendo 8-bit). The Mega Drive
+profile is built separately (see below).
 SGX is the default boot profile; Superset is no longer built or offered by
 the core selection menu. Each core image fits a 1 MiB flash slot. Core
 selection copies the selected image to the boot address, then requests a
@@ -90,10 +93,10 @@ Programmer can write the binary at this address.
 ### Core selection from the browser
 
 Browser Options (Select) provides
-**Choose core > HuCard / CD-Rom / Nintendo / Nintendo 8-bit**.
+**Choose core > HuCard / CD-Rom / Nintendo / Nintendo 8-bit / Mega Drive**.
 Selecting a different core asks for confirmation, checks the source slot's
 profile, size and CRC32, then erases/programs/verifies the first 1 MiB of flash.
-The four source slots and the firmware at `0x500000` are not modified.
+The source slots and the firmware at `0x500000` are not modified.
 When `Core ready` appears, A requests an FPGA reload if the GPIO29/TP1
 hardware is installed and the rebuilt core supports it. Otherwise use the
 TP1 button or switch power off and on. S1 only resets the console and does
@@ -124,6 +127,24 @@ limited to `0x000000..0x4FFFFF`. **Never use Bulk Erase.** The firmware is a
 separate file at `0x500000`. Verify programmer readback and power-cycle after
 programming.
 
+The Mega Drive core is not part of the combined image. Build it with
+`tools/build_profiles.ps1 -Profile megadrive`, then
+`tools/prepare_core_slots.ps1 -MegaDriveOnly`, and program
+`impl/core-slots/megadrive_slot.bin` as raw SPI flash data at **`0x600000`**,
+with erase/program/verify limited to `0x600000..0x6FFFFF`.
+
+SPI flash map:
+
+| Offset | Content | File |
+| --- | --- | --- |
+| `0x000000` | Boot core (SGX by default) | `cores_sgx_cd_snes_nesgb.bin` |
+| `0x100000` | HuCard (SGX) slot | `cores_sgx_cd_snes_nesgb.bin` |
+| `0x200000` | CD-Rom slot | `cores_sgx_cd_snes_nesgb.bin` |
+| `0x300000` | Nintendo (SNES) slot | `cores_sgx_cd_snes_nesgb.bin` |
+| `0x400000` | Nintendo 8-bit slot | `cores_sgx_cd_snes_nesgb.bin` |
+| `0x500000` | Firmware | `firmware/firmware.bin` |
+| `0x600000` | Mega Drive slot | `megadrive_slot.bin` |
+
 Launching a HuCard game from CD-Rom offers a switch to HuCard. Launching a CUE
 or a `(CD)` directory from HuCard offers a switch to CD-Rom. Accepting writes
 the exact game and directory to `/config/core_autorun.dat` on the SD card.
@@ -131,239 +152,8 @@ After copying, the requested core starts and loads the selected game. **Do not
 interrupt a core copy.** If power is lost during programming, restore the boot
 image with an external programmer.
 
-### Experimental SNES profile
 
-The [SNESTang](https://github.com/nand2mario/snestang) core is available as a
-separate profile and shares this project's firmware, browser, OSD, saves and
-core selection. Build it with `tools/build_profiles.ps1 -Profile snes`.
 
-The browser supports `.sfc` and `.smc` images, including copier headers, and
-SNES saves use `/saves/<game>.srm`. Video output is 640x480 with Integer,
-Stretch and Bilinear zoom modes; scanlines and zoom are available in Video Settings.
-The in-game pause menu stops the core without capturing a frame; the stopped
-24-line buffer may repeat behind the OSD. Returning to the browser hides the
-game background in black while leaving the OSD visible. This requires both
-the updated SNES bitstream and firmware.
-To fit the FPGA, the SNES profile has no bass/treble controls (master volume
-remains) and no UART firmware messages.
-ExHiROM and enhancement-chip games such as Super FX and SA-1 are not supported.
-
-The profile uses the upstream RAM layout, tested with Super Mario World
-(USA, 512 KiB), and accepts ROMs up to 3.75 MiB. The new Bilinear mode still
-needs hardware testing. CD and SNES support remain experimental.
-
-See [SNES source and license information](rtl/snestang/README.md).
-
-### Experimental Nintendo 8-bit profile
-
-Build the combined NES and Game Boy bitstream with
-`tools/build_profiles.ps1 -Profile nesgb`. It uses the NES core from NESTang
-without MMC5 and a Game Boy / Game Boy Color core ported from GBCandy Nano.
-Cartridges support ROM-only, MBC1, MBC3 without RTC, and MBC5; RAM save
-persistence is not implemented. Work RAM lives in SDRAM at 0x3D8000, so ROMs
-are limited to 0x3D8000 bytes. CGB palettes are applied when the frame is
-displayed, so mid-frame palette changes are approximated.
-
-Video output is 640x480 at 60 Hz. The Video Settings menu provides:
-
-| Setting | NES | GB / GBC |
-| --- | --- | --- |
-| Color | Original, Composite Direct (FBX), NES Classic (FBX), PC-10, PVM Style D93 (FBX), Smooth (FBX), Sony CXA, Wavebeam | GB: Off / DMG / Pocket / Light. GBC: Off / Accurate / Fast |
-| Integer | 512x480 (2x), centered | 480x432 (3x), centered |
-| Stretch | 640x480, nearest neighbor | **Wide Stretch**: 640x432 (4x horizontal, 3x vertical), centered |
-| Bilinear | 640x480, horizontal interpolation, as on PCE | Not offered; an existing mode-2 setting maps to Wide Stretch |
-| Scanlines / Grid | Darkens alternate output lines: Off / 25% / 50% / 100% | Dot grid: Off / 10% / 20% / 30%, aligned to source pixels in either zoom |
-
-The GB grid is a lightweight FPGA interpretation of
-[GBC-dot-matrix-shader](https://github.com/luigira/GBC-dot-matrix-shader):
-pixel gaps blend towards white, leaving white backgrounds unchanged. It does
-not implement the original shader's multi-pass shadows or other GPU effects.
-GBC Accurate uses Pokefan531/hunterk's public-domain
-[GBC color matrix](https://github.com/libretro/glsl-shaders/blob/master/handheld/shaders/color/gbc-color.glsl)
-with Gambatte's default Accurate gamma settings (2.2 - 0.5 input, 2.2 output).
-Fixed-point tables differ by at most 1/255 per channel from the floating-point
-reference over all 32768 RGB555 colors.
-Fast uses Gambatte's original integer correction, without gamma processing.
-The DMG/Pocket/Light colors follow the
-[Gambatte hardware palettes](https://github.com/libretro/gambatte-libretro/blob/master/libgambatte/libretro/gbcpalettes.h).
-Off preserves the previous GB shades or the uncorrected GBC colors.
-The ROM's CGB header flag selects the GB or GBC color menu, independently of
-the `.gb` / `.gbc` filename extension.
-
-NES palette selection, GB palette and GBC correction are saved separately as
-`nes_palette`, `gb_palette` and `gbc_color` in `/config/video.cfg`;
-the previous `gbc_accurate` key is still accepted. Existing PCE color settings are
-preserved. Zoom/effect strength continue to use the shared video settings and
-Select+D-pad shortcuts. Menu text is not affected by palettes, interpolation
-or the grid. Update both the `nesgb` bitstream and `firmware/firmware.bin`.
-
-In the in-game menus, A advances a setting. Settings with more than two choices
-also accept Left (previous) and Right (next), wrapping at either end. This
-includes palettes, NES/SNES/PCE zoom, scanlines/grid and gamepad mode.
-Two-choice settings retain their existing controls; audio keeps its existing
-Left/Right adjustment.
-
-The seven additional NES `.pal` files were supplied by the user from the
-November 2017 FBX/Nakedarthur palette collection: FBX palettes are by
-FirebrandX, Wavebeam by Nakedarthur, PC-10 follows the PlayChoice-10 PPU,
-and the supplied Sony CXA palette's original author is unknown.
-The previous NESTang palette is retained as Original. Palette data and
-generated tables are under `rtl/nestang/palettes/`; regenerate the hardware
-tables with `tools/generate_nintendo_colors.ps1` after changing the `.pal`
-files. The colors are compiled into the bitstream, not loaded from SD.
-
-The SNES pad controls both cores: B or A maps to NES/GB A, and Y or X maps
-to NES/GB B. The D-pad, Select and Start retain their functions. Game inputs
-are masked while the menu is open. The NES interface supplies only the
-standard controller's serial data; unused expansion inputs and the
-unconnected second port report no buttons pressed.
-
-See the source and license files under `rtl/nestang/`, `rtl/gbc/` and `rtl/gb/`.
-
-### Mega Drive experimental board profile
-
-The Nano 20K now has an experimental Mega Drive board top with resident
-PicoRV32/SD browser/OSD, x32 SDRAM, video through the HDMI connector
-(DVI-compatible when HDMI audio is disabled), and selectable stereo
-HDMI/on-board I2S audio. It retains the 68000, Z80, VDP, PSG and FM engines.
-The user has confirmed that the centered HDMI-audio build works on hardware.
-The latest changes below correct a remaining first-line alignment issue and
-add selectable console regions; these changes still need a board test.
-
-The previously validated centered HDMI-audio build used **20,266 / 20,736 logic units**
-(98%), **10,611 / 15,552 fabric flip-flops** and **46 / 46 BSRAM blocks**.
-Gowin V1.9.11.03 Education reports zero setup/hold violations, +0.211 ns
-worst setup slack, +0.555 ns minimum serializer-reset recovery slack and
-54.623 MHz master-clock Fmax against the 54 MHz constraint. The serializer
-clock uses a physical BUFS clock-routing constraint; Gowin warns that its
-generic routing may have excessive delay/skew, so reset and HDMI operation
-still require hardware validation. These STA results depend on the supplied
-constraints and do not guarantee hardware compatibility.
-
-The latest region/video RTL completes placement and routing, but the build
-gate does not export it: timing analysis reports 11 setup violations on
-Z80-to-MCLK paths (worst slack -0.906 ns), with no hold violations. Do not
-flash the intermediate Mega Drive files from `impl/profile-build`; a new
-Mega Drive image is not ready until those paths close.
-
-```powershell
-& .\tools\build_profiles.ps1 -Profile megadrive
-& .\firmware\build.ps1
-& .\sim\run_megadrive_probe.ps1
-& .\tools\prepare_core_slots.ps1 -MegaDriveOnly
-```
-
-The isolated build exports `impl/profiles/megadrive/pnr/PCE_GT_TangNano_megadrive.fs`
-and `.bin` only after Gowin reports zero setup/hold violated endpoints.
-`all` intentionally does not include this experimental profile.
-No build command programs the board.
-
-Shared firmware recognizes core ID 6 and raw `.md`, `.gen`, `.bin` images
-up to 6 MiB with a `SEGA` header at offset `0x100`. Put games in
-`/megadrive` on the SD card. Interleaved `.smd` files are not supported.
-The optional reconfiguration slot is `0x600000` (1 MiB), after the existing
-firmware slot at `0x500000`; core switching requires a populated slot and
-the corresponding flash manifest. Do not overwrite other slots.
-`prepare_core_slots.ps1 -MegaDriveOnly` packages the experimental binary and
-manifest into `impl/core-slots/megadrive_slot.bin`, without combining it
-across the firmware slot or programming any hardware.
-
-The console runs at 54 MHz (about 0.57% above nominal NTSC), with a
-27 MHz pixel / 135 MHz serializer clock. A single-BSRAM line doubler
-supports 320/256-pixel input and 224/240 active lines. Output is a
-640x480 active raster with source-locked, nonstandard timing; monitor
-compatibility must be tested. H32 can be centered at 2x or stretched;
-224-line games are centered vertically with 16 black output rows above and
-below the 448-row picture. 240-line games fill all 480 rows. Sampling VBL at
-the horizontal line boundary prevents a mid-line VBL transition from making
-the first captured picture row partial.
-In **Options > Region**, choose **NTSC US**, **NTSC Japan**, or **PAL Europe**.
-The choice is saved in `/config/system.cfg`. Mega Drive uses the matching
-VDP PAL and I/O export flags. The current SNES scaler is fixed to NTSC timing;
-its region menu displays **NTSC only** because PAL's 50 Hz source cadence is
-incompatible with its fixed-60-Hz HDMI output and rolling line buffer. Full
-SNES PAL support needs a matching video/frame-buffer design.
-Changing the Mega Drive setting takes effect on the next game launch/reset.
-The firmware detects whether a bitstream implements the extended settings
-registers before writing them; older bitstreams remain usable, but the Mega
-Drive region selector asks for an updated core until that support is present.
-Select **Audio Settings > Output > HDMI / Speaker** from the browser
-to change output. HDMI carries stereo PCM at 48 kHz; selecting it mutes
-the on-board amplifier. Scanlines and volume are available, but bilinear
-filtering and bass/treble are not.
-Interlaced games, cartridge-specific hardware and persistent cartridge
-saves are not validated/supported by this initial profile.
-
-The SNES pad maps Y/B/A to Mega Drive A/B/C, X/L/R to X/Y/Z,
-Select to Mode and Start/directions normally. `s1` resets the console;
-`s2` supplies the menu's Select input. One physical pad is connected.
-
-#### Resource probes
-
-A console-only probe based on
-[MDTang](https://github.com/nand2mario/mdtang), itself derived from
-[Genesis-MiSTer](https://github.com/MiSTer-devel/Genesis_MiSTer), targets the
-Nano 20K without changing the four existing profiles. The probe measurements
-below predate the final board timing optimizations:
-
-```powershell
-& .\tools\build_megadrive_probe.ps1
-& .\sim\run_megadrive_probe.ps1
-```
-
-The 68000, Z80, VDP, PSG and FM audio synthesize with Gowin V1.9.11.03
-Education using **16,459 / 20,736 logic units, 8,785 / 15,750 registers
-and 43 / 46 BSRAM blocks**. VDP line tables and the sprite cache use
-distributed RAM; explicit 68000 register-write decoding reduces logic.
-Two FM lookup ROMs use BSRAM to save logic for integration.
-This is a synthesis result, not a placed build:
-the SDRAM controller, ROM loading, PicoRV32/browser/OSD, clock PLLs,
-video scaling, HDMI and I2S are excluded. The remaining 4,277 logic units and
-3 BSRAM blocks do not establish that these interfaces will fit.
-The probe's ports are not physical board pins; it generates
-no flashable bitstream and is not offered in the core menu or flash slots.
-
-The memory regression compares the adapted RAMs against Gowin's DPB model,
-including byte masks and independent clocks, and checks FM lookup/shift timing.
-It is not a game compatibility test. Source revision, local memory changes
-and limitations are documented in [the MDTang source README](rtl/mdtang/README.md).
-
-An additional console + Nano 20K SDRAM probe is available:
-
-```powershell
-& .\tools\build_megadrive_probe.ps1 -WithSdram
-```
-
-It uses **16,897 / 20,736 logic units, 8,996 / 15,750 registers and
-43 / 46 BSRAM blocks**. The adapter reuses the local x32 SDRAM engine at
-the NTSC master clock, provides big-endian 16-bit console accesses, a
-masked x32 host port and autonomous refresh. The initial layout supports
-ROMs up to **6 MiB**, 64 KiB work RAM and 128 KiB cartridge RAM. The
-regression also checks SDRAM command sequencing, byte order/masks, address
-isolation, arbitration, refresh and reset. This still excludes the actual
-ROM loader, firmware/OSD, PLLs and video/audio board interfaces; it is not
-a playable build or a timing-closure result.
-
-The next integration probe includes IOSys (PicoRV32, SD/flash interfaces
-and text OSD) and a tested firmware/ROM-loader bridge:
-
-```powershell
-& .\tools\build_megadrive_probe.ps1 -WithMenu
-```
-
-It uses **19,222 / 20,736 logic units, 10,142 / 15,750 registers and
-45 / 46 BSRAM blocks**, leaving 1,514 logic units and one BSRAM block.
-The bridge initializes console RAM on reload without overwriting firmware.
-This probe remains a synthesis-only boundary, distinct from the board
-build above. The focused regressions cover RAM/FM, SDRAM, loader
-arbitration, 68000 register-file equivalence, FM frequency-mux equivalence
-and the video line doubler. Whole-frame tests verify exact 16/16 or 0/0
-vertical borders for 224/240 lines, including 262/263-line NTSC frames.
-HDMI tests check stereo sample order, throughput, BCH/parity, audio clock
-recovery, infoframes and both compact/default packet modes;
-they are not full-console/game compatibility tests. All 12 focused
-Mega Drive simulation runs pass, as does the firmware/browser loader test
-for the current audio-output menu/register behavior.
 
 ---
 
@@ -422,7 +212,8 @@ In the firmware browser, Up/Down select a file, Left/Right change pages, A
 opens a directory or loads a `.pce`, `.sgx` or `.cue`, and B goes to the parent
 directory. A folder ending in `(CD)` automatically opens its first CUE file.
 At startup the browser opens the core's default folder when it exists:
-`/pce` for HuCard, `/pcecd` for CD-ROM and `/snes` for Nintendo (SNES);
+`/pce` for HuCard, `/pcecd` for CD-ROM, `/snes` for Nintendo (SNES) and
+`/megadrive` for Mega Drive;
 otherwise it starts at the card root. B still goes up to the root.
 The SuperGrafx profile can also load standard `.pce` HuCard games.
 During a game, Select+Start opens the firmware pause menu (Resume, Reset,
@@ -534,7 +325,8 @@ CD games support CD audio and ADPCM. CD-ROM support remains experimental.
 
 RTL sources are grouped by core: `rtl/pce/` contains the PC Engine /
 SuperGrafx core, including `HUC6280/`, `cd/` and memory initialisation files;
-`rtl/snestang/` contains the SNES core. Board integration remains in
+`rtl/snestang/` contains the SNES core and `rtl/mdtang/` the Mega Drive core.
+Board integration remains in
 `rtl/tang/`, with both `top_tang_nano20k*.v` wrappers directly under `rtl/`.
 The main Gowin project references these paths; profile projects are generated
 from it by `tools/build_profiles.ps1`.
@@ -545,13 +337,15 @@ Resource use in the latest successfully placed Gowin builds:
 | --- | ---: | ---: | ---: | ---: |
 | SGX | 13,649 / 20,736 (66%) | 10,516 | 7,100 / 15,915 (45%) | 43 / 46 (94%) |
 | CD | 15,480 / 20,736 (75%) | 12,196 | 7,489 / 15,915 (48%) | 41 / 46 (90%) |
-| SNES | 20,205 / 20,736 (98%) | 16,815 | 7,151 / 15,915 (45%) | 46 / 46 (100%) |
+| SNES | 20,084 / 20,736 (97%) | 16,694 | 7,151 / 15,915 (45%) | 46 / 46 (100%) |
 | Nintendo 8-bit (NES + GB/GBC) | 18,119 / 20,736 (88%) | 15,588 | 7,397 / 15,915 (47%) | 46 / 46 (100%) |
+| Mega Drive | 19,593 / 20,736 (95%) | 13,915 | 10,271 / 15,915 (65%) | 46 / 46 (100%) |
 
 Run the available simulations from the repository root:
 
 ```powershell
 & .\sim\run.ps1
+& .\sim\run_megadrive_probe.ps1
 ```
 
 ---
@@ -567,7 +361,7 @@ Run the available simulations from the repository root:
 * NES core: selected sources from
   [nand2mario/nestang](https://github.com/nand2mario/nestang), GPLv3; the
   upstream license is preserved under `rtl/nestang/`.
-* Mega Drive synthesis probe: console RTL from
+* Mega Drive core: console RTL from
   [nand2mario/mdtang](https://github.com/nand2mario/mdtang), derived from
   Genesis-MiSTer; original headers and licenses are preserved in `rtl/mdtang/`.
 * Game Boy / Game Boy Color core: GBCandy Nano by kuangyl0212 (GPLv3, derived

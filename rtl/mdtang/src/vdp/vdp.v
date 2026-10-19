@@ -547,6 +547,7 @@ module vdp(
    
    wire             OBJ_COLINFO_CLK;
    wire [8:0]       OBJ_COLINFO_ADDR_A;
+   wire [8:0]       OBJ_COLINFO_ADDR_RAM;
    wire [8:0]       OBJ_COLINFO_ADDR_B;
    wire [6:0]       OBJ_COLINFO_D_B;
    wire             OBJ_COLINFO_WE_A;
@@ -683,13 +684,16 @@ module vdp(
    assign BGA_COLINFO_WE_B = 1'b0;
    
    
+   // MiSTer clocks this buffer on ~CLK so SP3C_PLOT sees the pixel addressed
+   // in the same cycle. Keep a posedge RAM and prefetch the next pixel instead.
    md_sdp_ram #(9, 8) obj_ci(
       .wr_clk(CLK), .wr_addr(OBJ_COLINFO_ADDR_B),
       .wr_data({1'b0, OBJ_COLINFO_D_B}), .wr_en(OBJ_COLINFO_WE_B), .wr_be(1'b1),
-      .rd_clk(CLK), .rd_addr(OBJ_COLINFO_ADDR_A), .rd_data(OBJ_COLINFO_Q_A)
+      .rd_clk(CLK), .rd_addr(OBJ_COLINFO_ADDR_RAM), .rd_data(OBJ_COLINFO_Q_A)
    );
    
    assign OBJ_COLINFO_CLK = (~CLK);
+   assign OBJ_COLINFO_ADDR_RAM = (SP3C == SP3C_PLOT && CE) ? OBJ_POS + 9'd1 : OBJ_COLINFO_ADDR_A;
    assign OBJ_COLINFO_ADDR_A = (SP3C != SP3C_DONE) ? OBJ_COLINFO_ADDR_RD_SP3 : OBJ_COLINFO_ADDR_RD_REND;
    assign OBJ_COLINFO_ADDR_B = (SP3C != SP3C_DONE) ? OBJ_COLINFO_ADDR_WR_SP3 : OBJ_COLINFO_ADDR_WR_REND;
    assign OBJ_COLINFO_WE_A = 1'b0;
