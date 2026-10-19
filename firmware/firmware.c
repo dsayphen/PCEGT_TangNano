@@ -45,6 +45,7 @@ static FATFS fs;
 uint8_t io_buf[2048];
 
 char current_game_name[NAME_MAX] = "";
+int current_game_cgb = 0;
 int current_game_populous = 0;
 uint32_t current_game_snes_ram_size = 0;
 
@@ -66,8 +67,9 @@ static int mount_card(void) {
 
 // ---------------------------------------------------------------------------
 int main(void) {
-    // 43.2 MHz / 375 = 115200 baud
-    uart_init(CORE_PROFILE_ID == CORE_PROFILE_SNES ||
+    // PCE 43.2 MHz, Nintendo 21.6 MHz, experimental MD 54 MHz.
+    uart_init(CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE ? 469 :
+              CORE_PROFILE_ID == CORE_PROFILE_SNES ||
               CORE_PROFILE_ID == CORE_PROFILE_NINTENDO8 ? 188 : 375);
 
     uint32_t sp_val;

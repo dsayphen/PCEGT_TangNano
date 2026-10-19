@@ -92,6 +92,8 @@ static int save_ram_file(const char *game_name, const char *extension,
 int load_game_saves(const char *game_name, int is_populous) {
     int ok = 0;
 
+    if (CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE)
+        return 0; // No MD cartridge RAM host interface yet.
     pce_pause(1);
     if (CORE_PROFILE_ID == CORE_PROFILE_SNES) {
         if (current_game_snes_ram_size &&
@@ -114,6 +116,8 @@ int load_game_saves(const char *game_name, int is_populous) {
 int save_game_saves(int resume_game) {
     int ok = 0;
 
+    if (CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE)
+        return 0;
     if (!current_game_name[0])
         return 0;
 

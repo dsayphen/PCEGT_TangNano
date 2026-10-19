@@ -1,5 +1,5 @@
 //
-// HuCard ROM loading (.PCE / .SGX, and the data BIN of a .CUE).
+// Cartridge ROM loading and HuCard-compatible BIN data referenced by CUE.
 //
 
 #include "common.h"
@@ -13,15 +13,15 @@
 static char path_buf[PWD_SIZE + NAME_MAX + 2];
 
 // ---------------------------------------------------------------------------
-// PC Engine / SuperGrafx ROM filter
+// Cartridge extension filters (MD BIN candidates still require a SEGA header).
 // ---------------------------------------------------------------------------
 int is_rom(const char *name) {
     int n = (int)strlen(name);
-    if (n < 5)
+    if (n < 4)
         return 0;
-    return strcasecmp(name + n - 4, ".pce") == 0 ||
-           strcasecmp(name + n - 4, ".sgx") == 0 || is_snes(name) ||
-           is_nes(name) || is_gameboy(name);
+    return (n >= 5 && (strcasecmp(name + n - 4, ".pce") == 0 ||
+                      strcasecmp(name + n - 4, ".sgx") == 0)) || is_snes(name) ||
+           is_nes(name) || is_gameboy(name) || is_megadrive(name);
 }
 
 int is_snes(const char *name) {
@@ -38,7 +38,8 @@ int is_nes(const char *name) {
 
 int is_gameboy(const char *name) {
     int length = (int)strlen(name);
-    return length >= 4 && strcasecmp(name + length - 3, ".gb") == 0;
+    return (length >= 4 && strcasecmp(name + length - 3, ".gb") == 0) ||
+           (length >= 5 && strcasecmp(name + length - 4, ".gbc") == 0);
 }
 
 int is_cue(const char *name) {
@@ -46,6 +47,13 @@ int is_cue(const char *name) {
     if (n < 5)
         return 0;
     return strcasecmp(name + n - 4, ".cue") == 0;
+}
+
+int is_megadrive(const char *name) {
+    int length = (int)strlen(name);
+    return (length >= 4 && strcasecmp(name + length - 3, ".md") == 0) ||
+           (length >= 5 && (strcasecmp(name + length - 4, ".gen") == 0 ||
+                            strcasecmp(name + length - 4, ".bin") == 0));
 }
 
 static int is_sgx(const char *name) {
@@ -286,7 +294,8 @@ static int load_nintendo8_rom(const char *fname, uint32_t size) {
     int last_percent = -1;
 
     if (CORE_PROFILE_ID != CORE_PROFILE_NINTENDO8 ||
-        size < (is_nes(fname) ? 16u : 0x150u) || size > 0x3e0000u) {
+        size < (is_nes(fname) ? 16u : 0x150u) ||
+        size > (is_nes(fname) ? 0x3e0000u : 0x3d8000u)) {
         message("Unsupported image", "Max size is just under 4 MiB");
         return -1;
     }
@@ -307,8 +316,8 @@ static int load_nintendo8_rom(const char *fname, uint32_t size) {
             message("Cannot read NES header", fname);
             return -1;
         }
-    } else if (f_lseek(&file, 0x147u) != FR_OK ||
-               f_read(&file, header, 1, &read) != FR_OK || read != 1) {
+    } else if (f_lseek(&file, 0x143u) != FR_OK ||
+               f_read(&file, header, 7, &read) != FR_OK || read != 7) {
         f_close(&file);
         message("Cannot read GB header", fname);
         return -1;
@@ -320,7 +329,7 @@ static int load_nintendo8_rom(const char *fname, uint32_t size) {
         message("Invalid NES image", fname);
         return -1;
     }
-    if (is_gameboy(fname) && !gameboy_mapper_supported(header[0])) {
+    if (is_gameboy(fname) && !gameboy_mapper_supported(header[4])) {
         f_close(&file);
         message("Unsupported GB mapper", fname);
         return -1;
@@ -334,6 +343,7 @@ static int load_nintendo8_rom(const char *fname, uint32_t size) {
 
     extract_filename(current_game_name, fname);
     current_game_snes_ram_size = 0;
+    current_game_cgb = is_gameboy(fname) && (header[0] & 0x80);
     loading_status("");
     show_rom_progress(0, size);
     nintendo8_load_start(size, is_nes(fname));
@@ -371,18 +381,121 @@ failed:
 }
 
 // ---------------------------------------------------------------------------
-// ROM loading
-//
-// The whole file is streamed to the SDRAM from byte 0, copier header included.
-// The hardware derives rom_sz = size >> 16 and rom_offset = 512 when
-// (size & 0x3FF) == 0x200, exactly like the UART loader does.
+// Mega Drive raw ROM loading. The entire file, including the console header,
+// is streamed unchanged; no copier header or interleaving is accepted.
 // ---------------------------------------------------------------------------
+static int open_megadrive_rom(FIL *file, const char *fname, uint32_t size) {
+    UINT read;
+
+    if (!is_megadrive(fname)) {
+        message("Unsupported MD image", "Use raw .md/.gen/.bin only");
+        return -1;
+    }
+    if (size < 0x200u || size > MD_ROM_MAX_SIZE) {
+        message("Unsupported MD size", "512 bytes to 6 MiB maximum");
+        return -1;
+    }
+    strcpy(path_buf, pwd);
+    if (pwd[1])
+        strcat(path_buf, "/");
+    strcat(path_buf, fname);
+    if (f_open(file, path_buf, FA_READ) != FR_OK) {
+        message("Cannot open", fname);
+        return -1;
+    }
+    if (f_size(file) != size || f_lseek(file, 0x100u) != FR_OK ||
+        f_read(file, io_buf, 4, &read) != FR_OK || read != 4) {
+        f_close(file);
+        message("Cannot read MD header", fname);
+        return -1;
+    }
+    if (memcmp(io_buf, "SEGA", 4) != 0) {
+        f_close(file);
+        message("Invalid MD header", "Raw SEGA only; no SMD/copier");
+        return -1;
+    }
+    if (f_lseek(file, 0) != FR_OK) {
+        f_close(file);
+        message("Cannot seek MD image", fname);
+        return -1;
+    }
+    return 0;
+}
+
+int validate_megadrive_rom(const char *fname, uint32_t size) {
+    FIL file;
+    if (open_megadrive_rom(&file, fname, size) != 0)
+        return -1;
+    f_close(&file);
+    return 0;
+}
+
+static int load_megadrive_rom(const char *fname, uint32_t size) {
+    FIL file;
+    UINT read;
+    uint32_t total = 0;
+    int last_percent = -1;
+
+    if (CORE_PROFILE_ID != CORE_PROFILE_MEGADRIVE) {
+        message("Wrong core for MD image", "Select Mega Drive first");
+        return -1;
+    }
+    if (open_megadrive_rom(&file, fname, size) != 0)
+        return -1;
+
+    current_game_populous = 0;
+    current_game_snes_ram_size = 0;
+    current_game_cgb = 0;
+    extract_filename(current_game_name, fname);
+    loading_status("");
+    show_rom_progress(0, size);
+    // ROM bytes are big-endian on disk; the host FIFO accepts little-endian
+    // packed words, not byte-swapped 68000 words. FF pads odd/partial tails.
+    pce_load_start((size + 3u) & ~3u, 0);
+    while (total < size) {
+        UINT want = (UINT)imin((int)(size - total), sizeof(io_buf));
+        if (f_read(&file, io_buf, want, &read) != FR_OK || read != want)
+            goto failed;
+        for (UINT index = 0; index < read; index += 4) {
+            uint32_t word = 0xffffffffu;
+            UINT remaining = read - index;
+            if (remaining > 4)
+                remaining = 4;
+            memcpy(&word, io_buf + index, remaining);
+            pce_load_word(word);
+        }
+        total += read;
+        int percent = (int)(total * 100u / size);
+        if (percent != last_percent) {
+            last_percent = percent;
+            show_rom_progress(total, size);
+        }
+    }
+    f_close(&file);
+    if (pce_load_end() != 0) {
+        pce_stop();
+        message("ROM transfer timeout", fname);
+        return -1;
+    }
+    return 0;
+
+failed:
+    f_close(&file);
+    (void)pce_load_end();
+    pce_stop();
+    message("Read error", fname);
+    return -1;
+}
+
 int load_rom(const char *fname, uint32_t size) {
+    if (is_megadrive(fname) || CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE)
+        return load_megadrive_rom(fname, size);
     if (is_nes(fname) || is_gameboy(fname))
         return load_nintendo8_rom(fname, size);
     if (is_snes(fname))
         return load_snes_rom(fname, size);
 
+    // HuCards retain their existing optional 512-byte copier-header handling.
     FIL f;
     UINT br;
     uint32_t total = 0;

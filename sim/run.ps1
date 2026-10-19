@@ -71,6 +71,38 @@ if ($CROSS) {
     try {
         & "${CROSS}gcc" -Os -mabi=ilp32 -march=rv32i -ffreestanding -fno-builtin -ffunction-sections -fdata-sections `
             '-Wl,--gc-sections,--build-id=none,-T,../firmware/baremetal.ld' -nostdlib `
+            -o nintendo_video_settings_test.elf start.o nintendo_video_settings_test.c `
+            ../firmware/util.c ../firmware/picorv32.c core_rom_filter.o -lgcc
+        if ($LASTEXITCODE) { throw 'compiling nintendo_video_settings_test failed' }
+        & "${CROSS}objcopy" nintendo_video_settings_test.elf nintendo_video_settings_test.bin -O binary
+        if ($LASTEXITCODE) { throw 'objcopy nintendo_video_settings_test failed' }
+    } finally {
+        Pop-Location
+    }
+    python tools/bin2hex.py sim/nintendo_video_settings_test.bin sim/nintendo_video_settings_test.hex 131072
+    if ($LASTEXITCODE) { throw 'converting nintendo_video_settings_test failed' }
+    & $vvp sim/tb_core_autorun.vvp '+IMAGE=sim/nintendo_video_settings_test.hex'
+    if ($LASTEXITCODE) { throw 'nintendo_video_settings_test failed' }
+    Push-Location sim
+    try {
+        & "${CROSS}gcc" -Os -mabi=ilp32 -march=rv32i -ffreestanding -fno-builtin -ffunction-sections -fdata-sections `
+            '-Wl,--gc-sections,--build-id=none,-T,../firmware/baremetal.ld' -nostdlib `
+            -o nintendo_loader_test.elf start.o nintendo_loader_test.c `
+            ../firmware/util.c ../firmware/picorv32.c -lgcc
+        if ($LASTEXITCODE) { throw 'compiling nintendo_loader_test failed' }
+        & "${CROSS}objcopy" nintendo_loader_test.elf nintendo_loader_test.bin -O binary
+        if ($LASTEXITCODE) { throw 'objcopy nintendo_loader_test failed' }
+    } finally {
+        Pop-Location
+    }
+    python tools/bin2hex.py sim/nintendo_loader_test.bin sim/nintendo_loader_test.hex 131072
+    if ($LASTEXITCODE) { throw 'converting nintendo_loader_test failed' }
+    & $vvp sim/tb_core_autorun.vvp '+IMAGE=sim/nintendo_loader_test.hex'
+    if ($LASTEXITCODE) { throw 'nintendo_loader_test failed' }
+    Push-Location sim
+    try {
+        & "${CROSS}gcc" -Os -mabi=ilp32 -march=rv32i -ffreestanding -fno-builtin -ffunction-sections -fdata-sections `
+            '-Wl,--gc-sections,--build-id=none,-T,../firmware/baremetal.ld' -nostdlib `
             -o snes_loader_test.elf start.o snes_loader_test.c ../firmware/picorv32.c -lgcc
         if ($LASTEXITCODE) { throw 'compiling snes_loader_test failed' }
         & "${CROSS}objcopy" snes_loader_test.elf snes_loader_test.bin -O binary
@@ -85,6 +117,22 @@ if ($CROSS) {
     if ($LASTEXITCODE) { throw 'iverilog snes_loader_test failed' }
     & $vvp sim/tb_snes_loader.vvp '+IMAGE=sim/snes_loader_test.hex'
     if ($LASTEXITCODE) { throw 'snes_loader_test failed' }
+    Push-Location sim
+    try {
+        & "${CROSS}gcc" -Os -mabi=ilp32 -march=rv32i -ffreestanding -fno-builtin -ffunction-sections -fdata-sections `
+            '-Wl,--gc-sections,--build-id=none,-T,..\firmware\baremetal.ld' -nostdlib `
+            -o megadrive_loader_test.elf start.o megadrive_loader_test.c `
+            ..\firmware\util.c ..\firmware\picorv32.c -lgcc
+        if ($LASTEXITCODE) { throw 'compiling megadrive_loader_test failed' }
+        & "${CROSS}objcopy" megadrive_loader_test.elf megadrive_loader_test.bin -O binary
+        if ($LASTEXITCODE) { throw 'objcopy megadrive_loader_test failed' }
+    } finally {
+        Pop-Location
+    }
+    python tools\bin2hex.py sim\megadrive_loader_test.bin sim\megadrive_loader_test.hex 131072
+    if ($LASTEXITCODE) { throw 'converting megadrive_loader_test failed' }
+    & $vvp sim\tb_snes_loader.vvp '+IMAGE=sim/megadrive_loader_test.hex'
+    if ($LASTEXITCODE) { throw 'megadrive_loader_test failed' }
     Push-Location sim
     & "${CROSS}gcc" -x assembler-with-cpp -mabi=ilp32 -march=rv32i -c -o start.o ../firmware/start.S
     & "${CROSS}gcc" -Os -mabi=ilp32 -march=rv32i -ffreestanding -fno-builtin -Wall -c -o prog.o prog.c
@@ -123,7 +171,7 @@ $gowinPrimSim = if ($env:GOWIN_HOME) {
 } else {
     'G:\Gowin\Gowin_V1.9.11.03_Education_x64\IDE\simlib\gw2a\prim_sim.v'
 }
-foreach ($tb in @('tb_nes_gamepad', 'tb_gb_cart_mapper', 'tb_snes_frame_probe', 'tb_snes_port_diag', 'tb_snes_vram_stream', 'tb_snes_video', 'tb_snes_video_stream', 'tb_snes_video_stream_bilinear', 'tb_snes_iosys_memory', 'tb_flash_pio', 'tb_textdisp', 'tb_dvi_video_window', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vram_clear', 'tb_arcade_ram', 'tb_rv_uart_diagnostic', 'tb_rv_x22', 'tb_rv_memory_probe')) {
+foreach ($tb in @('tb_nes_gamepad', 'tb_gb_cart_mapper', 'tb_gbc_core', 'tb_gbc_apu', 'tb_nintendo_video', 'tb_gbc_color_correct', 'tb_nintendo_iosys', 'tb_snes_frame_probe', 'tb_snes_port_diag', 'tb_snes_vram_stream', 'tb_snes_video', 'tb_snes_video_stream', 'tb_snes_video_stream_bilinear', 'tb_snes_iosys_memory', 'tb_flash_pio', 'tb_textdisp', 'tb_dvi_video_window', 'tb_rom_source_arb', 'tb_sprite_stream', 'tb_sdram_reload', 'tb_vram_clear', 'tb_arcade_ram', 'tb_rv_uart_diagnostic', 'tb_rv_x22', 'tb_rv_memory_probe')) {
     if ($tb -eq 'tb_dvi_video_window' -and -not (Test-Path $gowinPrimSim)) {
         Write-Warning 'Gowin GW2A simulation library unavailable; skipping tb_dvi_video_window.'
         continue
@@ -131,6 +179,11 @@ foreach ($tb in @('tb_nes_gamepad', 'tb_gb_cart_mapper', 'tb_snes_frame_probe', 
     $files = switch ($tb) {
         'tb_nes_gamepad' { @('rtl/nestang/src/nano20k/config.v', 'sim/tb_nes_gamepad.sv', 'rtl/top_tang_nano20k_nesgb.v', 'rtl/tang/snes_gamepad.v') }
         'tb_gb_cart_mapper' { @('sim/tb_gb_cart_mapper.sv', 'rtl/gb/gb_cart_mapper.sv') }
+        'tb_nintendo_video' { @('sim/tb_nintendo_video.sv', 'rtl/nestang/src/nes2hdmi.sv', 'rtl/nestang/src/gbc_color_correct.sv') }
+        'tb_gbc_color_correct' { @('sim/tb_gbc_color_correct.sv', 'rtl/nestang/src/gbc_color_correct.sv') }
+        'tb_nintendo_iosys' { @('sim/tb_nintendo_iosys.sv', 'rtl/tang/iosys/iosys.v') }
+        'tb_gbc_apu' { @('sim/tb_gbc_apu.sv', 'rtl/gbc/gbc_apu.v', 'rtl/gbc/gbc_apu_length_ctr.v', 'rtl/gbc/gbc_apu_noise.v', 'rtl/gbc/gbc_apu_square.v', 'rtl/gbc/gbc_apu_vol_env.v', 'rtl/gbc/gbc_apu_wave.v') }
+        'tb_gbc_core' { @('sim/tb_gbc_core.sv','rtl/gbc/gbc_alu.v', 'rtl/gbc/gbc_apu.v', 'rtl/gbc/gbc_apu_length_ctr.v', 'rtl/gbc/gbc_apu_noise.v', 'rtl/gbc/gbc_apu_square.v', 'rtl/gbc/gbc_apu_vol_env.v', 'rtl/gbc/gbc_apu_wave.v', 'rtl/gbc/gbc_cart_mapper.sv', 'rtl/gbc/gbc_control.v', 'rtl/gbc/gbc_core.v', 'rtl/gbc/gbc_cpu.v', 'rtl/gbc/gbc_ppu.v', 'rtl/gbc/gbc_regfile.v', 'rtl/gbc/gbc_singlereg.v', 'rtl/gbc/gbc_timer.v') }
         'tb_snes_frame_probe' { @('sim/tb_snes_vram_stream.sv', 'rtl/top_tang_nano20k_snes.v') }
         'tb_snes_port_diag' { @('sim/tb_snes_vram_stream.sv', 'rtl/top_tang_nano20k_snes.v') }
         'tb_snes_vram_stream' { @('sim/tb_snes_vram_stream.sv', 'rtl/top_tang_nano20k_snes.v', 'rtl/snestang/src/sdram_nano.v', 'sim/sdram_model.v') }
@@ -152,6 +205,9 @@ foreach ($tb in @('tb_nes_gamepad', 'tb_gb_cart_mapper', 'tb_snes_frame_probe', 
     }
     $flags = @('-g2005-sv')
     if ($tb -eq 'tb_gb_cart_mapper') { $flags = @('-g2012', '-s', $tb) }
+    if ($tb -eq 'tb_gbc_apu') { $flags = @('-g2012', '-s', $tb) }
+    if ($tb -eq 'tb_gbc_core') { $flags = @('-g2012', '-I', 'rtl/gbc', '-s', $tb) }
+    if ($tb -in @('tb_nintendo_video', 'tb_gbc_color_correct', 'tb_nintendo_iosys')) { $flags = @('-g2012', '-i', '-s', $tb) }
     if ($tb -eq 'tb_nes_gamepad') { $flags = @('-g2012', '-i', '-s', $tb) }
     if ($tb -in @('tb_snes_port_diag', 'tb_snes_frame_probe')) { $flags = @('-g2012', '-i', '-s', $tb) }
     if ($tb -eq 'tb_snes_vram_stream') { $flags = @('-g2012', '-i', '-s', $tb) }

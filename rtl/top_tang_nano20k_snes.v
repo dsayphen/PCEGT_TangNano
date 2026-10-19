@@ -168,6 +168,7 @@ wire        audio_hdmi;
 wire        audio_cdda_enable;
 wire        audio_adpcm_enable;
 wire        vdc_sprites_double;
+wire [1:0]  console_region;
 
 wire        rv_valid;
 wire        rv_ready;
@@ -247,6 +248,7 @@ iosys #(
     .audio_cdda_enable   (audio_cdda_enable),
     .audio_adpcm_enable  (audio_adpcm_enable),
     .vdc_sprites_double  (vdc_sprites_double),
+    .console_region      (console_region),
     .brm_host_q          (brm_host_q),
     .brm_host_addr       (brm_host_addr),
     .brm_host_data       (brm_host_data),
@@ -655,6 +657,8 @@ main #(.USE_DSPn(1'b1)) u_snes (
     .VRAM1_ADDR(VRAM1_ADDR), .VRAM1_DI(VRAM1_DI), .VRAM1_DO(VRAM1_DO), .VRAM1_WE_N(VRAM1_WE_N),
     .VRAM2_ADDR(VRAM2_ADDR), .VRAM2_DI(VRAM2_DI), .VRAM2_DO(VRAM2_DO), .VRAM2_WE_N(VRAM2_WE_N), .VRAM_OE_N(VRAM_OE_N),
     .ARAM_ADDR(ARAM_ADDR), .ARAM_Q(ARAM_Q), .ARAM_D(ARAM_D), .ARAM_CE_N(ARAM_CE_N), .ARAM_OE_N(ARAM_OE_N), .ARAM_WE_N(ARAM_WE_N),
+    // This profile's fixed-60-Hz HDMI output and rolling line buffer cannot
+    // safely consume PAL's 50-Hz frame cadence.
     .BLEND(1'b0), .PAL(1'b0), .DIS_SHORTLINE(1'b0), .HIGH_RES(), .FIELD(), .INTERLACE(),
     .DOTCLK(dotclk), .RGB_OUT(rgb_out), .HBLANKn(hblankn), .VBLANKn(vblankn), .X_OUT(x_out), .Y_OUT(y_out),
     .VRAM_READ_CE(ppu_read_ce),

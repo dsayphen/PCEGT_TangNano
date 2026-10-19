@@ -12,48 +12,104 @@
 #include "cheats.h"
 #include "core.h"
 
+static const char *zoom_names[3] = { "Integer", "Stretch", "Bilinear" };
+static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
+static const char *grid_names[4] = { "Off", "10%", "20%", "30%" };
+static const char *color_names[2] = { "RAW RGB", "Composite" };
+static const char *gb_color_names[4] = { "Off", "DMG", "Pocket", "Light" };
+static const char *gbc_color_names[3] = { "Off", "Accurate", "Fast" };
+static const char *nes_color_names[8] = {
+    "Original", "Comp. Direct", "NES Classic", "PC-10",
+    "PVM Style D93", "Smooth", "Sony CXA", "Wavebeam"
+};
+
+static const char *zoom_name(void) {
+    return video_is_gameboy() ?
+           (video_zoom ? "Wide Stretch" : "Integer") : zoom_names[video_zoom];
+}
+
+static int selection_step(uint32_t events, int choices) {
+    if (events & JOY_A)
+        return 1;
+    if (choices > 2) {
+        if (events & JOY_LEFT)
+            return -1;
+        if (events & JOY_RIGHT)
+            return 1;
+    }
+    return 0;
+}
+
+static int video_color_count(void) {
+    return CORE_PROFILE_ID != CORE_PROFILE_NINTENDO8 ? 2 :
+           !video_is_gameboy() ? 8 : video_is_gbc() ? 3 : 4;
+}
+
+static void advance_zoom(int dir) {
+    int current = video_is_gameboy() ? !!video_zoom : video_zoom;
+    video_zoom = (current + dir + video_zoom_count()) % video_zoom_count();
+    reg_video_zoom = video_zoom;
+}
+
+static void cycle_video_setting(int command, int dir) {
+    if (command == 0) {
+        if (CORE_PROFILE_ID == CORE_PROFILE_NINTENDO8) {
+            if (video_is_gbc())
+                gbc_color = (gbc_color + dir + 3) % 3;
+            else if (video_is_gameboy())
+                gb_palette = (gb_palette + dir + 4) % 4;
+            else
+                nes_palette = (nes_palette + dir + 8) % 8;
+            nintendo_color_apply();
+        } else {
+            video_color = !video_color;
+            reg_color_mode = video_color;
+        }
+    } else if (command == 1) {
+        advance_zoom(dir);
+    } else {
+        video_scanline = (video_scanline + dir + 4) % 4;
+        reg_scanline = video_scanline;
+    }
+    video_config_save();
+}
+
 // Cycle the display zoom mode (2x -> stretch -> ...) and flash the new
 // setting on the OSD for a moment.  Kept in sync with rtl/tang/iosys/iosys.v
 // (reg_video_zoom) and rtl/tang/video_scandoubler.v.
 void zoom_cycle(void) {
-    static const char *names[3] = {
-        "Zoom: Integer", "Zoom: Stretch", "Zoom: Bilinear"
-    };
-
-    video_zoom = (video_zoom + 1) % 3;
-    reg_video_zoom = video_zoom;
+    advance_zoom(1);
     video_config_save();
 
     clear();
-    print_field(1, 10, names[video_zoom], OSD_COLS - 2);
+    char label[24];
+    strcpy(label, "Zoom: ");
+    strcat(label, zoom_name());
+    print_field(1, 10, label, OSD_COLS - 2);
     overlay(1);
     delay(600);
     overlay(0);
 }
 
-// Cycle the scanline strength (0/25/50/100%) and flash the new setting on
+// Cycle scanlines (0/25/50/100%) or GB grid (0/10/20/30%) and flash the setting on
 // the OSD for a moment.  `dir` is +1 to increase, -1 to decrease; the value
 // wraps around in both directions.  Kept in sync with
 // rtl/tang/iosys/iosys.v (reg_scanline) and rtl/tang/video_scandoubler.v.
 void scanline_cycle(int dir) {
-    static const char *names[4] = {
-        "Scanlines: off", "Scanlines: 25%", "Scanlines: 50%", "Scanlines: 100%"
-    };
-
     video_scanline = (video_scanline + dir + 4) % 4;
     reg_scanline = video_scanline;
     video_config_save();
 
     clear();
-    print_field(1, 10, names[video_scanline], OSD_COLS - 2);
+    char label[24];
+    strcpy(label, video_is_gameboy() ? "Grid: " : "Scanlines: ");
+    strcat(label, (video_is_gameboy() ? grid_names : scan_names)[video_scanline]);
+    print_field(1, 10, label, OSD_COLS - 2);
     overlay(1);
     delay(600);
     overlay(0);
 }
 
-static const char *zoom_names[3] = { "Integer", "Stretch", "Bilinear" };
-static const char *scan_names[4] = { "Off", "25%", "50%", "100%" };
-static const char *color_names[2] = { "RAW RGB", "Composite" };
 #define MENU_FRAME_WIDTH 26
 
 // Snapshot of the HuC6260/HuC6270 timing registers as the running game has
@@ -191,13 +247,16 @@ static void make_menu_label(char *buf, int type) {
                 game_pad_mode == 1 ? "6 buttons" : "2 buttons";
     } else if (type == 4) {
         prefix = "Color: ";
-        value = color_names[video_color];
+        value = CORE_PROFILE_ID != CORE_PROFILE_NINTENDO8 ? color_names[video_color] :
+                video_is_gbc() ? gbc_color_names[gbc_color] :
+                video_is_gameboy() ? gb_color_names[gb_palette] :
+                nes_color_names[nes_palette];
     } else if (type == 5) {
         prefix = "Zoom: ";
-        value = zoom_names[video_zoom];
+        value = zoom_name();
     } else {
-        prefix = "Scanlines: ";
-        value = scan_names[video_scanline];
+        prefix = video_is_gameboy() ? "Grid: " : "Scanlines: ";
+        value = (video_is_gameboy() ? grid_names : scan_names)[video_scanline];
     }
 
     while (*prefix)
@@ -309,15 +368,16 @@ static void cheats_menu(void) {
 static void video_menu(int in_game) {
     static const char *back_label = "Back";
     int active = 0;
-    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
-    const int n_items = snes_profile ? 3 : 4;
+    const int simple_video = CORE_PROFILE_ID == CORE_PROFILE_SNES ||
+                             CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE;
+    const int n_items = simple_video ? 3 : 4;
     const int first_row = in_game ? 9 : 8;
 
     menu_header("Video Settings", in_game, MENU_FRAME_WIDTH);
 
     for (;;) {
         for (int i = 0; i < n_items; i++) {
-            int item = snes_profile ? i + 1 : i;
+            int item = simple_video ? i + 1 : i;
             cursor(4, first_row + i);
             putchar(i == active ? '>' : ' ');
 
@@ -334,25 +394,18 @@ static void video_menu(int in_game) {
         selection_row(first_row + active);
 
         uint32_t e = joy_edge();
-        int command = snes_profile ? active + 1 : active;
+        int command = simple_video ? active + 1 : active;
+        int choices = command == 0 ? video_color_count() :
+                      command == 1 ? video_zoom_count() : command == 2 ? 4 : 0;
+        int dir = selection_step(e, choices);
         if (e & JOY_UP) {
             active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {
             active = active < n_items - 1 ? active + 1 : 0;
         } else if ((e & JOY_B) || ((e & JOY_A) && command == 3)) {
             return;
-        } else if ((e & JOY_A) && command == 0) {
-            video_color = !video_color;
-            reg_color_mode = video_color;
-            video_config_save();
-        } else if ((e & JOY_A) && command == 1) {
-            video_zoom = (video_zoom + 1) % 3;
-            reg_video_zoom = video_zoom;
-            video_config_save();
-        } else if ((e & JOY_A) && command == 2) {
-            video_scanline = (video_scanline + 1) % 4;
-            reg_scanline = video_scanline;
-            video_config_save();
+        } else if (dir && command < 3) {
+            cycle_video_setting(command, dir);
         }
         delay(20);
     }
@@ -370,9 +423,10 @@ static void audio_menu(int in_game) {
     static const uint8_t pce_browser_items[] = { 0, 1, 2, 3, 4, 5, 6 };
     int active = 0;
     const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
-    const uint8_t *items = snes_profile ? (in_game ? snes_game_items : snes_browser_items)
+    const int md_profile = CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE;
+    const uint8_t *items = (md_profile || snes_profile) ? (in_game ? snes_game_items : snes_browser_items)
                                         : (in_game ? pce_game_items : pce_browser_items);
-    const int n_items = snes_profile ? (in_game ? 2 : 3) : (in_game ? 4 : 7);
+    const int n_items = (md_profile || snes_profile) ? (in_game ? 2 : 3) : (in_game ? 4 : 7);
     const int first_row = in_game ? 9 : 8;
 
     menu_header("Audio Settings", in_game, MENU_FRAME_WIDTH);
@@ -465,7 +519,8 @@ int pause_menu(void) {
         "Resume Game", "Reset Game", "Return to browser"
     };
     int active = 0;
-    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
+    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES ||
+                             CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE;
     const int snes_items[5] = {0, 2, 3, 5, 6};
     const int n_items = snes_profile ? 5 : 7;
     const int first_row = 9;
@@ -548,7 +603,8 @@ int pause_menu(void) {
             overlay(0);
             return 0;
         } else if ((e & JOY_A) && command == 6) {
-            cheats_clear();
+            if (CORE_PROFILE_ID != CORE_PROFILE_MEGADRIVE)
+                cheats_clear();
             overlay(0);
             clear();
             selection_row(31);
@@ -556,8 +612,8 @@ int pause_menu(void) {
             audio_paused = 0;
             audio_apply();
             return 1;
-        } else if ((e & JOY_A) && command == 1) {
-            game_pad_mode = (game_pad_mode + 1) % 3;
+        } else if (selection_step(e, 3) && command == 1) {
+            game_pad_mode = (game_pad_mode + selection_step(e, 3) + 3) % 3;
             reg_pad_mode = game_pad_mode;
             game_pad_mode_save(current_game_name); // <--- Sauvegarde dans /config/[nomdujeu].cfg
         } else if ((e & JOY_A) && command == 2) {
@@ -581,13 +637,17 @@ int pause_menu(void) {
 
 // Global options reached with Select from the ROM browser.
 void options_menu(void) {
-    static const char *items[7] = {
+    static const char *items[8] = {
         "Video Settings >", "Audio Settings >", "Debug UART: ",
-        "Cheats: ", "Sprites: ", "Choose core >", "Back"
+        "Cheats: ", "Sprites: ", "Choose core >", "Back", "Region: "
     };
-    const int snes_items[5] = {0, 1, 2, 5, 6};
-    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES;
-    const int n_items = snes_profile ? 5 : 7;
+    const int snes_items[6] = {0, 1, 2, 7, 5, 6};
+    const int snes_profile = CORE_PROFILE_ID == CORE_PROFILE_SNES ||
+                             CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE;
+    const int region_supported =
+        CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE &&
+        CORE_EXTENDED_SETTINGS_SUPPORTED;
+    const int n_items = snes_profile ? 6 : 7;
     int active = 0;
 
     menu_header("Options", 0, MENU_FRAME_WIDTH);
@@ -598,7 +658,22 @@ void options_menu(void) {
             cursor(4, 8 + i);
             putchar(i == active ? '>' : ' ');
 
-            if (item >= 2 && item <= 4) {
+            if (item == 7) {
+                static const char *regions[] = {
+                    "NTSC US", "NTSC Japan"
+                };
+                char label[32];
+                int j = 0;
+                for (const char *s = items[item]; *s; s++)
+                    label[j++] = *s;
+                const char *value = CORE_PROFILE_ID == CORE_PROFILE_SNES
+                    ? "NTSC only"
+                    : region_supported ? regions[console_region] : "Update core";
+                while (*value)
+                    label[j++] = *value++;
+                label[j] = '\0';
+                print_field(6, 8 + i, label, 20);
+            } else if (item >= 2 && item <= 4) {
                 char label[32];
                 const char *value = item == 2
                     ? (debug_uart ? "On" : "Off")
@@ -615,17 +690,29 @@ void options_menu(void) {
                 print_field(6, 8 + i, items[item], 20);
             }
         }
+        int command = snes_profile ? snes_items[active] : active;
         selection_row(8 + active);
-        print_field(1, ROW_STATUS, "A=Select  B=Back", OSD_COLS - 2);
+        print_field(1, ROW_STATUS,
+                    command == 7 && !region_supported
+                        ? CORE_PROFILE_ID == CORE_PROFILE_SNES
+                            ? "SNES region: NTSC only"
+                            : "Update core for region"
+                        : "A=Select  B=Back",
+                    OSD_COLS - 2);
 
         uint32_t e = joy_edge();
-        int command = snes_profile ? snes_items[active] : active;
         if (e & JOY_UP) {
             active = active ? active - 1 : n_items - 1;
         } else if (e & JOY_DOWN) {
             active = active < n_items - 1 ? active + 1 : 0;
         } else if ((e & (JOY_B | JOY_SELECT)) || ((e & JOY_A) && command == 6)) {
             return;
+        } else if ((e & (JOY_LEFT | JOY_RIGHT)) && command == 7 &&
+                   region_supported) {
+            int step = (e & JOY_LEFT) ? -1 : 1;
+            console_region = (console_region + step + 2) % 2;
+            console_region_apply();
+            system_config_save();
         } else if ((e & JOY_A) && command == 0) {
             video_menu(0);
             menu_header("Options", 0, MENU_FRAME_WIDTH);
@@ -641,6 +728,10 @@ void options_menu(void) {
         } else if ((e & JOY_A) && command == 4) {
             vdc_sprites_double = !vdc_sprites_double;
             vdc_options_apply();
+            system_config_save();
+        } else if ((e & JOY_A) && command == 7 && region_supported) {
+            console_region = (console_region + 1) % 2;
+            console_region_apply();
             system_config_save();
         } else if ((e & JOY_A) && command == 5) {
             core_menu();

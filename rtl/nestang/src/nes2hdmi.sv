@@ -13,12 +13,19 @@ module nes2hdmi (
     input [8:0] scanline,
     input [15:0] sample,
     input aspect_8x7,       // 1: 8x7 pixel aspect ratio mode
+    input [1:0] zoom_mode,
+    input [1:0] effect_strength,
+    input [6:0] nintendo_color,
     input gameboy_mode,
+    input gameboy_color,    // pixels are CGB palette indexes {obj, palette[2:0], color[1:0]}
     input game_active,
-    input [1:0] gameboy_pixel,
+    input [5:0] gameboy_pixel,
     input gameboy_hs,
     input gameboy_vs,
     input gameboy_valid,
+    input gameboy_pal_wr,         // CGB palette RAM mirror, clk domain
+    input [6:0] gameboy_pal_addr, // {obj, byte_index[5:0]}
+    input [7:0] gameboy_pal_data,
 
     // overlay interface
     input overlay,
@@ -41,12 +48,11 @@ module nes2hdmi (
 
 // include from tang_primer_25k/config.sv and tang_nano_20k/config.sv
 
-localparam FRAMEWIDTH = 1280;
-localparam FRAMEHEIGHT = 720;
-localparam TOTALWIDTH = 1650;
-localparam TOTALHEIGHT = 750;
-localparam SCALE = 5;
-localparam VIDEOID = 4;
+localparam FRAMEWIDTH = 640;
+localparam FRAMEHEIGHT = 480;
+localparam TOTALWIDTH = 800;
+localparam TOTALHEIGHT = 525;
+localparam VIDEOID = 1;
 localparam VIDEO_REFRESH = 60.0;
 
 // localparam IDIV_SEL_X5 = 3;
@@ -55,7 +61,7 @@ localparam VIDEO_REFRESH = 60.0;
 // localparam DUTYDA_SEL_X5 = "1000";
 // localparam DYN_SDIV_SEL_X5 = 2;
   
-localparam CLKFRQ = 74250;
+localparam CLKFRQ = 25200;
 
 localparam COLLEN = 80;
 localparam AUDIO_BIT_WIDTH = 16;
@@ -79,21 +85,13 @@ localparam BAUDRATE=115200;
 `define EMBED_GAME
 `endif
 
-// flags
-logic asp8x7_on = 1'b1;
-
 // video stuff
 wire [9:0] cy, frameHeight;
 wire [10:0] cx, frameWidth;
-logic [7:0] ONE_THIRD[0:768];     // lookup table for divide-by-3
 
 assign overlay_x = cx;
 assign overlay_y = cy;
 
-logic active;
-logic r_active;
-logic [7:0] x;                    // NES pixel position
-wire [7:0] y;
 
 //
 // BRAM frame buffer
@@ -101,13 +99,15 @@ wire [7:0] y;
 localparam MEM_DEPTH=256*240;
 localparam MEM_ABITS=16;
 
-logic [5:0] mem [0:256*240-1];
+// Even/odd banks expose adjacent pixels without duplicating the framebuffer.
+logic [5:0] mem_even [0:128*240-1];
+logic [5:0] mem_odd [0:128*240-1];
 logic [15:0] mem_portA_addr;
 logic [5:0] mem_portA_wdata;
 logic mem_portA_we;
 
-wire [15:0] mem_portB_addr;
-logic [5:0] mem_portB_rdata;
+wire [14:0] even_read_addr, odd_read_addr;
+logic [5:0] even_rdata, odd_rdata;
 
 logic initializing = 1;
 logic [7:0] init_y = 0;
@@ -117,14 +117,16 @@ logic [7:0] gb_y = 0;
 
 // BRAM port A read/write
 always_ff @(posedge clk) begin
-    if (mem_portA_we) begin
-        mem[mem_portA_addr] <= mem_portA_wdata;
-    end
+    if (mem_portA_we && !mem_portA_addr[0])
+        mem_even[mem_portA_addr[15:1]] <= mem_portA_wdata;
+    if (mem_portA_we && mem_portA_addr[0])
+        mem_odd[mem_portA_addr[15:1]] <= mem_portA_wdata;
 end
 
 // BRAM port B read
 always_ff @(posedge clk_pixel) begin
-    mem_portB_rdata <= mem[mem_portB_addr];
+    even_rdata <= mem_even[even_read_addr];
+    odd_rdata <= mem_odd[odd_read_addr];
 end
 
 // localparam [0:65] LOGO [0:12] = '{
@@ -181,7 +183,7 @@ always @(posedge clk) begin
             gb_x <= 0;
         end else if (gameboy_valid && gb_x < 8'd160 && gb_y < 8'd144) begin
             mem_portA_addr <= {gb_y, gb_x};
-            mem_portA_wdata <= {4'd0, gameboy_pixel};
+            mem_portA_wdata <= gameboy_pixel;
             mem_portA_we <= 1'b1;
             if (gb_x == 8'd159) begin
                 gb_x <= 0;
@@ -233,111 +235,228 @@ always @(posedge clk_pixel) begin       // crossing clock domain
 end
 
 //
-// Video
+// NES: integer x2, full-width nearest, or full-width horizontal bilinear.
+// GB: integer x3, or x4 horizontally / x3 vertically (Wide Stretch).
 //
-// We support both 1:1 pixel aspect ratio, and 8:7
-// - 7 NES pixels are mapped to 21 or 24 HDMI pixels horizontally in these 2 modes.
-// - For 8:7, the follows are "border" HDMI pixels (0 to 23) that combine 2 neighboring NES pixels
-//      3:  110,146  6: 219,37   10: 73,183; 
-//      13: 183,73   17: 37,219  20: 146,110
-//   For 1:1, there's no border pixels. Each NES pixel is expanded to 3 HDMI pixels.
-// - For 8:7, total width is 36*24 + 13 = 877. Therefore x goes from 201 to 1077.
-reg r2_active;
-reg [4:0] xs, r_xs, r2_xs;       // x step for each 7 NES pixel group, 0-23 for 8:7 pixel aspect ratio, or 0-20 for 1:1 pixel aspect ratio
-wire xload = asp8x7_on ? 
-        (xs == 5'd0 || xs == 5'd3 || xs == 5'd6 || xs == 5'd10 || xs == 5'd13 || xs == 5'd17 || xs == 5'd20)
-    : (xs == 5'd0 || xs == 5'd3 || xs == 5'd6 || xs == 5'd9 || xs == 5'd12 || xs == 5'd15 || xs == 5'd18);
-reg r_xload;
-// x is incremented whenver xload is 1
-assign y = ONE_THIRD[cy];
-wire gb_window = cx >= 11'd320 && cx < 11'd960 &&
-                 cy >= 10'd72 && cy < 10'd648;
-wire [7:0] gb_display_x = (cx - 11'd320) >> 2;
-wire [7:0] gb_display_y = (cy - 10'd72) >> 2;
-assign mem_portB_addr = gameboy_mode ? {gb_display_y, gb_display_x} : {y, x};
-// assign led = ~{2'b0, mem_portB_rdata}; 
-reg [23:0] NES_PALETTE [0:63];
-// Mix ratio of border pixels for 8x7 pixel aspect ratio
-reg [15:0] mixratio;
-reg mix;
-wire [15:0] next_mixratio = ~asp8x7_on ? 16'b0 :            // no mixing for 1:1 pixel aspect ratio
-                        r_xs == 5'd3 ? {8'd110,8'd146} :
-                        r_xs == 5'd6 ? {8'd219,8'd37} :
-                        r_xs == 5'd10 ? {8'd73,8'd183} :
-                        r_xs == 5'd13 ? {8'd183,8'd73} :
-                        r_xs == 5'd17 ? {8'd37,8'd219} :
-                        r_xs == 5'd20 ? {8'd146,8'd110} : 16'b0;
-wire next_mix = r_xs == 5'd3 || r_xs == 5'd6 || r_xs == 5'd10 || r_xs == 5'd13 || r_xs == 5'd17 || r_xs == 5'd20;
-reg [23:0] rgbv, r_rgbv;
-wire [15:0] rmix = r_rgbv[23:16]*mixratio[15:8] + rgbv[23:16]*mixratio[7:0];
-wire [15:0] gmix = r_rgbv[15:8]*mixratio[15:8] + rgbv[15:8]*mixratio[7:0];
-wire [15:0] bmix = r_rgbv[7:0]*mixratio[15:8] + rgbv[7:0]*mixratio[7:0];
-reg [23:0] rgb;     // actual RGB output
-reg gameboy_mode_meta = 0, gameboy_mode_pixel = 0;
-reg game_active_meta = 0, game_active_pixel = 0;
-reg gameboy_mode_read = 0, game_active_read = 0, gb_window_read = 0;
-always_ff @(posedge clk_pixel) begin
-    gameboy_mode_meta <= gameboy_mode;
-    gameboy_mode_pixel <= gameboy_mode_meta;
-    game_active_meta <= game_active;
-    game_active_pixel <= game_active_meta;
-    gameboy_mode_read <= gameboy_mode_pixel;
-    game_active_read <= game_active_pixel;
-    gb_window_read <= gb_window;
+reg [13:0] settings_meta = 0, settings_pixel = 0;
+always @(posedge clk_pixel) begin
+    settings_meta <= {game_active, gameboy_color, gameboy_mode,
+                      nintendo_color, effect_strength, zoom_mode};
+    settings_pixel <= settings_meta;
 end
-function automatic [23:0] gb_palette(input [1:0] shade);
-    case (shade)
-        2'd0: gb_palette = 24'hf8fcf8;
-        2'd1: gb_palette = 24'ha8b0a8;
-        2'd2: gb_palette = 24'h506050;
-        default: gb_palette = 24'h000000;
+wire [1:0] zoom = settings_pixel[1:0];
+wire [1:0] strength = settings_pixel[3:2];
+wire [2:0] palette_id = settings_pixel[6:4];
+wire [1:0] gbc_correction = settings_pixel[8:7];
+wire [1:0] dmg_palette = settings_pixel[10:9];
+wire gb_mode = settings_pixel[11];
+wire cgb_mode = settings_pixel[12];
+wire playing = settings_pixel[13];
+
+// Fetch four pixels ahead: framebuffer, palette, interpolation, composition.
+wire [10:0] render_x = cx < 11'd796 ? cx + 11'd4 : cx - 11'd796;
+wire [9:0] render_y = cx < 11'd796 ? cy : (cy == 10'd524 ? 10'd0 : cy + 1'b1);
+wire nes_window = render_y < 480 &&
+                  (zoom != 0 ? render_x < 640 : render_x >= 64 && render_x < 576);
+wire gb_window = render_y >= 24 && render_y < 456 &&
+                 (zoom != 0 ? render_x < 640 : render_x >= 80 && render_x < 560);
+wire [10:0] nes_display_x = render_x - 11'd64;
+wire [10:0] nes_scaled_x = (render_x * 11'd2) / 11'd5;
+wire [10:0] gb_local_x = zoom != 0 ? render_x : render_x - 11'd80;
+wire [9:0] gb_local_y = render_y - 10'd24;
+wire [10:0] gb_source_x = zoom != 0 ? gb_local_x >> 2 : gb_local_x / 11'd3;
+wire [9:0] gb_source_y = gb_local_y / 10'd3;
+wire [7:0] source_x = gb_mode ?
+    gb_source_x[7:0] :
+    (zoom != 0 ? nes_scaled_x[7:0] : nes_display_x[8:1]);
+wire [7:0] source_y = gb_mode ? gb_source_y[7:0] : render_y[8:1];
+wire in_window = playing && (gb_mode ? gb_window : nes_window);
+wire [7:0] next_x = source_x == 255 ? 8'd255 : source_x + 1'b1;
+assign even_read_addr = in_window ?
+    {source_y, (source_x[0] ? next_x[7:1] : source_x[7:1])} : 15'd0;
+assign odd_read_addr = in_window ? {source_y, source_x[7:1]} : 15'd0;
+wire grid_gap = (zoom != 0 ? gb_local_x[1:0] == 0 : gb_local_x % 11'd3 == 0) ||
+                gb_local_y % 10'd3 == 0;
+wire [2:0] fraction = (render_x * 11'd2) % 11'd5;
+reg odd_read, window_read, gb_read, cgb_read;
+reg [1:0] correction_read, dmg_palette_read;
+reg [2:0] palette_read, fraction_read;
+reg [1:0] strength_read;
+reg effect_read;
+always @(posedge clk_pixel) begin
+    odd_read <= source_x[0];
+    window_read <= in_window;
+    gb_read <= gb_mode;
+    cgb_read <= cgb_mode;
+    correction_read <= gbc_correction;
+    dmg_palette_read <= dmg_palette;
+    palette_read <= palette_id;
+    fraction_read <= !gb_mode && zoom == 2 && source_x != 255 ? fraction : 3'd0;
+    strength_read <= strength;
+    effect_read <= gb_mode ? grid_gap : render_y[0];
+end
+wire [5:0] index_first = odd_read ? odd_rdata : even_rdata;
+reg [23:0] palette_rom [0:511];
+initial $readmemh("rtl/nestang/palettes/nes.hex", palette_rom);
+reg [23:0] rgb;     // actual RGB output
+
+// Mirror of the 2x64-byte CGB palette RAM. Colours are looked up when the
+// frame is displayed, so mid-frame palette rewrites are not reproduced.
+reg [7:0] gbc_pal_lo [0:63];
+reg [7:0] gbc_pal_hi [0:63];
+always_ff @(posedge clk) begin
+    if (gameboy_pal_wr && !gameboy_pal_addr[0])
+        gbc_pal_lo[{gameboy_pal_addr[6], gameboy_pal_addr[5:1]}] <= gameboy_pal_data;
+    if (gameboy_pal_wr && gameboy_pal_addr[0])
+        gbc_pal_hi[{gameboy_pal_addr[6], gameboy_pal_addr[5:1]}] <= gameboy_pal_data;
+end
+wire [7:0] gbc_lo = gbc_pal_lo[index_first];
+wire [7:0] gbc_hi = gbc_pal_hi[index_first];
+wire [4:0] gbc_r = gbc_lo[4:0];
+wire [4:0] gbc_g = {gbc_hi[1:0], gbc_lo[7:5]};
+wire [4:0] gbc_b = gbc_hi[6:2];
+wire [23:0] gbc_rgb = {gbc_r, gbc_r[4:2], gbc_g, gbc_g[4:2], gbc_b, gbc_b[4:2]};
+
+// Gambatte's integer Fast correction, retaining the reference's 5-bit rounding.
+function automatic [23:0] gbc_fast(input [4:0] r, g, b);
+    reg [8:0] red, blue;
+    reg [6:0] green;
+    begin
+        red = r * 9'd13 + g * 9'd2 + b;
+        green = g * 7'd3 + b;
+        blue = r * 9'd3 + g * 9'd2 + b * 9'd11;
+        gbc_fast = {red[8:4], red[8:6], green[6:2], green[6:4], blue[8:4], blue[8:6]};
+    end
+endfunction
+
+// Revisit all 64 palette entries continuously, so byte writes and live mode
+// changes never need to stall the core. A sweep takes 384 core clocks.
+reg [5:0] correction_index = 0;
+reg [2:0] correction_phase = 0;
+reg [14:0] correction_color;
+reg [7:0] correction_r, correction_g;
+wire [7:0] correction_value;
+wire [1:0] correction_component = correction_phase == 2 ? 2'd1 :
+                                  correction_phase == 3 ? 2'd2 : 2'd0;
+reg [23:0] corrected_palette [0:63];
+gbc_color_correct u_correct (
+    .clk(clk), .color(correction_color), .component(correction_component),
+    .corrected(correction_value)
+);
+always @(posedge clk) begin
+    if (correction_phase == 0)
+        correction_color <= {gbc_pal_hi[correction_index][6:0], gbc_pal_lo[correction_index]};
+    if (correction_phase == 3) correction_r <= correction_value;
+    if (correction_phase == 4) correction_g <= correction_value;
+    if (correction_phase == 5) begin
+        corrected_palette[correction_index] <= {correction_r, correction_g, correction_value};
+        correction_phase <= 0;
+        correction_index <= correction_index + 1'b1;
+    end else
+        correction_phase <= correction_phase + 1'b1;
+end
+
+// Hardware-mimicking palettes from Gambatte's GB DMG/Pocket/Light set.
+function automatic [23:0] gb_palette(input [1:0] mode, shade);
+    case ({mode, shade})
+        4'h0: gb_palette = 24'hf8fcf8;
+        4'h1: gb_palette = 24'ha8b0a8;
+        4'h2: gb_palette = 24'h506050;
+        4'h3: gb_palette = 24'h000000;
+        4'h4: gb_palette = 24'h578200;
+        4'h5: gb_palette = 24'h317400;
+        4'h6: gb_palette = 24'h005121;
+        4'h7: gb_palette = 24'h00420c;
+        4'h8: gb_palette = 24'ha7b19a;
+        4'h9: gb_palette = 24'h86927c;
+        4'ha: gb_palette = 24'h535f49;
+        4'hb: gb_palette = 24'h2a3325;
+        4'hc: gb_palette = 24'h01cbdf;
+        4'hd: gb_palette = 24'h01b6d5;
+        4'he: gb_palette = 24'h269bad;
+        default: gb_palette = 24'h00778d;
     endcase
 endfunction
 
-// calc rgb value to hdmi
+reg [23:0] nes_even_rgb, nes_odd_rgb, gb_rgb;
+reg palette_odd, palette_window, palette_gb, palette_effect;
+reg [1:0] palette_strength;
+reg [2:0] palette_fraction;
+always @(posedge clk_pixel) begin
+    nes_even_rgb <= palette_rom[{palette_read, even_rdata}];
+    nes_odd_rgb <= palette_rom[{palette_read, odd_rdata}];
+    gb_rgb <= cgb_read ?
+        (correction_read == 1 ? corrected_palette[index_first] :
+         correction_read == 2 ? gbc_fast(gbc_r, gbc_g, gbc_b) : gbc_rgb) :
+        gb_palette(dmg_palette_read, index_first[1:0]);
+    palette_odd <= odd_read;
+    palette_window <= window_read;
+    palette_gb <= gb_read;
+    palette_effect <= effect_read;
+    palette_strength <= strength_read;
+    palette_fraction <= fraction_read;
+end
+wire [23:0] rgb_first = palette_odd ? nes_odd_rgb : nes_even_rgb;
+wire [23:0] rgb_next = palette_odd ? nes_even_rgb : nes_odd_rgb;
+function automatic [7:0] blend(input [7:0] a, b, input [2:0] f);
+    reg [7:0] weight;
+    reg [16:0] sum;
+    begin
+        case (f)
+            1: weight = 51;
+            2: weight = 102;
+            3: weight = 154;
+            4: weight = 205;
+            default: weight = 0;
+        endcase
+        sum = a * (9'd256 - weight) + b * weight + 17'd128;
+        blend = sum[15:8];
+    end
+endfunction
+reg [23:0] interpolated;
+reg image_window, image_gb, image_effect;
+reg [1:0] image_strength;
+always @(posedge clk_pixel) begin
+    interpolated <= palette_gb ? gb_rgb :
+        {blend(rgb_first[23:16], rgb_next[23:16], palette_fraction),
+         blend(rgb_first[15:8], rgb_next[15:8], palette_fraction),
+         blend(rgb_first[7:0], rgb_next[7:0], palette_fraction)};
+    image_window <= palette_window;
+    image_gb <= palette_gb;
+    image_effect <= palette_effect;
+    image_strength <= palette_strength;
+end
+
+function automatic [7:0] pixel_effect(input [7:0] v, input gb, edge_on,
+                                     input [1:0] amount);
+    reg [7:0] ink;
+    reg [9:0] gap_lift;
+    begin
+        // White grid gaps leave white backgrounds untouched (dot-matrix style).
+        ink = gb ? 8'd255 - v : v;
+        if (edge_on) begin
+            if (gb) begin
+                gap_lift = (ink * amount + 10'd5) / 10'd10;
+                ink = ink - gap_lift[7:0];
+            end else begin
+                case (amount)
+                    1: ink = ink - (ink >> 2);
+                    2: ink = ink >> 1;
+                    3: ink = 0;
+                    default: ink = ink;
+                endcase
+            end
+        end
+        pixel_effect = gb ? 8'd255 - ink : ink;
+    end
+endfunction
+
 always_ff @(posedge clk_pixel) begin
-    reg [23:0] rgb_nes;
     reg [23:0] rgb_game;
-    if (asp8x7_on && cx == 11'd198 || ~asp8x7_on && cx == 11'd253)
-        active <= 1'b1;
-    if (asp8x7_on && cx == 11'd1075 || ~asp8x7_on && cx == 11'd1021)
-        active <= 1'b0;
-
-    // calculate pixel rgb through 3 cycles
-    // 0 - load: xmem_portB_rdata = mem[{y,x}]
-    r_xload <= xload;
-    r_active <= active; r2_active <= r_active;
-    r_xs <= xs; r2_xs <= r_xs;
-    if (active) begin
-        if (asp8x7_on)
-            xs <= xs == 5'd23 ? 0 : xs + 1;
-        else
-            xs <= xs == 5'd20 ? 0 : xs + 1;
-    end
-
-    // 1 - look up palette and load mixratio
-    if (r_active && r_xload) begin
-        x <= x + 1;
-        rgbv <= NES_PALETTE[mem_portB_rdata];
-        r_rgbv <= rgbv;
-    end
-    mixratio <= next_mixratio;
-    mix <= next_mix;
-
-    // 2 - mix rgb and output
-    if (r2_active) begin
-        if (asp8x7_on && mix)
-            rgb_nes = {rmix[15:8], gmix[15:8], bmix[15:8]};
-        else
-            rgb_nes = rgbv;
-    end else
-        rgb_nes = 24'b0;
-
-    if (gameboy_mode_read)
-        rgb_game = gb_window_read && game_active_read ?
-                   gb_palette(mem_portB_rdata[1:0]) : 24'd0;
-    else
-        rgb_game = game_active_read ? rgb_nes : 24'd0;
+    rgb_game = !image_window ? 24'd0 :
+        {pixel_effect(interpolated[23:16], image_gb, image_effect, image_strength),
+         pixel_effect(interpolated[15:8], image_gb, image_effect, image_strength),
+         pixel_effect(interpolated[7:0], image_gb, image_effect, image_strength)};
 
     // overlay_color[15] marks an OSD glyph pixel; elsewhere the game is dimmed.
     if (overlay)
@@ -348,17 +467,13 @@ always_ff @(posedge clk_pixel) begin
                 1'b0, rgb_game[7:1]};
     else
         rgb <= rgb_game;
-
-    if (cx == 0) begin
-        x <= 0;
-        xs <= 0; r_xs <= 0; r2_xs <= 0;
-    end
 end
 
 // HDMI output.
 logic[2:0] tmds;
 
-hdmi #( .VIDEO_ID_CODE(VIDEOID), 
+hdmi #( .VIDEO_ID_CODE(VIDEOID),
+        .BIT_WIDTH(11),
         .DVI_OUTPUT(0), 
         .VIDEO_REFRESH_RATE(VIDEO_REFRESH),
         .IT_CONTENT(1),
@@ -386,31 +501,5 @@ ELVDS_OBUF tmds_bufds [3:0] (
     .O({tmds_clk_p, tmds_d_p}),
     .OB({tmds_clk_n, tmds_d_n})
 );
-
-// divide by three lookup table
-genvar i;
-generate
-    for (i = 0; i < 768; i = i + 1) begin : gen_one_third
-        assign ONE_THIRD[i] = i / 3;
-    end
-endgenerate
-
-// 2C02 palette: https://www.nesdev.org/wiki/PPU_palettes
-assign NES_PALETTE[0] = 24'h545454;  assign NES_PALETTE[1] = 24'h001e74;  assign NES_PALETTE[2] = 24'h081090;  assign NES_PALETTE[3] = 24'h300088;  
-assign NES_PALETTE[4] = 24'h440064;  assign NES_PALETTE[5] = 24'h5c0030;  assign NES_PALETTE[6] = 24'h540400;  assign NES_PALETTE[7] = 24'h3c1800;
-assign NES_PALETTE[8] = 24'h202a00;  assign NES_PALETTE[9] = 24'h083a00;  assign NES_PALETTE[10] = 24'h004000;  assign NES_PALETTE[11] = 24'h003c00;  
-assign NES_PALETTE[12] = 24'h00323c;  assign NES_PALETTE[13] = 24'h000000;  assign NES_PALETTE[14] = 24'h000000;  assign NES_PALETTE[15] = 24'h000000;
-assign NES_PALETTE[16] = 24'h989698;  assign NES_PALETTE[17] = 24'h084cc4;  assign NES_PALETTE[18] = 24'h3032ec;  assign NES_PALETTE[19] = 24'h5c1ee4;  
-assign NES_PALETTE[20] = 24'h8814b0;  assign NES_PALETTE[21] = 24'ha01464;  assign NES_PALETTE[22] = 24'h982220;  assign NES_PALETTE[23] = 24'h783c00;
-assign NES_PALETTE[24] = 24'h545a00;  assign NES_PALETTE[25] = 24'h287200;  assign NES_PALETTE[26] = 24'h087c00;  assign NES_PALETTE[27] = 24'h007628; 
-assign NES_PALETTE[28] = 24'h006678;  assign NES_PALETTE[29] = 24'h000000;  assign NES_PALETTE[30] = 24'h000000;  assign NES_PALETTE[31] = 24'h000000;
-assign NES_PALETTE[32] = 24'heceeec;  assign NES_PALETTE[33] = 24'h4c9aec;  assign NES_PALETTE[34] = 24'h787cec;  assign NES_PALETTE[35] = 24'hb062ec;  
-assign NES_PALETTE[36] = 24'he454ec;  assign NES_PALETTE[37] = 24'hec58b4;  assign NES_PALETTE[38] = 24'hec6a64;  assign NES_PALETTE[39] = 24'hd48820;
-assign NES_PALETTE[40] = 24'ha0aa00;  assign NES_PALETTE[41] = 24'h74c400;  assign NES_PALETTE[42] = 24'h4cd020;  assign NES_PALETTE[43] = 24'h38cc6c; 
-assign NES_PALETTE[44] = 24'h38b4cc;  assign NES_PALETTE[45] = 24'h3c3c3c;  assign NES_PALETTE[46] = 24'h000000;  assign NES_PALETTE[47] = 24'h000000;
-assign NES_PALETTE[48] = 24'heceeec;  assign NES_PALETTE[49] = 24'ha8ccec;  assign NES_PALETTE[50] = 24'hbcbcec;  assign NES_PALETTE[51] = 24'hd4b2ec;
-assign NES_PALETTE[52] = 24'hecaeec;  assign NES_PALETTE[53] = 24'hecaed4;  assign NES_PALETTE[54] = 24'hecb4b0;  assign NES_PALETTE[55] = 24'he4c490;
-assign NES_PALETTE[56] = 24'hccd278;  assign NES_PALETTE[57] = 24'hb4de78;  assign NES_PALETTE[58] = 24'ha8e290;  assign NES_PALETTE[59] = 24'h98e2b4;
-assign NES_PALETTE[60] = 24'ha0d6e4;  assign NES_PALETTE[61] = 24'ha0a2a0;  assign NES_PALETTE[62] = 24'h000000;  assign NES_PALETTE[63] = 24'h000000;
 
 endmodule

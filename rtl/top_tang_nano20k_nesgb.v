@@ -157,6 +157,7 @@ wire cheat_apply;
 wire cheat_reset;
 wire [128:0] cheat_code;
 wire color_mode;
+wire [6:0] nintendo_color;
 wire [3:0] audio_volume;
 wire [3:0] audio_bass;
 wire [3:0] audio_treble;
@@ -224,6 +225,7 @@ iosys #(
     .cheat_reset         (cheat_reset),
     .cheat_code          (cheat_code),
     .color_mode          (color_mode),
+    .nintendo_color      (nintendo_color),
     .audio_volume        (audio_volume),
     .audio_bass          (audio_bass),
     .audio_treble         (audio_treble),
@@ -449,118 +451,95 @@ GameLoader u_nes_loader (
     .rom_loaded       ()
 );
 
-wire [15:0] gb_addr;
-wire [7:0] gb_dout;
-wire [7:0] gb_din;
-wire gb_wr;
-wire gb_rd;
+wire [21:0] gb_mem_addr;
+wire gb_mem_rd;
+wire gb_mem_wr;
+wire [7:0] gb_mem_wdata;
 wire gb_hs;
 wire gb_vs;
-wire gb_cpl;
-wire [1:0] gb_pixel;
+wire [5:0] gb_pixel;
 wire gb_valid;
+wire gb_cgb_mode;
+wire gb_pal_wr;
+wire [6:0] gb_pal_addr;
+wire [7:0] gb_pal_data;
 wire [15:0] gb_audio_l;
 wire [15:0] gb_audio_r;
-wire [7:0] gb_key = {game_buttons[5], game_buttons[4],
-                     game_buttons[6], game_buttons[7],
-                     game_buttons[3], game_buttons[2],
+// gbc_core order: {Start, Select, B, A, Down, Up, Left, Right}.
+// SNES B/A -> GB A, SNES Y/X -> GB B.
+wire [7:0] gb_key = {game_buttons[3], game_buttons[2],
                      (game_buttons[1] | game_buttons[9]),
-                     (game_buttons[0] | game_buttons[8])};
-reg [2:0] gb_clock_count = 3'd0;
-reg gb_clock_source = 1'b0;
-reg gb_clock_gate = 1'b1;
-wire gb_clk = gb_clock_source & gb_clock_gate;
+                     (game_buttons[0] | game_buttons[8]),
+                     game_buttons[5], game_buttons[4],
+                     game_buttons[6], game_buttons[7]};
 
-always @(posedge mclk) begin
-    if (gb_clock_count == 3'd4) begin
-        gb_clock_count <= 3'd0;
-        gb_clock_source <= 1'b1;
-    end else begin
-        gb_clock_count <= gb_clock_count + 3'd1;
-        if (gb_clock_count == 3'd1)
-            gb_clock_source <= 1'b0;
-    end
-end
-
-always @(negedge gb_clock_source)
-    gb_clock_gate <= !game_pause;
-
-boy u_gameboy (
-    .rst   (!sys_resetn || !gb_game_active || game_reset || button_reset),
-    .clk   (gb_clk),
-    .phi   (),
-    .a     (gb_addr),
-    .dout  (gb_dout),
-    .din   (gb_din),
-    .wr    (gb_wr),
-    .rd    (gb_rd),
-    .key   (gb_key),
-    .hs    (gb_hs),
-    .vs    (gb_vs),
-    .cpl   (gb_cpl),
-    .pixel (gb_pixel),
-    .valid (gb_valid),
-    .left  (gb_audio_l),
-    .right (gb_audio_r),
-    .done  (),
-    .fault ()
-);
-
+reg [7:0] gb_cgb_flag = 8'd0;
 reg [7:0] gb_mapper_type = 8'd0;
+reg [7:0] gb_rom_size_code = 8'd0;
 reg [7:0] gb_ram_size_code = 8'd0;
-wire [21:0] gb_cart_addr;
-wire gb_rom_select;
-wire gb_ram_select;
-wire gb_ram_write;
-wire gb_mapper_supported;
 
 always @(posedge mclk) begin
     if (loader_reset) begin
+        gb_cgb_flag <= 8'd0;
         gb_mapper_type <= 8'd0;
+        gb_rom_size_code <= 8'd0;
         gb_ram_size_code <= 8'd0;
     end else if (loading && !nes_mode && ld_wr) begin
+        if (ld_addr == 23'h143)
+            gb_cgb_flag <= ld_data;
         if (ld_addr == 23'h147)
             gb_mapper_type <= ld_data;
+        if (ld_addr == 23'h148)
+            gb_rom_size_code <= ld_data;
         if (ld_addr == 23'h149)
             gb_ram_size_code <= ld_data;
     end
 end
 
-gb_cart_mapper u_gb_cart_mapper (
-    .clk             (mclk),
-    .reset           (!sys_resetn || !gb_game_active || game_reset || button_reset),
-    .mapper_type     (gb_mapper_type),
-    .ram_size_code   (gb_ram_size_code),
-    .cpu_addr        (gb_addr),
-    .cpu_dout        (gb_dout),
-    .cpu_rd          (gb_rd),
-    .cpu_wr          (gb_wr),
-    .cart_addr       (gb_cart_addr),
-    .rom_select      (gb_rom_select),
-    .ram_select      (gb_ram_select),
-    .ram_write       (gb_ram_write),
-    .mapper_supported(gb_mapper_supported)
+gbc_core #(.MEM_LAT(5)) u_gameboy (
+    .clk        (mclk),
+    .reset      (!sys_resetn || !gb_game_active || game_reset || button_reset),
+    .pause      (game_pause),
+    .cgb_enable (gb_cgb_flag[7]),
+    .cart_type  (gb_mapper_type),
+    .rom_size   (gb_rom_size_code),
+    .ram_size   (gb_ram_size_code),
+    .buttons    (gb_key),
+    .mem_addr   (gb_mem_addr),
+    .mem_rd     (gb_mem_rd),
+    .mem_wr     (gb_mem_wr),
+    .mem_wdata  (gb_mem_wdata),
+    .mem_rdata  (sdram_cpu_din),
+    .pix_valid  (gb_valid),
+    .pix_index  (gb_pixel),
+    .hsync      (gb_hs),
+    .vsync      (gb_vs),
+    .cgb_mode   (gb_cgb_mode),
+    .pal_wr     (gb_pal_wr),
+    .pal_wr_addr(gb_pal_addr),
+    .pal_wr_data(gb_pal_data),
+    .audio_l    (gb_audio_l),
+    .audio_r    (gb_audio_r)
 );
 
-wire [21:0] sdram_cpu_addr = nes_mode ? nes_cpu_addr : gb_cart_addr;
+wire [21:0] sdram_cpu_addr = nes_mode ? nes_cpu_addr : gb_mem_addr;
 wire [7:0] sdram_cpu_din;
 wire [7:0] sdram_ppu_din;
 assign nes_cpu_din = sdram_cpu_din;
 assign nes_ppu_din = sdram_ppu_din;
-assign gb_din = gb_rom_select || gb_ram_select ? sdram_cpu_din : 8'hff;
 
 assign nes_mem_write_b = nes_game_active && nes_cpu_write;
 assign nes_mem_read_b = nes_game_active && nes_cpu_read;
 wire sdram_cpu_write = nes_mode ?
                        (nes_mem_write_b && !loading) :
-                       (gb_game_active && gb_ram_write);
+                       (gb_game_active && gb_mem_wr);
 wire sdram_cpu_read = nes_mode ?
                       (nes_mem_read_b && !loading) :
-                      (gb_game_active && (gb_rom_select || gb_ram_select));
+                      (gb_game_active && gb_mem_rd);
 
 wire [21:0] sdram_addr_b = loader_write_mem ? loader_addr_mem : sdram_cpu_addr;
 wire [7:0] sdram_din_b = loader_write_mem ? loader_data_mem :
-                         (nes_mode ? nes_cpu_dout : gb_dout);
+                         (nes_mode ? nes_cpu_dout : gb_mem_wdata);
 wire sdram_we_b = loader_write_mem || sdram_cpu_write;
 wire sdram_oe_b = !loader_write_mem && sdram_cpu_read;
 
@@ -698,13 +677,12 @@ wire [15:0] overlay_color = {osd_text, osd_rgb[23:19],
                              osd_rgb[15:11], osd_rgb[7:3]};
 wire [10:0] overlay_x;
 wire [9:0] overlay_y;
-// Centre IOSys' 640x480 OSD plane in the 1280x720 frame. The registered
-// coordinates keep textdisp's three-pixel lead on the HDMI raster.
+// Registered coordinates keep textdisp's three-pixel lead on the HDMI raster.
 reg [10:0] osd_x_r = 11'h7ff;
 reg [9:0] osd_y_r = 10'h3ff;
 reg osd_de_r = 1'b0;
-wire [10:0] osd_x_next = overlay_x - 11'd316;
-wire [9:0] osd_y_next = overlay_y - 10'd120;
+wire [10:0] osd_x_next = overlay_x;
+wire [9:0] osd_y_next = overlay_y;
 always @(posedge hclk) begin
     osd_x_r <= osd_x_next;
     osd_y_r <= osd_y_next;
@@ -722,12 +700,19 @@ nes2hdmi u_nes2hdmi (
     .scanline     (nes_scanline),
     .sample       (nes2hdmi_sample),
     .aspect_8x7   (1'b1),
+    .zoom_mode    (video_zoom),
+    .effect_strength(scanline),
+    .nintendo_color(nintendo_color),
     .gameboy_mode (!nes_mode),
     .game_active  (game_active),
     .gameboy_pixel(gb_pixel),
     .gameboy_hs   (gb_hs),
     .gameboy_vs   (gb_vs),
     .gameboy_valid(gb_valid),
+    .gameboy_color(gb_cgb_mode),
+    .gameboy_pal_wr(gb_pal_wr),
+    .gameboy_pal_addr(gb_pal_addr),
+    .gameboy_pal_data(gb_pal_data),
     .overlay      (osd_on),
     .overlay_x    (overlay_x),
     .overlay_y    (overlay_y),

@@ -51,7 +51,12 @@ mclk 23.8/21.6 MHz, hclk 49.2/25.2 MHz (TNS 0).
 The ROM header heuristics in `firmware/rom.c` are adapted from the upstream
 PicoRV32 firmware at tag `v0.7` (GPLv3).
 
-Current limits: NTSC, one SNES pad, LoROM/HiROM up to 3.75 MiB (3,932,160 bytes),
+The browser's **Options > Region** setting is currently **NTSC only** for this
+profile. PAL PPU timing produces a 50 Hz frame cadence, but the Nano 20K video
+scaler has a fixed 60 Hz HDMI output and a rolling line buffer; enabling PAL
+causes severe slowdown and repeated image rows. The PAL input is therefore
+held low until a PAL-aware frame-buffer/output mode is implemented.
+Other current limits: one SNES pad, LoROM/HiROM up to 3.75 MiB (3,932,160 bytes),
 128 KiB SRAM maximum. ExHiROM, Super FX, SA-1, CX4, S-DD1, SPC7110 and ST01x
 are rejected. Audio worked in the previous profile; graphics fixes and VGA
 output require hardware retesting.

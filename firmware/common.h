@@ -14,12 +14,16 @@
 
 #define ROM_MIN_SIZE 1024
 #define ROM_MAX_SIZE (4*1024*1024)
+// MD physical SDRAM: ROM 000000..5fffff, firmware 600000..79ffff
+// (same 0x1a0000 linker window), work RAM 7a0000, cartridge RAM 7c0000.
+#define MD_ROM_MAX_SIZE 0x600000u
 
 extern char pwd[PWD_SIZE];                  // browser.c
 extern uint8_t io_buf[2048];                // firmware.c
 extern char current_game_name[NAME_MAX];    // firmware.c
 extern int current_game_populous;           // firmware.c
 extern uint32_t current_game_snes_ram_size;
+extern int current_game_cgb;
 
 // ---- util.c ---------------------------------------------------------------
 uint8_t to_bcd(uint32_t v);

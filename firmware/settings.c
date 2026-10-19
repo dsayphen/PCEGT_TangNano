@@ -4,6 +4,7 @@
 
 #include "common.h"
 #include "settings.h"
+#include "rom.h"
 
 // ---------------------------------------------------------------------------
 // Video configuration & Persistence
@@ -17,8 +18,30 @@ int video_zoom = 1;       // hardware reset default: stretch
 int video_scanline = 0;   // hardware reset default: off
 int game_pad_mode = 0;    // hardware reset default: 2 buttons
 int video_color = 0;      // hardware reset default: raw RGB
+int nes_palette = 0;
+int gbc_color = 0;
+int gb_palette = 0;
 int cheats_enabled = 0;
 int vdc_sprites_double = 0;
+
+int video_is_gameboy(void) {
+    return CORE_PROFILE_ID == CORE_PROFILE_NINTENDO8 &&
+           is_gameboy(current_game_name);
+}
+
+int video_zoom_count(void) {
+    return video_is_gameboy() || CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE ? 2 : 3;
+}
+
+int video_is_gbc(void) {
+    return video_is_gameboy() && current_game_cgb;
+}
+
+void nintendo_color_apply(void) {
+    if (CORE_PROFILE_ID == CORE_PROFILE_NINTENDO8 &&
+        CORE_EXTENDED_SETTINGS_SUPPORTED)
+        reg_nintendo_color = nes_palette | (gbc_color << 3) | (gb_palette << 5);
+}
 
 static int open_game_config(FIL *file, const char *game_name) {
     char path[PWD_SIZE + NAME_MAX + 16];
@@ -251,6 +274,7 @@ int game_cheats_activated_save(const char *game_name, const uint8_t *indices,
 void video_config_load(void) {
     FIL file;
     char line[64];
+    int have_gbc_color = 0;
 
     if (f_open(&file, VIDEO_CFG_FILE, FA_READ) != FR_OK) {
         return;
@@ -263,18 +287,34 @@ void video_config_load(void) {
 
         if (starts_with(line, "reg_video_zoom=")) {
             video_zoom = parse_u8(line + 15);
-            if (video_zoom > 2)
+            if (video_zoom > 2 ||
+                (CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE && video_zoom > 1))
                 video_zoom = 1;
             reg_video_zoom = video_zoom;
         } else if (starts_with(line, "reg_scanline=")) {
             video_scanline = reg_scanline = parse_u8(line + 13);
         } else if (starts_with(line, "color_palette=")) {
             video_color = parse_u8(line + 14) ? 1 : 0;
-            reg_color_mode = video_color;
+            if (CORE_PROFILE_ID != CORE_PROFILE_MEGADRIVE)
+                reg_color_mode = video_color;
+        } else if (starts_with(line, "nes_palette=")) {
+            unsigned value = parse_u8(line + 12);
+            nes_palette = value < 8 ? value : 0;
+        } else if (starts_with(line, "gbc_accurate=")) {
+            if (!have_gbc_color)
+                gbc_color = parse_u8(line + 13) ? 1 : 0;
+        } else if (starts_with(line, "gbc_color=")) {
+            unsigned value = parse_u8(line + 10);
+            gbc_color = value < 3 ? value : 0;
+            have_gbc_color = 1;
+        } else if (starts_with(line, "gb_palette=")) {
+            unsigned value = parse_u8(line + 11);
+            gb_palette = value < 4 ? value : 0;
         }
     }
 
     f_close(&file);
+    nintendo_color_apply();
 }
 
 void video_config_save(void) {
@@ -303,12 +343,31 @@ void video_config_save(void) {
         "#   2 = 50% Intensity\n"
         "#   3 = 100% Intensity\n"
         "# color_palette : 0 = RAW RGB, 1 = Composite\n"
+        "# nes_palette : 0=Original, 1=Composite Direct, 2=NES Classic,\n"
+        "#   3=PC-10, 4=PVM D93, 5=Smooth, 6=Sony CXA, 7=Wavebeam\n"
+        "# gbc_color : 0=Off, 1=Accurate, 2=Fast\n"
+        "# gb_palette : 0=Off, 1=DMG, 2=Pocket, 3=Light\n"
+        "# GB zoom: 0=Integer, 1/2=Wide Stretch\n"
+        "# GB/GBC reg_scanline: 0=Off, 1=10%, 2=20%, 3=30% grid\n"
         "# -----------------------------------\n";
 
     f_write(&file, header, (UINT)strlen(header), &bw);
 
     f_write(&file, "reg_video_zoom=", 15, &bw);
     len = u8_to_str(num, reg_video_zoom);
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+
+    f_write(&file, "nes_palette=", 12, &bw);
+    len = u8_to_str(num, nes_palette);
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+    f_write(&file, "gbc_color=", 10, &bw);
+    len = u8_to_str(num, gbc_color);
+    f_write(&file, num, len, &bw);
+    f_write(&file, "\n", 1, &bw);
+    f_write(&file, "gb_palette=", 11, &bw);
+    len = u8_to_str(num, gb_palette);
     f_write(&file, num, len, &bw);
     f_write(&file, "\n", 1, &bw);
 
@@ -339,12 +398,17 @@ int audio_output_hdmi = 0; // 0 = onboard speaker, 1 = HDMI
 int audio_cdda_enabled = 1;
 int audio_adpcm_enabled = 1;
 int audio_paused = 0;
+int console_region = CONSOLE_REGION_NTSC_US;
 
 // Pushes the current settings to reg_audio; bass/treble are biased by +5 to
 // match the unsigned 0..10 range iosys.v stores them in.
 void audio_apply(void) {
     uint32_t volume = audio_paused ? 0 : (uint32_t)audio_volume;
 
+    if (CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE) {
+        reg_audio = volume | ((uint32_t)audio_output_hdmi << 12);
+        return;
+    }
     reg_audio = volume |
                 ((uint32_t)(audio_bass + 5) << 4) |
                 ((uint32_t)(audio_treble + 5) << 8) |
@@ -444,7 +508,14 @@ void audio_config_save(void) {
 #define SYSTEM_CFG_FILE   "/config/system.cfg"
 
 void vdc_options_apply(void) {
+    if (CORE_PROFILE_ID == CORE_PROFILE_MEGADRIVE)
+        return;
     reg_vdc_options = vdc_sprites_double ? 1u : 0u;
+}
+
+void console_region_apply(void) {
+    if (CORE_EXTENDED_SETTINGS_SUPPORTED)
+        reg_console_region = (uint32_t)console_region;
 }
 
 void system_config_load(void) {
@@ -453,6 +524,7 @@ void system_config_load(void) {
 
     if (f_open(&file, SYSTEM_CFG_FILE, FA_READ) != FR_OK) {
         vdc_options_apply();
+        console_region_apply();
         return;
     }
 
@@ -465,10 +537,16 @@ void system_config_load(void) {
             cheats_enabled = parse_u8(line + 9) ? 1 : 0;
         else if (starts_with(line, "sprites_double="))
             vdc_sprites_double = parse_u8(line + 15) ? 1 : 0;
+        else if (starts_with(line, "console_region=")) {
+            uint8_t value = parse_u8(line + 15);
+            console_region = value <= CONSOLE_REGION_NTSC_JP ? value :
+                             CONSOLE_REGION_NTSC_US;
+        }
     }
 
     f_close(&file);
     vdc_options_apply();
+    console_region_apply();
 }
 
 void system_config_save(void) {
@@ -479,6 +557,7 @@ void system_config_save(void) {
         "# debug_uart : 0 = off, 1 = debug traces on the UART\n"
         "# cheats : 0 = off, 1 = PCE / SGX / CD cheats\n"
         "# sprites_double : 0 = 16 sprites/line, 1 = 32 sprites/line\n"
+        "# console_region : 0 = NTSC US, 1 = NTSC Japan\n"
         "debug_uart=";
 
     f_mkdir("/config");
@@ -492,5 +571,10 @@ void system_config_save(void) {
     f_write(&file, cheats_enabled ? "1\n" : "0\n", 2, &bw);
     f_write(&file, "sprites_double=", 15, &bw);
     f_write(&file, vdc_sprites_double ? "1\n" : "0\n", 2, &bw);
+    f_write(&file, "console_region=", 15, &bw);
+    char region[4];
+    int region_len = u8_to_str(region, (uint8_t)console_region);
+    f_write(&file, region, region_len, &bw);
+    f_write(&file, "\n", 1, &bw);
     f_close(&file);
 }

@@ -1,7 +1,10 @@
 // HDMI 1.4 audio packets for the Tang Nano 20K.
 // Packet organization follows HDMI 1.4a; the packet scheduling approach was
 // informed by NESTang's GPLv3 HDMI transmitter by Sameer Puri.
-module hdmi_audio_packetizer (
+module hdmi_audio_packetizer #(
+    parameter SAMPLES_PER_PACKET = 4,
+    parameter ACR_COUNTER_BITS = 20
+) (
     input  wire               clk_pixel,
     input  wire               resetn,
     input  wire               audio_enable,
@@ -27,17 +30,19 @@ reg [1:0] audio_clock_sync;
 reg       audio_clock_delayed;
 wire      audio_rising = audio_clock_sync[1] && !audio_clock_delayed;
 
-reg [15:0] sample_l [1:0][3:0];
-reg [15:0] sample_r [1:0][3:0];
+reg [15:0] sample_l [1:0][SAMPLES_PER_PACKET-1:0];
+reg [15:0] sample_r [1:0][SAMPLES_PER_PACKET-1:0];
 reg        sample_write_bank;
 reg        sample_read_bank;
+reg        sample_packet_bank;
 reg [1:0]  sample_write_index;
 reg [1:0]  sample_ready;
 reg [7:0]  audio_frame_counter;
 
 reg [5:0]  acr_audio_count;
-reg [19:0] acr_cycle_count;
-reg [19:0] acr_cycle_stamp;
+reg [ACR_COUNTER_BITS-1:0] acr_cycle_count;
+reg [ACR_COUNTER_BITS-1:0] acr_cycle_stamp;
+wire [19:0] acr_stamp = acr_cycle_stamp;
 reg        acr_pending;
 reg        audio_info_sent;
 reg        avi_info_sent;
@@ -48,8 +53,8 @@ reg [4:0] packet_counter;
 wire [19:0] acr_n = 20'd6144;
 wire [55:0] acr_sub = {
     acr_n[7:0], acr_n[15:8], 4'd0, acr_n[19:16],
-    acr_cycle_stamp[7:0], acr_cycle_stamp[15:8],
-    4'd0, acr_cycle_stamp[19:16], 8'd0
+    acr_stamp[7:0], acr_stamp[15:8],
+    4'd0, acr_stamp[19:16], 8'd0
 };
 
 wire [63:0] bch0 = {parity0, sub[0]};
@@ -114,6 +119,14 @@ reg right_parity;
 
 always @* begin
     header = 24'd0;
+    frame_bit = 0;
+    sample_starts = 0;
+    left_word = 0;
+    right_word = 0;
+    left_status = 0;
+    right_status = 0;
+    left_parity = 0;
+    right_parity = 0;
     for (i = 0; i < 4; i = i + 1)
         sub[i] = 56'd0;
 
@@ -125,15 +138,16 @@ always @* begin
         end
         PACKET_AUDIO: begin
             sample_starts = 4'b0000;
-            for (i = 0; i < 4; i = i + 1) begin
+            for (i = 0; i < SAMPLES_PER_PACKET; i = i + 1) begin
                 frame_bit = audio_frame_counter + i;
                 sample_starts[i] = (frame_bit == 8'd0);
             end
-            header = {sample_starts, 8'b00000000, 4'b1111, 8'd2};
-            for (i = 0; i < 4; i = i + 1) begin
+            header = {sample_starts, 8'b00000000, 4'b0000, 8'd2} |
+                     (((1 << SAMPLES_PER_PACKET) - 1) << 8);
+            for (i = 0; i < SAMPLES_PER_PACKET; i = i + 1) begin
                 frame_bit = audio_frame_counter + i;
-                left_word = {sample_l[sample_read_bank][i], 8'd0};
-                right_word = {sample_r[sample_read_bank][i], 8'd0};
+                left_word = {sample_l[sample_packet_bank][i], 8'd0};
+                right_word = {sample_r[sample_packet_bank][i], 8'd0};
                 left_status = status_bit(frame_bit, 1'b0);
                 right_status = status_bit(frame_bit, 1'b1);
                 left_parity = ^{left_status, 1'b0, 1'b0, left_word};
@@ -168,10 +182,11 @@ always @(posedge clk_pixel) begin
         audio_clock_delayed <= 1'b0;
         sample_write_bank  <= 1'b0;
         sample_read_bank   <= 1'b0;
+        sample_packet_bank <= 1'b0;
         sample_write_index <= 2'd0;
         sample_ready       <= 2'b00;
         audio_frame_counter <= 8'd0;
-        acr_audio_count    <= 6'd0;
+        acr_audio_count    <= 6'd63;
         acr_cycle_count    <= 20'd0;
         acr_cycle_stamp    <= 20'd0;
         acr_pending        <= 1'b0;
@@ -185,7 +200,7 @@ always @(posedge clk_pixel) begin
             if (!sample_ready[sample_write_bank]) begin
                 sample_l[sample_write_bank][sample_write_index] <= sample_left;
                 sample_r[sample_write_bank][sample_write_index] <= sample_right;
-                if (sample_write_index == 2'd3) begin
+                if (sample_write_index == SAMPLES_PER_PACKET - 1) begin
                     sample_ready[sample_write_bank] <= 1'b1;
                     sample_write_bank <= !sample_write_bank;
                     sample_write_index <= 2'd0;
@@ -194,7 +209,11 @@ always @(posedge clk_pixel) begin
                 end
             end
 
-            if (acr_audio_count == 6'd47) begin
+            if (acr_audio_count == 6'd63) begin
+                // Establish the first sample edge before measuring 48 intervals.
+                acr_audio_count <= 0;
+                acr_cycle_count <= 0;
+            end else if (acr_audio_count == 6'd47) begin
                 acr_audio_count <= 6'd0;
                 acr_cycle_stamp <= acr_cycle_count + 20'd1;
                 acr_cycle_count <= 20'd0;
@@ -210,9 +229,11 @@ always @(posedge clk_pixel) begin
         end
 
         if (packet_period && packet_counter == 5'd31 &&
-            packet_type == PACKET_AUDIO)
-            audio_frame_counter <= audio_frame_counter == 8'd188 ?
-                                   8'd0 : audio_frame_counter + 8'd4;
+            packet_type == PACKET_AUDIO) begin
+            audio_frame_counter <= audio_frame_counter == 192 - SAMPLES_PER_PACKET ?
+                                   8'd0 : audio_frame_counter + SAMPLES_PER_PACKET;
+            sample_ready[sample_packet_bank] <= 1'b0;
+        end
 
         if (packet_start) begin
             if (acr_pending) begin
@@ -220,7 +241,7 @@ always @(posedge clk_pixel) begin
                 acr_pending <= 1'b0;
             end else if (sample_ready[sample_read_bank]) begin
                 packet_type <= PACKET_AUDIO;
-                sample_ready[sample_read_bank] <= 1'b0;
+                sample_packet_bank <= sample_read_bank;
                 sample_read_bank <= !sample_read_bank;
             end else if (!audio_info_sent) begin
                 packet_type <= PACKET_INFO;

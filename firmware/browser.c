@@ -36,12 +36,16 @@ static int is_hidden_dir(const char *name) {
     return 0;
 }
 
-static int check_entry_profile(const char *name) {
+static int check_entry_profile(const char *name, uint32_t size) {
     uint32_t required = core_game_profile(name);
 
     if (core_supports_game(CORE_PROFILE_ID, name))
         return 1;
 
+    // A CD data track must not trigger an MD core copy merely due to .bin.
+    if (required == CORE_PROFILE_MEGADRIVE &&
+        validate_megadrive_rom(name, size) != 0)
+        return 0;
     core_offer_switch(required, name);
     return 0;
 }
@@ -237,7 +241,7 @@ static void draw_page(int page, int total, int active) {
     clear_line(ROW_STATUS);
     cursor(1, ROW_STATUS);
     if (total == 0)
-        print("No .PCE/.SGX/.CUE files here");
+        print("No supported game files here");
     else
         printf("P%d/%d A=open B=back SEL=opt", page + 1, pages);
 }
@@ -259,7 +263,8 @@ void browser_default_dir(void) {
     case CORE_PROFILE_SGX: dir = "/pce"; break;
     case CORE_PROFILE_CD: dir = "/pcecd"; break;
     case CORE_PROFILE_SNES: dir = "/snes"; break;
-    case CORE_PROFILE_NINTENDO8: dir = "/nintendo8"; break;
+    case CORE_PROFILE_NINTENDO8: dir = "/nes"; break;
+    case CORE_PROFILE_MEGADRIVE: dir = "/md"; break;
     default: return;
     }
     if (f_stat(dir, &info) == FR_OK && (info.fattrib & AM_DIR))
@@ -382,7 +387,7 @@ void browse(void) {
                     if (is_cd_dir(names[active])) {
                         char cue_name[NAME_MAX];
                         if (find_cd_cue(cue_name, sizeof(cue_name)) == 0 &&
-                            check_entry_profile(cue_name) &&
+                            check_entry_profile(cue_name, 0) &&
                             open_cd_image(cue_name) == 0) {
                             overlay(0);
                             uart_printf("browser: CD started, overlay=%d\n", overlay_status());
@@ -399,7 +404,7 @@ void browse(void) {
                     need_redraw = 1;
                 }
             } else {
-                if (!check_entry_profile(names[active])) {
+                if (!check_entry_profile(names[active], sizes[active])) {
                     need_redraw = 1;
                     continue;
                 }

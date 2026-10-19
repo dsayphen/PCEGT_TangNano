@@ -12,7 +12,14 @@
 //
 
 module dvi_tx #(
-    parameter HDMI_AUDIO = 1
+    parameter HDMI_AUDIO = 1,
+    parameter SERIAL_RESET_SYNC = 0,
+    parameter H_TOTAL = 819,
+    parameter ACTIVE_X = 152,
+    parameter ACTIVE_Y = 42,
+    parameter AUDIO_SAMPLES_PER_PACKET = 4,
+    parameter PREAMBLE_NEXT_LINE = 0,
+    parameter AUDIO_ACR_COUNTER_BITS = 20
 ) (
     input  wire       clk_pix,      // 25.92 MHz
     input  wire       clk_pix5,     // 129.6 MHz
@@ -26,6 +33,7 @@ module dvi_tx #(
     input  wire       vsync,        // active high
     input  wire [10:0] pix_x,
     input  wire [9:0]  pix_y,
+    input  wire [9:0]  frame_height,
     input  wire        audio_enable,
     input  wire        clk_audio,
     input  wire signed [15:0] audio_left,
@@ -52,18 +60,20 @@ wire hdmi_audio_on = (HDMI_AUDIO != 0) && audio_enable_sync[1];
 
 // Rebase the scaler's 819x524/526 timing so the 640x480 active window starts
 // at (0,0), leaving its full horizontal blanking interval available for HDMI.
-wire [10:0] cx = pix_x >= 11'd152 ? pix_x - 11'd152 : pix_x + 11'd667;
-wire [9:0] cy = pix_y >= 10'd42 ? pix_y - 10'd42 : pix_y + 10'd982;
+wire [10:0] cx = pix_x >= ACTIVE_X ? pix_x - ACTIVE_X : pix_x + (H_TOTAL - ACTIVE_X);
+wire [9:0] cy = pix_y - ACTIVE_Y;
 
 wire island_period = hdmi_audio_on && cx >= 11'd654 && cx < 11'd782;
 wire island_preamble = hdmi_audio_on && cx >= 11'd644 && cx < 11'd652;
 wire island_guard = hdmi_audio_on &&
                     ((cx >= 11'd652 && cx < 11'd654) ||
                      (cx >= 11'd782 && cx < 11'd784));
-wire video_preamble = hdmi_audio_on && cy < 10'd480 &&
-                      cx >= 11'd809 && cx < 11'd817;
-wire video_guard = hdmi_audio_on && cy < 10'd480 &&
-                   cx >= 11'd817 && cx < 11'd819;
+wire video_line = PREAMBLE_NEXT_LINE != 0 ?
+                  (cy < 10'd479 || cy == frame_height - 1'b1) : cy < 10'd480;
+wire video_preamble = hdmi_audio_on && video_line &&
+                      cx >= H_TOTAL - 10 && cx < H_TOTAL - 2;
+wire video_guard = hdmi_audio_on && video_line &&
+                   cx >= H_TOTAL - 2 && cx < H_TOTAL;
 wire packet_start = hdmi_audio_on && cx >= 11'd653 && cx < 11'd781 &&
                     cx[4:0] == 5'd13;
 wire video_field_end = cx == 11'd639 && cy == 10'd479;
@@ -83,7 +93,8 @@ wire [11:0] island_data = {
 
 generate
     if (HDMI_AUDIO != 0) begin : g_hdmi_audio
-        hdmi_audio_packetizer u_audio_packets (
+        hdmi_audio_packetizer #(.SAMPLES_PER_PACKET(AUDIO_SAMPLES_PER_PACKET),
+                               .ACR_COUNTER_BITS(AUDIO_ACR_COUNTER_BITS)) u_audio_packets (
             .clk_pixel       (clk_pix),
             .resetn          (resetn),
             .audio_enable    (hdmi_audio_on),
@@ -125,7 +136,24 @@ tmds_encoder #(.CHANNEL(2)) enc2 (
     .data_island(island_data[11:8]), .dout(tmds_ch2)
 );
 
-wire ser_reset = ~resetn;
+wire [2:0] ser_reset;
+generate
+    if (SERIAL_RESET_SYNC != 0) begin : g_serial_reset
+        reg reset_meta = 1'b1;
+        (* syn_preserve = 1, syn_keep = 1 *) reg reset_sync = 1'b1;
+        always @(posedge clk_pix5 or negedge resetn)
+            if (!resetn) begin
+                reset_meta <= 1'b1;
+                reset_sync <= 1'b1;
+            end else begin
+                reset_meta <= 1'b0;
+                reset_sync <= reset_meta;
+            end
+        assign ser_reset = {3{reset_sync}};
+    end else begin : g_pixel_reset
+        assign ser_reset = {3{~resetn}};
+    end
+endgenerate
 wire [2:0] tmds_serial;
 
 OSER10 ser0 (
@@ -133,7 +161,7 @@ OSER10 ser0 (
     .D0 (tmds_ch0[0]), .D1 (tmds_ch0[1]), .D2 (tmds_ch0[2]), .D3 (tmds_ch0[3]),
     .D4 (tmds_ch0[4]), .D5 (tmds_ch0[5]), .D6 (tmds_ch0[6]), .D7 (tmds_ch0[7]),
     .D8 (tmds_ch0[8]), .D9 (tmds_ch0[9]),
-    .PCLK(clk_pix), .FCLK(clk_pix5), .RESET(ser_reset)
+    .PCLK(clk_pix), .FCLK(clk_pix5), .RESET(ser_reset[0])
 );
 
 OSER10 ser1 (
@@ -141,7 +169,7 @@ OSER10 ser1 (
     .D0 (tmds_ch1[0]), .D1 (tmds_ch1[1]), .D2 (tmds_ch1[2]), .D3 (tmds_ch1[3]),
     .D4 (tmds_ch1[4]), .D5 (tmds_ch1[5]), .D6 (tmds_ch1[6]), .D7 (tmds_ch1[7]),
     .D8 (tmds_ch1[8]), .D9 (tmds_ch1[9]),
-    .PCLK(clk_pix), .FCLK(clk_pix5), .RESET(ser_reset)
+    .PCLK(clk_pix), .FCLK(clk_pix5), .RESET(ser_reset[1])
 );
 
 OSER10 ser2 (
@@ -149,7 +177,7 @@ OSER10 ser2 (
     .D0 (tmds_ch2[0]), .D1 (tmds_ch2[1]), .D2 (tmds_ch2[2]), .D3 (tmds_ch2[3]),
     .D4 (tmds_ch2[4]), .D5 (tmds_ch2[5]), .D6 (tmds_ch2[6]), .D7 (tmds_ch2[7]),
     .D8 (tmds_ch2[8]), .D9 (tmds_ch2[9]),
-    .PCLK(clk_pix), .FCLK(clk_pix5), .RESET(ser_reset)
+    .PCLK(clk_pix), .FCLK(clk_pix5), .RESET(ser_reset[2])
 );
 
 // Gowin LVDS output buffers (ELVDS on a 3.3 V bank)

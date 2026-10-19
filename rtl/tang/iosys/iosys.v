@@ -37,6 +37,7 @@
 //   0x0200_0050                  milliseconds since reset, read only
 //   0x0200_005C                  color palette (0=raw RGB, 1=composite)
 //   0x0200_0060                  core id (bits 15:0), VCE dot clock debug (bits 17:16), VDC0 width debug (bits 24:18), read only
+//   0x0200_00D4                  Nintendo only: NES palette [2:0], GBC correction [4:3], GB palette [6:5]
 //
 // ROM description
 // ---------------
@@ -118,6 +119,7 @@ module iosys #(
     // 0/1/2/3 = 0/25/50/100% scanline darkening on the duplicated line
     output reg  [1:0]  scanline,
     output reg         color_mode,
+    output reg  [6:0]  nintendo_color,
 
     // ---- audio tone controls, all 0..10, biased by +5 for bass/treble -----
     output reg  [3:0]  audio_volume,
@@ -127,6 +129,7 @@ module iosys #(
     output reg         audio_cdda_enable,
     output reg         audio_adpcm_enable,
     output reg         vdc_sprites_double,
+    output reg  [1:0]  console_region,
 
     // Save-RAM service port. The CPU is paused while firmware accesses BRAM.
     input  wire [7:0]  brm_host_q,
@@ -416,9 +419,11 @@ wire game_ctrl_sel = mem_valid && (mem_addr == 32'h0200_004c);
 wire time_sel      = mem_valid && (mem_addr == 32'h0200_0050);
 wire pad_mode_sel  = mem_valid && (mem_addr == 32'h0200_0058);
 wire color_mode_sel= mem_valid && (mem_addr == 32'h0200_005c);
+wire nintendo_color_sel = (CORE_ID == 16'd5) && mem_valid && (mem_addr == 32'h0200_00d4);
 wire id_sel        = mem_valid && (mem_addr == 32'h0200_0060);
 wire audio_sel     = mem_valid && (mem_addr == 32'h0200_0064);
 wire vdc_options_sel = mem_valid && (mem_addr == 32'h0200_00d0);
+wire console_region_sel = mem_valid && (mem_addr == 32'h0200_00d8);
 wire rl_status_sel  = mem_valid && (mem_addr == 32'h0200_0068);
 wire rl_debug_sel   = mem_valid && (mem_addr == 32'h0200_006c);
 wire cd_event_sel  = mem_valid && (mem_addr == 32'h0200_0070);
@@ -522,7 +527,8 @@ assign mem_ready = (ram_sel && rv_ready && !probe_valid) || textdisp_sel ||
                    (uart_div_sel && !diag_uart_owned) ||
                    rl_ctrl_sel || rl_size_sel || joy_sel || zoom_sel || scan_sel ||
                    game_ctrl_sel || rl_status_sel || rl_debug_sel || vdc_options_sel ||
-                   time_sel || pad_mode_sel || color_mode_sel || id_sel || audio_sel ||
+                   console_region_sel ||
+                   time_sel || pad_mode_sel || color_mode_sel || nintendo_color_sel || id_sel || audio_sel ||
                    cd_event_sel || cd_stat_sel || cd_cmd0_sel || cd_cmd1_sel || cd_cmd2_sel ||
                    cd_data0_sel || cd_data1_sel || cd_data2_sel ||
                    (cd_feed_sel && cd_audio_count == 0) || cd_ack_sel ||
@@ -552,10 +558,15 @@ assign mem_rdata = ram_sel      ? rv_rdata :
                    time_sel     ? time_reg :
                    pad_mode_sel ? {pad_mode_sf2, 5'd0, vce_cr_q, vcr_q, vdw_q, pad_mode} :
                    color_mode_sel ? {6'd0, vds_q, vsw_q, hde_q, hsw_q, color_mode} :
-                   id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg, CORE_ID} :
+                   nintendo_color_sel ? {25'd0, nintendo_color} :
+                   // Bit 15 advertises the newer Nintendo color and
+                   // console-region MMIO registers.
+                   id_sel       ? {vid_hds_dbg, vid_hdw_dbg, vid_dcc_dbg,
+                                   (CORE_ID | 16'h8000)} :
                    audio_sel    ? {17'b0, audio_adpcm_enable, audio_cdda_enable,
                                    audio_hdmi, audio_treble, audio_bass, audio_volume} :
                    vdc_options_sel ? {31'b0, vdc_sprites_double} :
+                   console_region_sel ? {30'b0, console_region} :
                    rl_status_sel ? {30'b0, image_valid, loading} :
                    rl_debug_sel ? {2'b0, rl_timeout, rl_cnt, ld_idle, ld_busy, ld_wr,
                                    rl_clearing, rl_finishing, image_valid, loading} :
@@ -940,6 +951,9 @@ always @(posedge clk) begin
     if (color_mode_sel && (mem_wstrb != 4'b0))
         color_mode <= mem_wdata[0];
 
+    if (nintendo_color_sel && mem_wstrb[0])
+        nintendo_color <= mem_wdata[6:0];
+
     if (rom_pop_sel && (mem_wstrb != 4'b0))
         rom_pop <= mem_wdata[0];
 
@@ -970,6 +984,8 @@ always @(posedge clk) begin
     if (vdc_options_sel && (mem_wstrb != 4'b0)) begin
         vdc_sprites_double <= mem_wdata[0];
     end
+    if (console_region_sel && mem_wstrb[0])
+        console_region <= mem_wdata[1:0];
 
     // ---- end of transfer: wait for the SDRAM to really drain -------------
     if (rl_finishing) begin
@@ -1008,12 +1024,14 @@ always @(posedge clk) begin
         pad_mode     <= 1'b0;
         pad_mode_sf2 <= 1'b0;
         color_mode   <= 1'b0;
+        nintendo_color <= 7'd0;
         audio_volume <= 4'd10;     // unity gain
         audio_bass   <= 4'd5;      // flat (offset by +5)
         audio_treble <= 4'd5;      // flat (offset by +5)
         audio_cdda_enable <= 1'b1;
         audio_adpcm_enable <= 1'b1;
         vdc_sprites_double <= 1'b0;
+        console_region <= 2'd0;
         brm_host_addr <= 11'd0;
         brm_host_data <= 8'd0;
         brm_host_we   <= 1'b0;

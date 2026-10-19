@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('pce', 'sgx', 'sgx_rv_diag', 'sgx_no_hdmi_audio', 'sgx_gpio26_input', 'sgx_gpio29_input', 'sgx_gpio29_pulse', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'snes', 'nesgb', 'all')]
+    [ValidateSet('pce', 'sgx', 'sgx_rv_diag', 'sgx_no_hdmi_audio', 'sgx_gpio26_input', 'sgx_gpio29_input', 'sgx_gpio29_pulse', 'cd', 'cdprobe', 'cd_sgx', 'cd_vdc1', 'cd_vdc1_gg', 'cd_vdc1_quiet', 'snes', 'nesgb', 'megadrive', 'all')]
     [string]$Profile = 'all',
     [string]$GowinShell,
     [switch]$SnesSdramPhase180,
@@ -40,6 +40,11 @@ if (-not $GowinShell) {
 }
 if (-not (Test-Path $GowinShell)) {
     throw "Gowin Tcl shell not found: $GowinShell. Pass -GowinShell or set GOWIN_HOME."
+}
+
+if ($Profile -eq 'megadrive') {
+    & (Join-Path $PSScriptRoot 'build_megadrive.ps1') -GowinShell $GowinShell
+    return
 }
 
 $profileIds = @{
@@ -293,7 +298,7 @@ foreach ($name in $profiles) {
 
             $nesgbSources = @(
                 'rtl/nestang/src/nano20k/config.v',
-                'rtl/nestang/src/nano20k/gowin_pll_hdmi.v',
+                'rtl/snestang/src/pllr/gowin_pll_hdmi.v',
                 'rtl/nestang/src/nano20k/gowin_pll_nes.v',
                 'rtl/nestang/src/EEPROM_24C0x.sv',
                 'rtl/nestang/src/apu.v',
@@ -303,6 +308,7 @@ foreach ($name in $profiles) {
                 'rtl/nestang/src/game_loader.v',
                 'rtl/nestang/src/nes.v',
                 'rtl/nestang/src/nes2hdmi.sv',
+                'rtl/nestang/src/gbc_color_correct.sv',
                 'rtl/nestang/src/ppu.v',
                 'rtl/nestang/src/sdram_nes.v',
                 'rtl/nestang/src/mappers/FDS.sv',
@@ -332,29 +338,21 @@ foreach ($name in $profiles) {
                 'rtl/nestang/src/hdmi2/serializer.sv',
                 'rtl/nestang/src/hdmi2/source_product_description_info_frame.sv',
                 'rtl/nestang/src/hdmi2/tmds_channel.sv',
-                'rtl/gb/verilogboy/alu.v',
-                'rtl/gb/verilogboy/boy.v',
-                'rtl/gb/verilogboy/brom.v',
-                'rtl/gb/verilogboy/clk_div.v',
-                'rtl/gb/verilogboy/common.v',
-                'rtl/gb/verilogboy/control.v',
-                'rtl/gb/verilogboy/cpu.v',
-                'rtl/gb/verilogboy/dma.v',
-                'rtl/gb/verilogboy/edgedet.v',
-                'rtl/gb/verilogboy/ppu.v',
-                'rtl/gb/verilogboy/regfile.v',
-                'rtl/gb/verilogboy/serial.v',
-                'rtl/gb/verilogboy/singleport_ram.v',
-                'rtl/gb/verilogboy/singlereg.v',
-                'rtl/gb/verilogboy/sound.v',
-                'rtl/gb/verilogboy/sound_channel_mix.v',
-                'rtl/gb/verilogboy/sound_length_ctr.v',
-                'rtl/gb/verilogboy/sound_noise.v',
-                'rtl/gb/verilogboy/sound_square.v',
-                'rtl/gb/verilogboy/sound_vol_env.v',
-                'rtl/gb/verilogboy/sound_wave.v',
-                'rtl/gb/verilogboy/timer.v',
-                'rtl/gb/gb_cart_mapper.sv'
+            'rtl/gbc/gbc_alu.v',
+            'rtl/gbc/gbc_apu.v',
+            'rtl/gbc/gbc_apu_length_ctr.v',
+            'rtl/gbc/gbc_apu_noise.v',
+            'rtl/gbc/gbc_apu_square.v',
+            'rtl/gbc/gbc_apu_vol_env.v',
+            'rtl/gbc/gbc_apu_wave.v',
+            'rtl/gbc/gbc_cart_mapper.sv',
+            'rtl/gbc/gbc_control.v',
+            'rtl/gbc/gbc_core.v',
+            'rtl/gbc/gbc_cpu.v',
+            'rtl/gbc/gbc_ppu.v',
+            'rtl/gbc/gbc_regfile.v',
+            'rtl/gbc/gbc_singlereg.v',
+            'rtl/gbc/gbc_timer.v'
             )
             foreach ($source in $nesgbSources) {
                 if (-not (Test-Path (Join-Path $root $source))) {

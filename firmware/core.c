@@ -30,17 +30,31 @@ typedef struct {
 static uint8_t sector_buf[SECTOR_SIZE];
 static Autorun autorun;
 
+static uint32_t core_flash_slot(uint32_t profile) {
+    switch (profile) {
+    case CORE_PROFILE_SGX: return 1u;
+    case CORE_PROFILE_CD: return 2u;
+    case CORE_PROFILE_SNES: return 3u;
+    case CORE_PROFILE_NINTENDO8: return 4u;
+    case CORE_PROFILE_MEGADRIVE: return 6u; // Slot 5 holds shared firmware.
+    default: return 0u;
+    }
+}
+
 const char *core_name(uint32_t profile) {
     switch (profile) {
     case CORE_PROFILE_SGX: return "HuCard";
     case CORE_PROFILE_CD: return "CD-Rom";
     case CORE_PROFILE_SNES: return "Nintendo";
     case CORE_PROFILE_NINTENDO8: return "Nintendo 8-bit";
+    case CORE_PROFILE_MEGADRIVE: return "Mega Drive (exp)";
     default: return "Unknown";
     }
 }
 
 uint32_t core_game_profile(const char *game) {
+    if (is_megadrive(game))
+        return CORE_PROFILE_MEGADRIVE;
     if (is_nes(game) || is_gameboy(game))
         return CORE_PROFILE_NINTENDO8;
     if (is_snes(game))
@@ -315,7 +329,8 @@ int core_offer_switch(uint32_t profile, const char *game) {
     uint8_t identity[3];
     int modified = 0;
     if (profile != CORE_PROFILE_SGX && profile != CORE_PROFILE_CD &&
-        profile != CORE_PROFILE_SNES && profile != CORE_PROFILE_NINTENDO8)
+        profile != CORE_PROFILE_SNES && profile != CORE_PROFILE_NINTENDO8 &&
+        profile != CORE_PROFILE_MEGADRIVE)
         return 0;
     if (reg_flash_ctrl & FPGA_RELOAD_OUTPUT_TEST) {
         message("GPIO pulse diagnostic core", "Core copying disabled");
@@ -340,14 +355,20 @@ int core_offer_switch(uint32_t profile, const char *game) {
     flash_end();
     if (!identity[0] || identity[0] == 255 || identity[2] < 0x17 || identity[2] > 0x19)
         goto failed;
-    uint32_t source = profile == CORE_PROFILE_SNES ? 3u :
-                      profile == CORE_PROFILE_NINTENDO8 ? 4u : profile;
-    source *= SLOT_SIZE;
+    uint32_t source = core_flash_slot(profile) * SLOT_SIZE;
+    if (source + SLOT_SIZE > (1u << identity[2]))
+        goto failed;
     if (flash_read(source + MANIFEST_OFFSET, &manifest, sizeof(manifest)) != 0 ||
         manifest.magic != CORE_MAGIC || manifest.version != 1 ||
         manifest.profile != profile || manifest.size == 0 ||
-        manifest.size > MANIFEST_OFFSET)
+        manifest.size > MANIFEST_OFFSET) {
+        if (profile == CORE_PROFILE_MEGADRIVE) {
+            flash_release();
+            message("MD slot not provisioned", "Install experimental core first");
+            return 0;
+        }
         goto failed;
+    }
     status("");
     progress_status("Checking core", 0);
     int last_pct = 0;
@@ -432,13 +453,13 @@ failed:
 void core_menu(void) {
     static const uint32_t profiles[] = {
         CORE_PROFILE_SGX, CORE_PROFILE_CD, CORE_PROFILE_SNES,
-        CORE_PROFILE_NINTENDO8
+        CORE_PROFILE_NINTENDO8, CORE_PROFILE_MEGADRIVE
     };
     int active = 0;
     for (;;) {
         clear();
         print_field(3, 5, "Choose core", OSD_COLS - 3);
-        for (int index = 0; index < 4; index++) {
+        for (int index = 0; index < 5; index++) {
             uint32_t profile = profiles[index];
             cursor(2, 8 + index);
             putchar(index == active ? '>' : ' ');
@@ -446,9 +467,9 @@ void core_menu(void) {
             if (profile == CORE_PROFILE_ID)
                 print_field(21, 8 + index, "Active", 6);
         }
-        cursor(2, 12);
-        putchar(active == 4 ? '>' : ' ');
-        print_field(4, 12, "Test FPGA reload", OSD_COLS - 5);
+        cursor(2, 13);
+        putchar(active == 5 ? '>' : ' ');
+        print_field(4, 13, "Test FPGA reload", OSD_COLS - 5);
         selection_row(8 + active);
         status("A=Select  B=Back");
         for (;;) {
@@ -456,15 +477,15 @@ void core_menu(void) {
             if (edge & (JOY_B | JOY_SELECT))
                 return;
             if (edge & JOY_UP) {
-                active = active ? active - 1 : 4;
+                active = active ? active - 1 : 5;
                 break;
             }
             if (edge & JOY_DOWN) {
-                active = active == 4 ? 0 : active + 1;
+                active = active == 5 ? 0 : active + 1;
                 break;
             }
             if (edge & JOY_A) {
-                if (active == 4) {
+                if (active == 5) {
                     test_fpga_reload();
                     break;
                 }

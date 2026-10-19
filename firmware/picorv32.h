@@ -34,8 +34,13 @@
 #define reg_time           (*(volatile uint32_t*)0x02000050)
 #define reg_pad_mode       (*(volatile uint32_t*)0x02000058)
 #define reg_color_mode     (*(volatile uint32_t*)0x0200005c)
+#define reg_nintendo_color (*(volatile uint32_t*)0x020000d4)
 #define reg_core_id        (*(volatile uint32_t*)0x02000060)
 #define reg_vdc_options    (*(volatile uint32_t*)0x020000d0)
+#define reg_console_region (*(volatile uint32_t*)0x020000d8)
+#define CONSOLE_REGION_NTSC_US 0u
+#define CONSOLE_REGION_NTSC_JP 1u
+#define CONSOLE_REGION_PAL_EU  2u
 #define reg_flash_ctrl     (*(volatile uint32_t*)0x020000e0)
 #define reg_flash_data     (*(volatile uint32_t*)0x020000e4)
 #define reg_fpga_reload    (*(volatile uint32_t*)0x020000e8)
@@ -49,7 +54,11 @@
 #define CORE_PROFILE_SUPERSET 3u
 #define CORE_PROFILE_SNES     4u
 #define CORE_PROFILE_NINTENDO8 5u
-#define CORE_PROFILE_ID       (reg_core_id & 0xffffu)
+#define CORE_PROFILE_MEGADRIVE 6u
+#define CORE_FEATURE_EXTENDED_SETTINGS (1u << 15)
+#define CORE_EXTENDED_SETTINGS_SUPPORTED \
+    ((reg_core_id & CORE_FEATURE_EXTENDED_SETTINGS) != 0)
+#define CORE_PROFILE_ID       (reg_core_id & 0x7fffu)
 #define reg_audio          (*(volatile uint32_t*)0x02000064)
 #define reg_cd_events      (*(volatile uint32_t*)0x02000070)
 #define reg_cd_stat        (*(volatile uint32_t*)0x02000074)

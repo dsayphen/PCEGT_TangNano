@@ -1,7 +1,9 @@
 param(
     [string]$InputDirectory,
     [string]$OutputDirectory,
-    [switch]$CombinedImage
+    [switch]$CombinedImage,
+    [switch]$MegaDriveOnly,
+    [switch]$SnesOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +40,17 @@ $profiles = @(
     @{ Name = 'snes'; Id = 4; Slot = 3; Label = 'Nintendo' },
     @{ Name = 'nesgb'; Id = 5; Slot = 4; Label = 'Nintendo 8-bit' }
 )
+if ($MegaDriveOnly -and $SnesOnly) {
+    throw '-MegaDriveOnly and -SnesOnly are mutually exclusive.'
+}
+if ($MegaDriveOnly -or $SnesOnly) {
+    if ($CombinedImage) { throw '-MegaDriveOnly cannot be combined with -CombinedImage (slot 5 contains firmware).' }
+    if ($MegaDriveOnly) {
+        $profiles = @(@{ Name = 'megadrive'; Id = 6; Slot = 6; Label = 'Mega Drive experimental' })
+    } else {
+        $profiles = @(@{ Name = 'snes'; Id = 4; Slot = 3; Label = 'Nintendo' })
+    }
+}
 
 $profileSources = @{}
 foreach ($profile in $profiles) {
@@ -95,4 +108,4 @@ if ($CombinedImage) {
         $destination, $combined.Length)
 }
 Write-Host 'Program these slot images as raw SPI flash data, without erasing the entire flash.'
-Write-Host 'All four bitstreams must include flash PIO support. Keep firmware at 0x500000.'
+Write-Host 'Bitstreams must include flash PIO support. Keep firmware at 0x500000.'
