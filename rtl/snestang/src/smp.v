@@ -235,14 +235,14 @@ always @(posedge CLK) begin : spc_timers
                 TM01_CNT <= NEW_TM01_CNT & 9'b001111111;
                 if (TM_EN[0] && TIMERS_ENABLE && ~TIMERS_DISABLE) begin
                     T0_CNT <= T0_CNT + 1;
-                    if (T0_CNT + 1 == T0DIV) begin
+                    if (8'(T0_CNT + 8'd1) == T0DIV) begin  // DIV=0 means 256
                         T0_CNT <= 0;
                         T0OUT  <= T0OUT + 1;
                     end
                 end
                 if (TM_EN[1] && TIMERS_ENABLE && ~TIMERS_DISABLE) begin
                     T1_CNT <= T1_CNT + 1;
-                    if (T1_CNT + 1 == T1DIV) begin
+                    if (8'(T1_CNT + 8'd1) == T1DIV) begin  // DIV=0 means 256
                         T1_CNT <= 0;
                         T1OUT  <= T1OUT + 1;
                     end
@@ -255,7 +255,7 @@ always @(posedge CLK) begin : spc_timers
                 TM2_CNT <= NEW_TM2_CNT & 6'b001111;
                 if (TM_EN[2] && TIMERS_ENABLE && ~TIMERS_DISABLE) begin
                     T2_CNT <= T2_CNT + 1;
-                    if (T2_CNT + 1 == T2DIV) begin
+                    if (8'(T2_CNT + 8'd1) == T2DIV) begin  // DIV=0 means 256
                         T2_CNT <= 0;
                         T2OUT  <= T2OUT + 1;
                     end
@@ -273,6 +273,8 @@ always @* begin
                 SPC700_D_IN = DI;
             4'h4, 4'h5, 4'h6, 4'h7: 
                 SPC700_D_IN = CPUI[SPC700_A[1:0]];
+            4'h8, 4'h9:
+                SPC700_D_IN = AUX[SPC700_A[0]];
             4'hD: 
                 SPC700_D_IN = {4'h0, T0OUT};
             4'hE: 
@@ -289,7 +291,7 @@ always @* begin
 end
 
 assign A = SPC700_A;
-assign WE_N = SPC700_R_WN;
+assign WE_N = SPC700_R_WN | ~RAM_WRITE_EN;
 assign DO = SPC700_D_OUT;
 
 always @* begin

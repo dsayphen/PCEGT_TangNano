@@ -95,7 +95,7 @@ Programmer can write the binary at this address.
 Browser Options (Select) provides
 **Choose core > HuCard / CD-Rom / Nintendo / Nintendo 8-bit / Mega Drive**.
 Selecting a different core asks for confirmation, checks the source slot's
-profile, size and CRC32, then erases/programs/verifies the first 1 MiB of flash.
+profile and size, then erases/programs/verifies the first 1 MiB of flash.
 The source slots and the firmware at `0x500000` are not modified.
 When `Core ready` appears, A requests an FPGA reload if the GPIO29/TP1
 hardware is installed and the rebuilt core supports it. Otherwise use the

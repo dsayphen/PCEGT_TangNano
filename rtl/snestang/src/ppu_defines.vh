@@ -134,19 +134,21 @@ endfunction
 // Saturated add or sub
 function logic [4:0] AddSub(logic [4:0] a, logic [4:0] b, logic add, logic half);
     logic [5:0] temp;
+    // Halve before saturating on add (hardware: (a+b)>>1), as in MiSTer PPU_PKG.
     if (add) begin
         temp = {1'b0, a} + {1'b0, b};
-        if (temp[5])
+        if (half)
+            temp = {1'b0, temp[5:1]};
+        else if (temp[5])
             temp = 6'b111111;
     end else begin
         temp = {1'b0, a} - {1'b0, b};
         if (temp[5])
             temp = 6'b0;
+        else if (half)
+            temp = {1'b0, temp[5:1]};
     end
-    if (half)
-        return temp[5:1];
-    else
-        return temp[4:0];
+    return temp[4:0];
 endfunction
 
 function logic [14:0] GetDCM(logic [10:0] a);

@@ -195,6 +195,7 @@ assign SB = MC.BUS_CTRL[4:2] == 3'b000 ? A :
             MC.BUS_CTRL[4:2] == 3'b100 ? D_IN : 
             MC.BUS_CTRL[4:2] == 3'b101 ? {7'b0000000,PSW[0]} :    // C
             MC.BUS_CTRL[4:2] == 3'b110 ? MulDivR[7:0] : 
+            MC.BUS_CTRL == 5'b11111 ? T :         // MOV1 m.b,C: T | CToBit
             MC.BUS_CTRL[4:2] == 3'b111 ? SP : 
             8'h00;
 assign DB = MC.BUS_CTRL[1:0] == 2'b00 && MC.BUS_CTRL[4] == 1'b0 ? D_IN : 

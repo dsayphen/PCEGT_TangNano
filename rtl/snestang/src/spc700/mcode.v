@@ -71,7 +71,8 @@ always @* begin
 	31: ALUFlags = {3'b110,4'b1101,1'b0,1'b0,1'b0,1'b1};// 011111 DAS
 	32: ALUFlags = {3'b110,4'b1110,1'b0,1'b0,1'b0,1'b0};// 100000 MUL 
 	33: ALUFlags = {3'b110,4'b1111,1'b1,1'b1,1'b0,1'b0};// 100001 DIV
-	default: ALUFlags = 11'b0;
+		34: ALUFlags = {3'b110,4'b1011,1'b0,1'b0,1'b0,1'b0};// 100010 CMP without C (TSET1/TCLR1)
+		default: ALUFlags = 11'b0;
 	endcase
 end
 

@@ -21,18 +21,18 @@ reg tV, tZ, tS;
 reg [15:0] mulRes, mulTemp;
 reg [15:0] mulA;
 reg [7:0] mulY;
-reg [15:0] divt;
-reg [8:0] quotient;
-reg [15:0] remainder;
+reg [16:0] divx;
+reg [16:0] yva;
+reg [17:0] yvaS;
+reg [16:0] yvaN;
 
 always @(posedge CLK) begin
     if(RST_N == 1'b0) begin
       mulA <= {16{1'b0}};
       mulY <= {8{1'b0}};
       mulRes <= {16{1'b0}};
-      divt <= {16{1'b0}};
-      remainder <= {16{1'b0}};
-      quotient <= {9{1'b0}};
+      divx <= {17{1'b0}};
+      yva <= {17{1'b0}};
     end else begin
       if(EN == 1'b1) begin
         if(CTRL.secOp == 4'b1110) begin
@@ -41,25 +41,25 @@ always @(posedge CLK) begin
           mulY <= {1'b0,mulY[7:1]};
         end
         else if(CTRL.secOp == 4'b1111) begin
-          if(remainder >= divt) begin
-            remainder <= remainder - divt;
-            quotient <= {quotient[7:0],1'b1};
-          end
-          else begin
-            quotient <= {quotient[7:0],1'b0};
-          end
-          divt <= {1'b0,divt[15:1]};
+          yva <= yvaN;
         end
         else begin
           mulA <= {8'b00000000,A};
           mulY <= Y;
           mulRes <= {16{1'b0}};
-          divt <= {X,8'b00000000};
-          remainder <= {Y,A};
-          quotient <= {9{1'b0}};
+          divx <= {X,9'b000000000};
+          yva <= {1'b0,Y,A};
         end
       end
     end
+end
+
+// Bit-serial SPC700 DIV (higan), exact for overflow cases (Y >= 2X)
+always @* begin
+    yvaS = {yva,1'b0};
+    yvaN = yvaS[17] ? {yvaS[16:1],1'b1} : yvaS[16:0];
+    if (yvaN >= divx) yvaN[0] = ~yvaN[0];
+    if (yvaN[0]) yvaN = yvaN - divx;
 end
 
 always @* begin
@@ -82,15 +82,15 @@ always @* begin
       tS = mulTemp[15];
     end
     else if(CTRL.secOp == 4'b1111) begin
-      tResult = {remainder[7:0],quotient[7:0]};
-      if(quotient[7:0] == 0) begin
+      tResult = {yva[16:9],yva[7:0]};
+      if(yva[7:0] == 0) begin
         tZ = 1'b1;
       end
       else begin
         tZ = 1'b0;
       end
-      tV = quotient[8];
-      tS = quotient[7];
+      tV = yva[8];
+      tS = yva[7];
     end
     else begin
       tResult = {16{1'b0}};

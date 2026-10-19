@@ -370,25 +370,6 @@ int core_offer_switch(uint32_t profile, const char *game) {
         goto failed;
     }
     status("");
-    progress_status("Checking core", 0);
-    int last_pct = 0;
-    uint32_t crc = 0xffffffffu;
-    for (uint32_t offset = 0; offset < manifest.size; offset += SECTOR_SIZE) {
-        uint32_t length = manifest.size - offset;
-        if (length > SECTOR_SIZE)
-            length = SECTOR_SIZE;
-        if (flash_read(source + offset, sector_buf, length) != 0)
-            goto failed;
-        for (uint32_t index = 0; index < length; index++)
-            crc = crc_byte(crc, sector_buf[index]);
-        int pct = (int)((offset + length) * 100 / manifest.size);
-        if (pct != last_pct) {
-            last_pct = pct;
-            progress_status("Checking core", pct);
-        }
-    }
-    if (~crc != manifest.crc)
-        goto failed;
     if (save_autorun(profile, game) != 0) {
         flash_release();
         message("Cannot save autorun", "Check SD card /config");
@@ -398,7 +379,7 @@ int core_offer_switch(uint32_t profile, const char *game) {
     cd_audio_reset();
     cd_close();
     progress_status("Copying core", 0);
-    last_pct = 0;
+    int last_pct = 0;
     for (uint32_t offset = 0; offset < SLOT_SIZE; offset += SECTOR_SIZE) {
         if (flash_read(source + offset, sector_buf, SECTOR_SIZE) != 0)
             goto failed;

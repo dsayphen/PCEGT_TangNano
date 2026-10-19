@@ -659,7 +659,7 @@ main #(.USE_DSPn(1'b1)) u_snes (
     .ARAM_ADDR(ARAM_ADDR), .ARAM_Q(ARAM_Q), .ARAM_D(ARAM_D), .ARAM_CE_N(ARAM_CE_N), .ARAM_OE_N(ARAM_OE_N), .ARAM_WE_N(ARAM_WE_N),
     // This profile's fixed-60-Hz HDMI output and rolling line buffer cannot
     // safely consume PAL's 50-Hz frame cadence.
-    .BLEND(1'b0), .PAL(1'b0), .DIS_SHORTLINE(1'b0), .HIGH_RES(), .FIELD(), .INTERLACE(),
+    .BLEND(1'b1), .PAL(1'b0), .DIS_SHORTLINE(1'b0), .HIGH_RES(), .FIELD(), .INTERLACE(),
     .DOTCLK(dotclk), .RGB_OUT(rgb_out), .HBLANKn(hblankn), .VBLANKn(vblankn), .X_OUT(x_out), .Y_OUT(y_out),
     .VRAM_READ_CE(ppu_read_ce),
     .JOY1_DI(snes_joy1_di), .JOY2_DI(snes_joy2_di), .JOY_STRB(snes_joy_strb),
