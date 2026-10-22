@@ -37,3 +37,4 @@ sim/roms/*.sgx
 *~
 Thumbs.db
 firmware/*.bin
+sim/gen/

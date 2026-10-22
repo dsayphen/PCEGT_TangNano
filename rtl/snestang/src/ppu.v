@@ -1503,7 +1503,9 @@ always @(posedge CLK) begin : calc_sprite_range
                     
                     TILES_OAM_CNT <= TILES_OAM_CNT + 1;
                     TILES_CNT <= CUR_TILES_CNT + 1;
-                    if (CUR_TILES_CNT == W[5:3] || ((TILE_X + 8) >= 256 && OAM_OBJ_X != 256)) begin
+                    // Keep the next X modulo 512: a tile at X=-7..-1 crosses
+                    // the left edge and must not terminate the sprite.
+                    if (CUR_TILES_CNT == W[5:3] || ((TILE_X + 9'd8) >= 9'd256 && OAM_OBJ_X != 9'd256)) begin
                         NEW_RANGE_CNT = RANGE_CNT - 1;
                         TILES_CNT <= 0;
                         RANGE_CNT <= NEW_RANGE_CNT;

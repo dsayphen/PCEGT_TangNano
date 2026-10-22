@@ -2,7 +2,9 @@
 // 4 MiB SNES ROM support: the last 256 KiB of the ROM is stored in SDRAM bank 2
 // and served on the ARAM channel. Checks the CPU deadline (data valid six mclk
 // after the address changes), ARAM latency, physical placement and tRC.
-module tb_snes_rom_hi;
+module tb_snes_rom_hi #(
+    parameter CHECK_REPHASE = 0
+);
 reg fclk = 0;
 always #2 fclk = ~fclk;
 reg mclk = 0;
@@ -36,6 +38,10 @@ reg rv_req = 0;
 reg [22:1] rv_addr = 0;
 wire rv_ack;
 wire [15:0] rv_q;
+reg vram_req = 0;
+reg vram_we = 0;
+wire vram1_ack, vram2_ack;
+wire [7:0] vram1_q, vram2_q;
 wire busy;
 wire [10:0] sa;
 wire [1:0] sba;
@@ -45,7 +51,8 @@ wire [31:0] dq;
 
 sdram_snes #(.SHARED_IOSYS(1), .SPLIT_WRAM(1), .UPSTREAM_RAM_LAYOUT(1),
              .ROM_HIGH_SHARED(1)) dut (
-    .clk(fclk), .mclk(mclk), .clkref(dot_ce), .resetn(resetn), .busy(busy),
+    .clk(fclk), .mclk(mclk), .clkref(dot_ce),
+    .resetn(resetn), .busy(busy),
     .SDRAM_DQ(dq), .SDRAM_A(sa), .SDRAM_BA(sba), .SDRAM_DQM(sdqm),
     .SDRAM_nCS(scs), .SDRAM_nRAS(sras), .SDRAM_nCAS(scas), .SDRAM_nWE(swe), .SDRAM_CKE(scke),
     .cpu_din(cpu_din), .cpu_port(cpu_port), .cpu_addr(cpu_addr), .cpu_req(cpu_req),
@@ -56,13 +63,14 @@ sdram_snes #(.SHARED_IOSYS(1), .SPLIT_WRAM(1), .UPSTREAM_RAM_LAYOUT(1),
     .bsram_req_ack(), .bsram_dout(),
     .aram_16(1'b0), .aram_addr(aram_addr), .aram_din(16'd0), .aram_req(aram_req), .aram_we(1'b0),
     .aram_req_ack(aram_ack), .aram_dout(aram_q),
-    .vram1_addr(15'd0), .vram1_din(8'd0), .vram1_req(1'b0), .vram1_we(1'b0),
-    .vram2_addr(15'd0), .vram2_din(8'd0), .vram2_req(1'b0), .vram2_we(1'b0),
-    .vram1_ack(), .vram2_ack(), .vram1_dout(), .vram2_dout(),
+    .vram1_addr(15'h100), .vram1_din(8'haa), .vram1_req(vram_req), .vram1_we(vram_we),
+    .vram2_addr(15'h100), .vram2_din(8'hbb), .vram2_req(vram_req), .vram2_we(vram_we),
+    .vram1_ack(vram1_ack), .vram2_ack(vram2_ack),
+    .vram1_dout(vram1_q), .vram2_dout(vram2_q),
     .rv_addr(rv_addr), .rv_din(16'd0), .rv_ds(2'b11), .rv_req(rv_req), .rv_we(1'b0),
     .rv_req_ack(rv_ack), .rv_dout(rv_q), .refreshing(), .total_refresh()
 );
-sdram_model #(.READ_HOLD_CYCLES(1)) memory (
+sdram_model #(.READ_HOLD_CYCLES(1), .CHECK_OPEN_ROWS(1)) memory (
     .DQ(dq), .A(sa), .BA(sba), .nCS(scs), .nRAS(sras), .nCAS(scas), .nWE(swe),
     .DQM(sdqm), .CKE(scke), .CLK(~fclk), .clk(fclk)
 );
@@ -147,6 +155,8 @@ always @(negedge mclk) begin
     if (aram_pending && aram_ack == aram_req &&
         (aram_addr[0] ? aram_q[15:8] : aram_q[7:0]) === aram_byte(aram_addr)) begin
         aram_lat = mcount - aram_issue;
+        if (aram_lat > 4)
+            $fatal(1, "ARAM read missed DSP deadline after reset: %0d mclk", aram_lat);
         if (rom_phase) begin
             if (aram_lat > max_aram_hi) max_aram_hi = aram_lat;
         end else if (aram_lat > max_aram_base) max_aram_base = aram_lat;
@@ -205,9 +215,12 @@ initial begin
         for (k = 1; k <= hold; k = k + 1) begin
             @(negedge mclk);
             if (lat == 0 && rom_hi_q === rom_word(a)) lat = k;
+            if (k == 6 && rom_hi_q !== rom_word(a))
+                $fatal(1, "ROM high data invalid at CPU deadline: address=%h data=%h",
+                       a, rom_hi_q);
             if (k < hold) @(posedge mclk);
         end
-        if (lat == 0) begin
+        if (lat == 0 || lat > 6) begin
             $display("ROM high read %h missed deadline (q=%h exp=%h) at %0t", a, rom_hi_q, rom_word(a), $time);
             err = err + 1;
         end
@@ -236,8 +249,43 @@ initial begin
     aram_traffic = 0;
     repeat (20) @(posedge mclk);
 
+    // A dot-counter restart can move the reference edge from cycle 2 to 6.
+    // The old scheduler replayed CAS 3 on an auto-precharged bank.
+    put_word(23'h7f0200, 16'ha55a);
+    for (j = 0; CHECK_REPHASE && j < 2; j = j + 1) begin
+        force dot_ce = 0;
+        @(posedge mclk);
+        a = (22'h3c0000 >> 1) + j;
+        rom_hi_addr <= a;
+        rom_hi_rd <= 1;
+        vram_we <= j[0];
+        vram_req <= ~vram_req;
+        @(negedge fclk);
+        while (!(dut.cycle[1] && dut.next_port[1] == dut.PORT_ROM_HI))
+            @(negedge fclk);
+        @(negedge fclk);
+        while (!dut.cycle[6]) @(negedge fclk);
+        force dot_ce = 1;
+        repeat (6) @(negedge fclk);
+        if (rom_hi_q !== rom_word(a))
+            $fatal(1, "Dot-counter restart corrupted cached high-ROM word: q=%h expected=%h",
+                   rom_hi_q, rom_word(a));
+        repeat (12) @(negedge fclk);
+        if (rom_hi_q !== rom_word(a))
+            $fatal(1, "High-ROM cache did not recover after dot-counter restart");
+        if (vram1_ack !== vram_req || vram2_ack !== vram_req)
+            $fatal(1, "VRAM transaction lost during dot-counter restart");
+        if (!vram_we && {vram2_q, vram1_q} !== 16'ha55a)
+            $fatal(1, "VRAM read corrupted during dot-counter restart");
+        if (vram_we && get_word(23'h7f0200) !== 16'hbbaa)
+            $fatal(1, "VRAM write corrupted during dot-counter restart");
+    end
+    release dot_ce;
+
     $display("max ROM-high latency %0d mclk (deadline 6)", max_hi_lat);
     $display("max ARAM latency: baseline %0d, with ROM-high %0d", max_aram_base, max_aram_hi);
+    if (max_aram_base == 0 || max_aram_hi == 0)
+        $fatal(1, "ARAM traffic was not exercised in both phases");
     if (max_aram_hi > max_aram_base) begin
         $display("ARAM latency increased"); err = err + 1;
     end

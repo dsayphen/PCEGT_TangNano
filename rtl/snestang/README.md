@@ -5,6 +5,15 @@ Source: https://github.com/nand2mario/snestang
 Revision: `5f0ef193145f67bded7f73f2c477ac8da4d85f7e`.
 The upstream license is preserved in `LICENSE`; source notices are retained.
 
+The sprite fetch loop keeps the next tile X addition at nine bits, matching
+the PPU's modulo-512 coordinates. An unsized addition previously stopped a
+partially left-clipped sprite after its first tile, dropping its remaining
+visible tiles. This applies to all ROM sizes, independently of ROM-high access.
+`sim\run_snes_sprite_clip.ps1` extracts the actual range/fetch block from
+`ppu.v` and checks visible tile coverage and horizontal tile order for every
+X coordinate, size and horizontal flip, including the special X=$100 case.
+The focused simulation passes; hardware validation is pending.
+
 Only the SNES core, memory controller, controller adapter and video/audio
 dependencies are enabled by the `snes` build profile. The upstream board top
 and BL616 IOSys are not instantiated. The PCE project's PicoRV32 firmware,
@@ -18,6 +27,19 @@ on the ARAM channel (`ROM_HIGH_SHARED`). ARAM keeps priority; the request is
 taken directly from the CPU address bus so data still arrives within six mclk
 after one ARAM collision (`sim/tb_snes_rom_hi.sv`). Smaller ROMs do not use it.
 4 MiB titles were confirmed on hardware.
+Reset Game with 4 MiB titles: the CPU/DMA clock counters keep running while
+ENABLE is low, but the dot clock that schedules the SDRAM slots stops. An odd
+pause length (the Reset Game pause is arbitrary) therefore shifts the CPU/DMA
+cycle by one mclk against the SDRAM frame, and high-ROM reads on port 1 then
+return the previous byte (wrong tiles, crashes). The board wrapper now lets
+ENABLE change only every other mclk after reset, so every pause has an even
+length and the phase stays even, as in normal play. `sim/run_snes_reset_dma.ps1`
+runs the real top, CPU, WRAM and SDRAM controller (PPU timing stub, forced
+ARAM traffic) through a cold boot and repeated Reset Game pauses of every
+length modulo 4, checking DMA and CPU copies from high and low ROM; without
+the gating, odd phases corrupt every high-ROM copy. Not yet hardware-validated.
+The simulation-only `CHECK_REPHASE` and `CHECK_RESET_HOLD` parameters of
+`sim/tb_snes_rom_hi.sv` keep earlier experimental checks, disabled by default.
 The CPU response selector is captured at transaction acceptance.
 The board wrapper enables `SPLIT_WRAM`: ROM and WRAM requests have independent
 payloads and acknowledgements, so a simultaneous DMA read/write cannot replace
@@ -49,8 +71,8 @@ and visible OSD in all three zoom modes.
 To conserve logic, the SNES top sets `UART_ENABLE=0` in IOSys (UART writes complete without output;
 `RV_DIAGNOSTIC` still forces the UART) and `TONE_ENABLE=0` in `audio_tone`
 (master volume only); the firmware hides Bass/Treble for this profile.
-Gowin 1.9.11.03 result: Logic 20253/20736,
-CLS 10302/10368, registers 7194, BSRAM 46/46 (TNS 0).
+Gowin 1.9.11.03 result: Logic 20415/20736,
+CLS 10341/10368, registers 7196, BSRAM 46/46 (setup/hold TNS 0).
 
 The ROM header heuristics in `firmware/rom.c` are adapted from the upstream
 PicoRV32 firmware at tag `v0.7` (GPLv3).

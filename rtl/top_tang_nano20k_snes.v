@@ -648,8 +648,25 @@ end
 
 wire        core_resetn = sys_resetn & image_valid & ~loading & ~game_reset &
                           ~button_reset;
-wire        enable = core_resetn & ~sdram_busy & loaded & ~game_pause &
-                     ~pause_snes_for_frame_sync & ~wram_wait;
+wire        enable_request = core_resetn & ~sdram_busy & loaded & ~game_pause &
+                             ~pause_snes_for_frame_sync;
+// The CPU/DMA clock counters keep running while ENABLE is low but the dot
+// clock (the SDRAM slot reference) stops. Let ENABLE change only every other
+// mclk after reset so every pause has an even length and the CPU/SDRAM phase
+// stays even; an odd phase makes high-ROM reads return stale data.
+reg         enable_phase = 1'b0;
+reg         enable_gated = 1'b0;
+always @(posedge mclk) begin
+    if (!core_resetn) begin
+        enable_phase <= 1'b0;
+        enable_gated <= 1'b0;
+    end else begin
+        enable_phase <= ~enable_phase;
+        if (!enable_phase)
+            enable_gated <= enable_request;
+    end
+end
+wire        enable = enable_gated & core_resetn & ~wram_wait;
 wire [19:0] audio_l_scaled = {audio_l, 4'd0};
 wire [19:0] audio_r_scaled = {audio_r, 4'd0};
 wire [19:0] audio_l_filtered;
